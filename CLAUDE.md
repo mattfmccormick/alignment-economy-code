@@ -207,6 +207,7 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 - ~~**`ae-miner` Login shows "Registration failed" when the account is already a miner.**~~ Already fixed in `Login.tsx:handleRegister` (catches 409 and proceeds when `isMiner === true`).
 - ~~**WS `court:argument` events don't auto-refresh.**~~ Already added to the allowed event types in `ae-node/src/api/websocket.ts`.
 - ~~**WebSocket subscribe has no authentication.**~~ Audited Phase 65. Backend `setupWebSocket` already verifies a signed `{action:'subscribe', accountId, role}` payload + timestamp via the account's stored publicKey, with a 5-minute window. Both clients (`ae-app/src/lib/websocket.ts` and `ae-miner/src/lib/websocket.ts`) sign with the wallet's ML-DSA private key on `onopen`. New `phase65.test.ts` (5/5 pass) covers the four failure modes (no sig, wrong sig, stale timestamp, unauthenticated client) plus the happy path that an authenticated client receives its account-specific events.
+- ~~**`tweetnacl` dependency is dead.**~~ Removed from `ae-node/package.json`. No source under `alignment-economy-code/` imports it (full-codebase grep, and crypto fully runs on `@noble/post-quantum` for ML-DSA + `@noble/curves` for Ed25519 VRF + `@noble/hashes` for SHA-256). Phase 1 + Phase 65 still pass post-removal.
 
 ### Next (Before / During 2-Person Testing)
 
