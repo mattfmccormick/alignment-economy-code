@@ -148,12 +148,22 @@ export function Onboarding() {
     }
   }
 
-  function continueAsFounder() {
+  async function continueAsFounder() {
     if (!genesis || genesis.keystores.length === 0) return;
     // The first keystore is the founder's. Subsequent keystores are for the
     // invitees and remain the founder's responsibility to deliver.
     saveFounderWallet(genesis.keystores[0]);
     saveJoinedNetwork(genesis.spec);
+    // When running inside Electron, ask main to persist the spec + keystore
+    // to userData and flip the next ae-node spawn into BFT mode. The user
+    // will need to restart the app for the change to take effect — we
+    // surface a notice on the wallet's first screen for that. In plain
+    // browser dev there's no main process so we silently skip.
+    if (window.aeNetwork) {
+      try {
+        await window.aeNetwork.saveConfig({ mode: 'bft', spec: genesis.spec, keystore: genesis.keystores[0] });
+      } catch { /* non-fatal; localStorage is still set */ }
+    }
     navigate('/');
   }
 
@@ -203,7 +213,7 @@ export function Onboarding() {
     return spec.accounts.some((a) => a.validator && a.publicKey === ks.account!.publicKey);
   }
 
-  function joinNetworkAsValidator(): void {
+  async function joinNetworkAsValidator(): Promise<void> {
     if (!joinSpec || !joinKeystore) return;
     // Final sanity check before persisting: the keystore must correspond to
     // one of the validators in the spec, otherwise this keystore is for
@@ -218,6 +228,11 @@ export function Onboarding() {
     }
     saveJoinerWallet({ accountId: joinKeystore.accountId, account: joinKeystore.account });
     saveJoinedNetwork(joinSpec);
+    if (window.aeNetwork) {
+      try {
+        await window.aeNetwork.saveConfig({ mode: 'bft', spec: joinSpec, keystore: joinKeystore });
+      } catch { /* non-fatal; localStorage is still set */ }
+    }
     navigate('/');
   }
 

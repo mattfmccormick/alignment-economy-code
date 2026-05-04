@@ -11,7 +11,7 @@
 //   - Skip the spawn. Assume the developer is running `npm run dev` in ae-node
 //     manually. Window points at the Vite dev server (localhost:5173).
 
-const { app, BrowserWindow, shell, dialog } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -20,6 +20,35 @@ const http = require('node:http');
 const isDev = process.env.ELECTRON_DEV === '1';
 const NODE_PORT = 3000;
 const HEALTH_URL = `http://localhost:${NODE_PORT}/api/v1/health`;
+
+// Network config layout. When the user finishes the Start-new or Join-existing
+// onboarding flow, the renderer pushes the spec + keystore + chosen mode here
+// via aeNetwork:saveConfig (preload bridge). Next time main starts ae-node it
+// reads these and switches from solo authority mode into real BFT mode with
+// the right genesis + keys. None of these files are touched on a Solo wallet.
+const networkPaths = () => {
+  const dir = path.join(app.getPath('userData'), 'ae-network');
+  return {
+    dir,
+    config: path.join(dir, 'network-config.json'),
+    genesis: path.join(dir, 'genesis.json'),
+    keystore: path.join(dir, 'keystore.json'),
+  };
+};
+
+function readNetworkConfig() {
+  try {
+    const p = networkPaths();
+    if (!fs.existsSync(p.config)) return null;
+    const raw = fs.readFileSync(p.config, 'utf8');
+    const cfg = JSON.parse(raw);
+    if (cfg && (cfg.mode === 'bft' || cfg.mode === 'solo')) return cfg;
+    return null;
+  } catch (err) {
+    console.error('[ae-network] failed to read network-config.json:', err && err.message);
+    return null;
+  }
+}
 
 let nodeChild = null;
 let mainWindow = null;
@@ -64,20 +93,41 @@ function startAeNode() {
   const dataDir = path.join(app.getPath('userData'), 'ae-node-data');
   fs.mkdirSync(dataDir, { recursive: true });
 
-  nodeChild = spawn(process.execPath, [entry], {
-    cwd,
-    env: {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
-      AE_API_PORT: String(NODE_PORT),
-      AE_DB_PATH: path.join(dataDir, 'ae-node.db'),
-      AE_LOG_LEVEL: 'info',
-      // Authority node by default. Multi-validator consensus comes later.
+  // Pick spawn env based on the saved network config. Solo (or no config)
+  // keeps today's authority single-validator behavior. BFT loads the
+  // genesis + keystore the user persisted during Start-new/Join-existing
+  // onboarding so the node boots into real multi-validator mode and is
+  // able to peer with other operators on the same network.
+  const cfg = readNetworkConfig();
+  const np = networkPaths();
+  const env = {
+    ...process.env,
+    ELECTRON_RUN_AS_NODE: '1',
+    AE_API_PORT: String(NODE_PORT),
+    // P2P port 9000 (default). Wallet uses 9000, miner uses 9001 so that
+    // both installed apps on one machine each get their own listening port.
+    AE_P2P_PORT: '9000',
+    AE_DB_PATH: path.join(dataDir, 'ae-node.db'),
+    AE_LOG_LEVEL: 'info',
+  };
+  if (cfg && cfg.mode === 'bft' && cfg.accountId) {
+    Object.assign(env, {
+      AE_CONSENSUS_MODE: 'bft',
+      AE_GENESIS_CONFIG_PATH: np.genesis,
+      AE_NODE_KEY_PATH: np.keystore,
+      AE_BFT_LOCAL_ACCOUNT_ID: cfg.accountId,
+      AE_NODE_ID: cfg.accountId,
+    });
+    console.log(`[ae-network] booting in BFT mode for ${cfg.networkId || '(unknown network)'} as ${cfg.accountId}`);
+  } else {
+    Object.assign(env, {
       AE_NODE_ID: 'desktop-authority',
       AE_AUTHORITY_NODE_ID: 'desktop-authority',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+    });
+    console.log('[ae-network] booting in solo authority mode');
+  }
+
+  nodeChild = spawn(process.execPath, [entry], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
 
   nodeChild.stdout.on('data', (chunk) => process.stdout.write(`[ae-node] ${chunk}`));
   nodeChild.stderr.on('data', (chunk) => process.stderr.write(`[ae-node] ${chunk}`));
@@ -130,6 +180,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   });
 
@@ -148,6 +199,40 @@ function createWindow() {
     return { action: 'allow' };
   });
 }
+
+// Renderer asks main to write the active network config + spec + keystore to
+// userData. We validate the shape just enough to keep junk off disk; the
+// renderer is the source of truth for what's a valid spec/keystore.
+ipcMain.handle('aeNetwork:saveConfig', async (_event, opts) => {
+  if (!opts || typeof opts !== 'object') return { ok: false, error: 'opts required' };
+  const { mode, spec, keystore } = opts;
+  if (mode !== 'solo' && mode !== 'bft') return { ok: false, error: "mode must be 'solo' or 'bft'" };
+  const np = networkPaths();
+  fs.mkdirSync(np.dir, { recursive: true });
+  if (mode === 'solo') {
+    // Reset to default authority behavior on next boot.
+    if (fs.existsSync(np.config)) fs.unlinkSync(np.config);
+    if (fs.existsSync(np.genesis)) fs.unlinkSync(np.genesis);
+    if (fs.existsSync(np.keystore)) fs.unlinkSync(np.keystore);
+    return { ok: true, mode: 'solo' };
+  }
+  // BFT: spec + keystore both required.
+  if (!spec || typeof spec !== 'object' || typeof spec.networkId !== 'string') {
+    return { ok: false, error: 'BFT mode requires a valid spec' };
+  }
+  if (!keystore || typeof keystore !== 'object' || typeof keystore.accountId !== 'string') {
+    return { ok: false, error: 'BFT mode requires a valid keystore' };
+  }
+  fs.writeFileSync(np.genesis, JSON.stringify(spec, null, 2));
+  fs.writeFileSync(np.keystore, JSON.stringify(keystore, null, 2), { mode: 0o600 });
+  fs.writeFileSync(np.config, JSON.stringify({
+    mode: 'bft',
+    networkId: spec.networkId,
+    accountId: keystore.accountId,
+    savedAt: new Date().toISOString(),
+  }, null, 2));
+  return { ok: true, mode: 'bft', configPath: np.config };
+});
 
 app.whenReady().then(async () => {
   try {
