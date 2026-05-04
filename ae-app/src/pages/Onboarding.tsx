@@ -5,7 +5,41 @@ import { saveWalletFromMnemonic } from '../lib/keys';
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
 
-type Flow = 'welcome' | 'creating' | 'show-key' | 'confirm-key' | 'how-balance' | 'get-verified' | 'login';
+type Flow =
+  | 'welcome'
+  | 'network-mode'
+  | 'start-new-stub'
+  | 'join-existing-stub'
+  | 'creating'
+  | 'show-key'
+  | 'confirm-key'
+  | 'how-balance'
+  | 'get-verified'
+  | 'login';
+
+// First-launch network mode. Captured before account creation so future
+// launches know which protocol mode to boot ae-node into:
+//   - solo:  authority single-validator. Today's default. No peers.
+//   - start: this user is founding a new network; they'll run the genesis
+//            ceremony and share the spec with people they invite.
+//   - join:  this user is joining someone else's existing network; they
+//            paste a genesis hash + bootstrap address (or scan an invite
+//            link) and ae-node boots in validator mode.
+//
+// Only `solo` is fully wired in this turn. The other two paths land their
+// real implementations in the next two milestone tasks. Stub screens here
+// keep the UX visible while the wiring lands.
+type NetworkMode = 'solo' | 'start' | 'join';
+const NETWORK_MODE_KEY = 'ae_network_mode';
+
+function persistNetworkMode(mode: NetworkMode): void {
+  try {
+    localStorage.setItem(NETWORK_MODE_KEY, mode);
+  } catch {
+    // localStorage can throw in private-browsing contexts. Non-fatal: the
+    // user can still create an account; they'll just re-pick on next launch.
+  }
+}
 
 interface NewWalletState {
   accountId: string;
@@ -169,11 +203,11 @@ export function Onboarding() {
         </p>
 
         <button
-          onClick={createAccount}
+          onClick={() => setFlow('network-mode')}
           disabled={loading}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
         >
-          {loading ? 'Creating...' : 'Create Account'}
+          Create Account
         </button>
 
         <button
@@ -184,6 +218,127 @@ export function Onboarding() {
         </button>
 
         {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      </div>
+    );
+  }
+
+  // Network mode picker. Comes between Welcome and account creation so
+  // every new wallet is born into a known protocol mode (solo / new
+  // network / joining a network). Today only "solo" is fully wired
+  // through to a working ae-node config; the other two land in the
+  // following milestone tasks.
+  if (flow === 'network-mode') {
+    return (
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Pick a Network</h2>
+        <p className="text-gray-400 text-sm mb-8 max-w-sm text-center">
+          The Alignment Economy is a network of nodes. Pick how you want yours to run. You can change later by re-installing.
+        </p>
+
+        <div className="w-full max-w-sm space-y-3 mb-6">
+          <button
+            onClick={() => { persistNetworkMode('solo'); createAccount(); }}
+            disabled={loading}
+            className="w-full text-left bg-navy border border-teal/40 hover:border-teal rounded-xl p-4 transition-colors disabled:opacity-50"
+          >
+            <div className="flex items-start justify-between mb-1">
+              <span className="text-white font-medium">Solo</span>
+              <span className="text-[10px] text-teal bg-teal/15 px-2 py-0.5 rounded-full">Recommended for now</span>
+            </div>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Run by yourself. Your wallet is its own one-person economy. Good for trying the AE without inviting anyone.
+            </p>
+          </button>
+
+          <button
+            onClick={() => { persistNetworkMode('start'); setFlow('start-new-stub'); }}
+            disabled={loading}
+            className="w-full text-left bg-navy border border-navy-light hover:border-gold/60 rounded-xl p-4 transition-colors disabled:opacity-50"
+          >
+            <div className="flex items-start justify-between mb-1">
+              <span className="text-white font-medium">Start a new network</span>
+              <span className="text-[10px] text-gold bg-gold/15 px-2 py-0.5 rounded-full">Founder</span>
+            </div>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Found a network and invite people to join. You run the genesis ceremony, share a network spec with friends, and they connect to you.
+            </p>
+          </button>
+
+          <button
+            onClick={() => { persistNetworkMode('join'); setFlow('join-existing-stub'); }}
+            disabled={loading}
+            className="w-full text-left bg-navy border border-navy-light hover:border-gold/60 rounded-xl p-4 transition-colors disabled:opacity-50"
+          >
+            <div className="flex items-start justify-between mb-1">
+              <span className="text-white font-medium">Join an existing network</span>
+              <span className="text-[10px] text-gold bg-gold/15 px-2 py-0.5 rounded-full">Validator</span>
+            </div>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Someone shared a network spec with you (or sent you an invite link). Join their network and become a validator on it.
+            </p>
+          </button>
+        </div>
+
+        <button
+          onClick={() => setFlow('welcome')}
+          className="text-xs text-gray-500 hover:text-gray-300"
+        >
+          Back
+        </button>
+
+        {error && <p className="text-sm text-red-400 mt-4 max-w-sm text-center">{error}</p>}
+      </div>
+    );
+  }
+
+  // "Start a new network" stub. The real flow (run genesis ceremony from
+  // inside the app, write the spec to disk, show a share/export screen)
+  // is the next milestone task.
+  if (flow === 'start-new-stub') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
+        <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4">
+          <span className="text-xl text-gold">+</span>
+        </div>
+        <h2 className="text-2xl font-serif text-white mb-2">Start a new network</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
+          The founder flow is being built. The next version will run the genesis ceremony from inside this app, generate a `genesis.json` you can share, and start your node as the first validator.
+        </p>
+        <p className="text-xs text-gray-500 mb-8 max-w-sm">
+          For now you can still create a Solo wallet by going back and picking that option.
+        </p>
+        <button
+          onClick={() => setFlow('network-mode')}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors"
+        >
+          Back to Network Choice
+        </button>
+      </div>
+    );
+  }
+
+  // "Join an existing network" stub. The real flow (paste genesis hash +
+  // bootstrap address, or scan an invite link, then run validator:setup
+  // inline) is the milestone task after "Start a new network."
+  if (flow === 'join-existing-stub') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
+        <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4">
+          <span className="text-xl text-gold">→</span>
+        </div>
+        <h2 className="text-2xl font-serif text-white mb-2">Join an existing network</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
+          The joiner flow is being built. The next version will accept a network spec or invite link, generate your validator keystore, and connect your node to the network.
+        </p>
+        <p className="text-xs text-gray-500 mb-8 max-w-sm">
+          For now you can still create a Solo wallet by going back and picking that option.
+        </p>
+        <button
+          onClick={() => setFlow('network-mode')}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors"
+        >
+          Back to Network Choice
+        </button>
       </div>
     );
   }
