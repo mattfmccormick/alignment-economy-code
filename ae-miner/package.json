@@ -25,6 +25,21 @@
       "electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "../ae-node/dist",
+        "to": "ae-node/dist"
+      },
+      {
+        "from": "../ae-node/package.json",
+        "to": "ae-node/package.json"
+      },
+      {
+        "from": "../ae-node/node_modules",
+        "to": "ae-node/node_modules",
+        "filter": ["**/*", "!**/.cache/**", "!**/.bin/**"]
+      }
+    ],
     "win": {
       "target": [
         { "target": "dir", "arch": ["x64"] },

@@ -1,4 +1,9 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+// Default port 3001 because the miner's bundled ae-node lives there (the
+// wallet's bundled node uses 3000; both apps installed = two independent
+// nodes, no port collision). Override with VITE_API_URL when running
+// against an external ae-node (e.g. `VITE_API_URL=http://localhost:3000/api/v1
+// npm run dev` to hit a manually-started node).
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
 
 export interface ApiResponse<T = unknown> {
   success: boolean;

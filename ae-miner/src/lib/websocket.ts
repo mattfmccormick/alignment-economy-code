@@ -17,7 +17,9 @@ class WSClient {
     if (buildTimeUrl) {
       url = buildTimeUrl;
     } else if (window.location.protocol === 'file:') {
-      url = 'ws://localhost:3000/ws';
+      // Electron production: bundled ae-node lives on 3001 for the miner
+      // (3000 belongs to the wallet's bundled node).
+      url = 'ws://localhost:3001/ws';
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       url = `${protocol}//${window.location.host}/ws`;
