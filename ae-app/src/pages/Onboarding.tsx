@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { saveWalletFromMnemonic, saveFounderWallet } from '../lib/keys';
+import { saveWalletFromMnemonic, saveFounderWallet, saveJoinerWallet, saveJoinedNetwork } from '../lib/keys';
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
 
@@ -11,7 +11,7 @@ type Flow =
   | 'start-new-form'
   | 'start-new-generating'
   | 'start-new-result'
-  | 'join-existing-stub'
+  | 'join-existing-form'
   | 'creating'
   | 'show-key'
   | 'confirm-key'
@@ -93,6 +93,24 @@ export function Onboarding() {
   const [founderNames, setFounderNames] = useState<string[]>(['founder', 'invitee-1']);
   const [genesis, setGenesis] = useState<GeneratedGenesis | null>(null);
 
+  // Joiner flow state. The user feeds in two files received from the
+  // founder: genesis.json (public, the network spec) and their personal
+  // keystore.json (private, contains their account/node/VRF keys). We
+  // validate that the keystore is one of the validators listed in the
+  // genesis spec — otherwise the keystore is for some other network or
+  // got mismatched with this spec.
+  // Genesis spec shape (per ae-node/src/node/genesis-config.ts): top-level
+  // accounts[] each with optional `validator` field. A validator entry IS
+  // an account whose `validator` is set; the joiner's keystore matches by
+  // `account.publicKey === acc.publicKey`.
+  interface SpecAccount { publicKey: string; validator?: unknown }
+  interface SpecShape { networkId?: string; accounts?: SpecAccount[] }
+  const [joinSpec, setJoinSpec] = useState<SpecShape | null>(null);
+  const [joinSpecFilename, setJoinSpecFilename] = useState<string | null>(null);
+  const [joinKeystore, setJoinKeystore] = useState<{ accountId: string; name?: string; account?: { publicKey: string; privateKey: string } } | null>(null);
+  const [joinKeystoreFilename, setJoinKeystoreFilename] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
+
   const navigate = useNavigate();
 
   // For confirm-key step: pick three random word indices the user must re-enter.
@@ -135,6 +153,71 @@ export function Onboarding() {
     // The first keystore is the founder's. Subsequent keystores are for the
     // invitees and remain the founder's responsibility to deliver.
     saveFounderWallet(genesis.keystores[0]);
+    saveJoinedNetwork(genesis.spec);
+    navigate('/');
+  }
+
+  // Joiner: file pickers parse JSON and stash the parsed object in state.
+  // Errors are surfaced inline so the user knows immediately if they
+  // grabbed the wrong file (e.g. uploaded keystore as the genesis slot).
+  async function handleSpecFile(file: File): Promise<void> {
+    setJoinError(null);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed.networkId !== 'string' || !Array.isArray(parsed.accounts)) {
+        throw new Error("This file doesn't look like a genesis spec. Expected networkId + accounts[].");
+      }
+      const validatorCount = parsed.accounts.filter((a: SpecAccount) => a.validator).length;
+      if (validatorCount === 0) {
+        throw new Error('Genesis spec has no validators. Pick a different file.');
+      }
+      setJoinSpec(parsed);
+      setJoinSpecFilename(file.name);
+    } catch (e) {
+      setJoinSpec(null);
+      setJoinSpecFilename(null);
+      setJoinError(e instanceof Error ? e.message : 'Could not read file');
+    }
+  }
+
+  async function handleKeystoreFile(file: File): Promise<void> {
+    setJoinError(null);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed.accountId !== 'string' || !parsed.account?.publicKey || !parsed.account?.privateKey) {
+        throw new Error("This file doesn't look like a keystore. Expected accountId + account.publicKey + account.privateKey.");
+      }
+      setJoinKeystore(parsed);
+      setJoinKeystoreFilename(file.name);
+    } catch (e) {
+      setJoinKeystore(null);
+      setJoinKeystoreFilename(null);
+      setJoinError(e instanceof Error ? e.message : 'Could not read file');
+    }
+  }
+
+  function keystoreMatchesValidator(spec: SpecShape, ks: { account?: { publicKey: string } }): boolean {
+    if (!spec.accounts || !ks.account) return false;
+    return spec.accounts.some((a) => a.validator && a.publicKey === ks.account!.publicKey);
+  }
+
+  function joinNetworkAsValidator(): void {
+    if (!joinSpec || !joinKeystore) return;
+    // Final sanity check before persisting: the keystore must correspond to
+    // one of the validators in the spec, otherwise this keystore is for
+    // some other network or got crossed in the mail.
+    if (!keystoreMatchesValidator(joinSpec, joinKeystore)) {
+      setJoinError("This keystore isn't a validator on this network. Double-check that the genesis.json and keystore came from the same founder, for the same network.");
+      return;
+    }
+    if (!joinKeystore.account) {
+      setJoinError('Keystore is missing the account keypair.');
+      return;
+    }
+    saveJoinerWallet({ accountId: joinKeystore.accountId, account: joinKeystore.account });
+    saveJoinedNetwork(joinSpec);
     navigate('/');
   }
 
@@ -332,7 +415,7 @@ export function Onboarding() {
           </button>
 
           <button
-            onClick={() => { persistNetworkMode('join'); setFlow('join-existing-stub'); }}
+            onClick={() => { persistNetworkMode('join'); setFlow('join-existing-form'); }}
             disabled={loading}
             className="w-full text-left bg-navy border border-navy-light hover:border-gold/60 rounded-xl p-4 transition-colors disabled:opacity-50"
           >
@@ -530,25 +613,123 @@ export function Onboarding() {
     );
   }
 
-  // "Join an existing network" stub. The real flow (paste genesis hash +
-  // bootstrap address, or scan an invite link, then run validator:setup
-  // inline) is the milestone task after "Start a new network."
-  if (flow === 'join-existing-stub') {
+  // "Join an existing network." The user has been pre-allocated as a
+  // validator by the founder of some network. They received two files
+  // privately: the public genesis spec and their own keystore. We load
+  // both, sanity-check that the keystore is in the spec's validator set,
+  // and persist them as the wallet identity + network choice.
+  //
+  // Note: this does NOT yet boot ae-node against the chosen genesis. That
+  // wiring is the next milestone task ("wire main.cjs to honor network
+  // choice"). For now the wallet has the right identity and the right
+  // spec stashed; the bundled node is still in solo authority mode under
+  // the hood until that piece lands.
+  if (flow === 'join-existing-form') {
+    const validatorAccounts = joinSpec?.accounts?.filter((a) => a.validator) ?? [];
+    const keystoreInSpec = !!(
+      joinSpec && joinKeystore &&
+      keystoreMatchesValidator(joinSpec, joinKeystore)
+    );
+    const ready = keystoreInSpec;
+
     return (
-      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
         <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4">
           <span className="text-xl text-gold">→</span>
         </div>
-        <h2 className="text-2xl font-serif text-white mb-2">Join an existing network</h2>
-        <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
-          The joiner flow is being built. The next version will accept a network spec or invite link, generate your validator keystore, and connect your node to the network.
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Join an existing network</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
+          Load the two files the founder sent you: the public genesis spec and your private keystore.
         </p>
-        <p className="text-xs text-gray-500 mb-8 max-w-sm">
-          For now you can still create a Solo wallet by going back and picking that option.
-        </p>
+
+        <div className="w-full max-w-sm space-y-3 mb-4">
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <p className="text-sm text-white font-medium">genesis.json</p>
+                <p className="text-[11px] text-gray-500">The shared network spec. Public.</p>
+              </div>
+              {joinSpecFilename && <span className="text-[10px] text-teal bg-teal/15 px-2 py-1 rounded-full shrink-0">Loaded</span>}
+            </div>
+            <label className="block">
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleSpecFile(f);
+                }}
+                className="block w-full text-xs text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-teal/15 file:text-teal hover:file:bg-teal/25 file:cursor-pointer"
+              />
+            </label>
+            {joinSpecFilename && joinSpec?.networkId && (
+              <p className="text-[11px] text-gray-400 mt-2">
+                <span className="text-gray-500">Network:</span> <span className="font-mono text-white">{joinSpec.networkId}</span>
+                {' · '}
+                <span className="text-gray-500">{validatorAccounts.length} validators</span>
+              </p>
+            )}
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <p className="text-sm text-white font-medium">Your keystore</p>
+                <p className="text-[11px] text-gray-500">Private. Holds your validator + account keys.</p>
+              </div>
+              {joinKeystoreFilename && <span className="text-[10px] text-teal bg-teal/15 px-2 py-1 rounded-full shrink-0">Loaded</span>}
+            </div>
+            <label className="block">
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleKeystoreFile(f);
+                }}
+                className="block w-full text-xs text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-gold/15 file:text-gold hover:file:bg-gold/25 file:cursor-pointer"
+              />
+            </label>
+            {joinKeystoreFilename && joinKeystore?.accountId && (
+              <p className="text-[11px] text-gray-400 mt-2">
+                <span className="text-gray-500">Account:</span> <span className="font-mono text-white">{truncateId(joinKeystore.accountId, 16)}</span>
+                {joinKeystore.name && <> · <span className="text-gray-500">{joinKeystore.name}</span></>}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {joinSpec && joinKeystore && (
+          keystoreInSpec ? (
+            <div className="w-full max-w-sm bg-teal/10 border border-teal/30 rounded-xl p-3 mb-4">
+              <p className="text-xs text-teal font-medium mb-1">Match confirmed</p>
+              <p className="text-[11px] text-gray-300">
+                You&apos;re joining <span className="font-mono text-white">{joinSpec.networkId}</span> as <span className="font-mono text-white">{joinKeystore?.accountId ? truncateId(joinKeystore.accountId, 12) : ''}</span>{joinKeystore?.name ? <> ({joinKeystore.name})</> : null}.
+              </p>
+            </div>
+          ) : (
+            <div className="w-full max-w-sm bg-red-900/20 border border-red-900/40 rounded-xl p-3 mb-4">
+              <p className="text-xs text-red-400 font-medium mb-1">Keystore not in this network</p>
+              <p className="text-[11px] text-gray-300">
+                The keystore&apos;s account is not listed as a validator in this genesis spec. Check that both files came from the same founder for the same network.
+              </p>
+            </div>
+          )
+        )}
+
+        {joinError && <p className="text-sm text-red-400 mb-4 max-w-sm text-center">{joinError}</p>}
+
         <button
-          onClick={() => setFlow('network-mode')}
-          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors"
+          onClick={joinNetworkAsValidator}
+          disabled={!ready}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+        >
+          Join network
+        </button>
+
+        <button
+          onClick={() => { setFlow('network-mode'); setJoinError(null); }}
+          className="text-xs text-gray-500 hover:text-gray-300"
         >
           Back to Network Choice
         </button>

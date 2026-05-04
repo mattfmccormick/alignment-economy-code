@@ -93,3 +93,27 @@ export function saveFounderWallet(keystore: { accountId: string; account: { publ
   localStorage.setItem(STORAGE_KEY, JSON.stringify(wallet));
   localStorage.removeItem(LEGACY_KEY);
 }
+
+// Joiner-side persistence. A joiner has the same wallet shape as a founder
+// (raw ML-DSA keypair, no mnemonic) — they just got their keystore from the
+// founder instead of generating it inline. Same save function, different
+// name at call sites for readability.
+export const saveJoinerWallet = saveFounderWallet;
+
+const JOINED_NETWORK_KEY = 'ae_joined_network';
+
+/**
+ * Persist the genesis spec the user joined. Stored alongside the wallet so
+ * a future ae-node spawn knows which network to boot into. The Electron
+ * main process will read this on next launch (forthcoming "wire main.cjs"
+ * milestone task) to set AE_GENESIS_CONFIG_PATH and friends.
+ */
+export function saveJoinedNetwork(spec: unknown): void {
+  localStorage.setItem(JOINED_NETWORK_KEY, JSON.stringify(spec));
+}
+
+export function loadJoinedNetwork(): unknown | null {
+  const raw = localStorage.getItem(JOINED_NETWORK_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
