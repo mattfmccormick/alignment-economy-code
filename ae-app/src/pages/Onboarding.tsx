@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { saveWalletFromMnemonic, saveFounderWallet, saveJoinerWallet, saveJoinedNetwork } from '../lib/keys';
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
+import { encodeInviteLink, decodeInviteLink } from '../lib/invite';
 
 type Flow =
   | 'welcome'
@@ -117,6 +118,11 @@ export function Onboarding() {
   // path they took.
   const [pendingNetworkSummary, setPendingNetworkSummary] = useState<{ networkId: string; accountId: string } | null>(null);
   const [relaunching, setRelaunching] = useState(false);
+
+  // Invite-link UI state.
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [inviteInput, setInviteInput] = useState('');
+  const [inviteParseError, setInviteParseError] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -605,6 +611,26 @@ export function Onboarding() {
         </div>
 
         <div className="w-full max-w-sm space-y-3 mb-6">
+          <div className="bg-navy rounded-xl p-3 border border-teal/30">
+            <p className="text-xs text-teal mb-2 font-medium">Invite link</p>
+            <p className="text-[10px] text-gray-400 break-all font-mono mb-3 leading-relaxed">
+              {encodeInviteLink(genesis.spec)}
+            </p>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(encodeInviteLink(genesis.spec));
+                setInviteCopied(true);
+                setTimeout(() => setInviteCopied(false), 2000);
+              }}
+              className="w-full bg-teal/15 text-teal rounded-lg py-2 text-xs font-medium hover:bg-teal/25 transition-colors"
+            >
+              {inviteCopied ? 'Copied!' : 'Copy invite link'}
+            </button>
+            <p className="text-[10px] text-gray-500 mt-2">
+              Send this to invitees alongside their personal keystore. The link contains the public spec; pasting it into their wallet pre-fills the join form.
+            </p>
+          </div>
+
           <button
             onClick={() => downloadJson('genesis.json', genesis.spec)}
             className="w-full bg-teal/20 text-teal rounded-xl py-3 text-sm font-medium hover:bg-teal/30 transition-colors"
@@ -683,15 +709,41 @@ export function Onboarding() {
         </div>
         <h2 className="text-2xl font-serif text-white mb-2 text-center">Join an existing network</h2>
         <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
-          Load the two files the founder sent you: the public genesis spec and your private keystore.
+          Paste the invite link from the founder (or upload genesis.json if they sent the file). Then upload your private keystore.
         </p>
+
+        <div className="w-full max-w-sm bg-navy rounded-xl p-4 border border-navy-light mb-3">
+          <p className="text-xs text-white font-medium mb-1">Invite link</p>
+          <p className="text-[11px] text-gray-500 mb-2">Quickest way in. Replaces the genesis.json file upload below.</p>
+          <textarea
+            value={inviteInput}
+            onChange={(e) => {
+              const v = e.target.value;
+              setInviteInput(v);
+              setInviteParseError(null);
+              if (!v.trim()) return;
+              const parsed = decodeInviteLink(v);
+              if (parsed) {
+                setJoinSpec(parsed.spec as SpecShape);
+                setJoinSpecFilename('(from invite link)');
+                setJoinError(null);
+              } else if (v.trim().length > 8) {
+                setInviteParseError("That doesn't look like a valid AE invite link.");
+              }
+            }}
+            placeholder="https://invite.alignmenteconomy.org/v1#..."
+            rows={2}
+            className="w-full bg-navy-dark border border-navy-light rounded-lg px-3 py-2 text-xs text-white font-mono focus:border-teal focus:outline-none resize-none placeholder-gray-600"
+          />
+          {inviteParseError && <p className="text-[11px] text-red-400 mt-1">{inviteParseError}</p>}
+        </div>
 
         <div className="w-full max-w-sm space-y-3 mb-4">
           <div className="bg-navy rounded-xl p-4 border border-navy-light">
             <div className="flex items-start justify-between mb-2">
               <div>
                 <p className="text-sm text-white font-medium">genesis.json</p>
-                <p className="text-[11px] text-gray-500">The shared network spec. Public.</p>
+                <p className="text-[11px] text-gray-500">The shared network spec. Public. Or use the invite link above.</p>
               </div>
               {joinSpecFilename && <span className="text-[10px] text-teal bg-teal/15 px-2 py-1 rounded-full shrink-0">Loaded</span>}
             </div>
