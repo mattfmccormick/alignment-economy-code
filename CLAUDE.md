@@ -208,6 +208,7 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 - ~~**WS `court:argument` events don't auto-refresh.**~~ Already added to the allowed event types in `ae-node/src/api/websocket.ts`.
 - ~~**WebSocket subscribe has no authentication.**~~ Audited Phase 65. Backend `setupWebSocket` already verifies a signed `{action:'subscribe', accountId, role}` payload + timestamp via the account's stored publicKey, with a 5-minute window. Both clients (`ae-app/src/lib/websocket.ts` and `ae-miner/src/lib/websocket.ts`) sign with the wallet's ML-DSA private key on `onopen`. New `phase65.test.ts` (5/5 pass) covers the four failure modes (no sig, wrong sig, stale timestamp, unauthenticated client) plus the happy path that an authenticated client receives its account-specific events.
 - ~~**`tweetnacl` dependency is dead.**~~ Removed from `ae-node/package.json`. No source under `alignment-economy-code/` imports it (full-codebase grep, and crypto fully runs on `@noble/post-quantum` for ML-DSA + `@noble/curves` for Ed25519 VRF + `@noble/hashes` for SHA-256). Phase 1 + Phase 65 still pass post-removal.
+- ~~**Admin endpoint protection / docs.**~~ Already gated by `AE_ADMIN_SECRET` (constant-time compare, fail-closed when unset). Now documented in `README.md` under "Configuration" with usage example. Operators set the env var to a long random value (`openssl rand -hex 32`) to enable `/admin/advance-day`; without it the endpoint returns `403 ADMIN_DISABLED`.
 
 ### Next (Before / During 2-Person Testing)
 
@@ -218,8 +219,7 @@ These are real but not test-blockers. Matt and his wife will hit some of them; d
 
 ### Before Public Beta (Not Blocking 2-Person Test)
 
-- **Admin endpoint protection.** Already gated by `AE_ADMIN_SECRET` env var (admin routes return 403 when unset). Document the env var in deploy docs.
-- **`tweetnacl` dependency is dead.** Listed in `package.json` but no longer imported (replaced by `@noble`). Remove during cleanup.
+(All previously listed items are now in Done.)
 
 ### Future (Phase 2+)
 
