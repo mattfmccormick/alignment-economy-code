@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
 import { displayPoints } from '../lib/formatting';

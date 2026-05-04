@@ -76,3 +76,20 @@ export function hasWallet(): boolean {
 export function saveWallet(wallet: { accountId: string; publicKey: string; privateKey: string }): void {
   saveWalletLegacy(wallet);
 }
+
+/**
+ * Save the founder's wallet from a genesis keystore. Founder accounts come
+ * out of the genesis ceremony as raw ML-DSA keypairs (no BIP39 derivation),
+ * so we persist them in the same shape as a V1 legacy wallet. The keystore
+ * file the founder downloaded IS the recovery artifact for this account;
+ * losing it loses the account, just like losing a mnemonic loses a V2.
+ */
+export function saveFounderWallet(keystore: { accountId: string; account: { publicKey: string; privateKey: string } }): void {
+  const wallet: StoredWalletV1 = {
+    accountId: keystore.accountId,
+    publicKey: keystore.account.publicKey,
+    privateKey: keystore.account.privateKey,
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(wallet));
+  localStorage.removeItem(LEGACY_KEY);
+}

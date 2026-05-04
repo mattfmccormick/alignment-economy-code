@@ -137,8 +137,6 @@ export function CaseDetail() {
 
       <ArgumentTimeline
         argumentLog={argumentLog}
-        challengerId={caseHeader.challengerId}
-        defendantId={caseHeader.defendantId}
         myAccountId={myAccountId}
       />
 
@@ -216,11 +214,9 @@ function CaseHeaderCard({ caseHeader, myAccountId }: { caseHeader: CaseHeader; m
 }
 
 function ArgumentTimeline({
-  argumentLog, challengerId, defendantId, myAccountId,
+  argumentLog, myAccountId,
 }: {
   argumentLog: CaseArgument[];
-  challengerId: string;
-  defendantId: string;
   myAccountId: string;
 }) {
   if (argumentLog.length === 0) {

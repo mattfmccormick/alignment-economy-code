@@ -13,6 +13,7 @@ import { verificationRoutes } from './routes/verification.js';
 import { courtRoutes } from './routes/court.js';
 import { validatorRoutes } from './routes/validators.js';
 import { tagRoutes } from './routes/tags.js';
+import { founderRoutes } from './routes/founder.js';
 import { rateLimitMiddleware } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setupWebSocket } from './websocket.js';
@@ -56,6 +57,7 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
   app.use('/api/v1/court', courtRoutes(db));
   app.use('/api/v1/validators', validatorRoutes(db));
   app.use('/api/v1/tags', tagRoutes(db));
+  app.use('/api/v1/founder', founderRoutes());
 
   // Error handler (must be last)
   app.use(errorHandler);

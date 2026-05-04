@@ -211,4 +211,19 @@ export const api = {
 
   getTodayDay: () =>
     request<{ day: number; cyclePhase: string }>('GET', '/tags/today'),
+
+  // Founder: generate a fresh genesis ceremony from inside the wallet.
+  // The response includes the public spec, one keystore per validator
+  // (the founder's is the first), and the spec hash for out-of-band
+  // confirmation across operators. The wallet UI is responsible for
+  // letting the user save/share these.
+  generateGenesis: (body: {
+    networkId: string;
+    validatorCount?: number;
+    names?: string[];
+    initialEarnedDisplay?: number;
+    stakeDisplay?: number;
+    genesisTimestamp?: number;
+  }) =>
+    request<{ spec: any; keystores: any[]; specHash: string }>('POST', '/founder/generate-genesis', body),
 };

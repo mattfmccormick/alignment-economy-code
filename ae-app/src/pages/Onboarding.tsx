@@ -1,14 +1,16 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { saveWalletFromMnemonic } from '../lib/keys';
+import { saveWalletFromMnemonic, saveFounderWallet } from '../lib/keys';
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
 
 type Flow =
   | 'welcome'
   | 'network-mode'
-  | 'start-new-stub'
+  | 'start-new-form'
+  | 'start-new-generating'
+  | 'start-new-result'
   | 'join-existing-stub'
   | 'creating'
   | 'show-key'
@@ -16,6 +18,32 @@ type Flow =
   | 'how-balance'
   | 'get-verified'
   | 'login';
+
+interface GeneratedGenesis {
+  spec: unknown;
+  specHash: string;
+  keystores: Array<{
+    name: string;
+    accountId: string;
+    publicKey: string;
+    secretKey: string;
+    account: { publicKey: string; privateKey: string };
+    vrf: { publicKey: string; secretKey: string };
+  }>;
+}
+
+// Trigger a browser download of a JSON object as a file.
+function downloadJson(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // First-launch network mode. Captured before account creation so future
 // launches know which protocol mode to boot ae-node into:
@@ -59,6 +87,12 @@ export function Onboarding() {
   // Login state — paste a mnemonic phrase
   const [loginMnemonic, setLoginMnemonic] = useState('');
 
+  // Founder flow state.
+  const [founderNetworkId, setFounderNetworkId] = useState('');
+  const [founderValidatorCount, setFounderValidatorCount] = useState(2);
+  const [founderNames, setFounderNames] = useState<string[]>(['founder', 'invitee-1']);
+  const [genesis, setGenesis] = useState<GeneratedGenesis | null>(null);
+
   const navigate = useNavigate();
 
   // For confirm-key step: pick three random word indices the user must re-enter.
@@ -70,6 +104,39 @@ export function Onboarding() {
     return Array.from(set).sort((a, b) => a - b);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet?.mnemonic]);
+
+  async function runGenesisCeremony() {
+    setLoading(true);
+    setError(null);
+    setFlow('start-new-generating');
+    try {
+      const res = await api.generateGenesis({
+        networkId: founderNetworkId.trim(),
+        validatorCount: founderValidatorCount,
+        names: founderNames.map((n) => n.trim()).filter((n) => n.length > 0),
+      });
+      if (res.success && res.data) {
+        setGenesis(res.data as GeneratedGenesis);
+        setFlow('start-new-result');
+      } else {
+        setError(res.error?.message || 'Failed to generate genesis');
+        setFlow('start-new-form');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error. Is the backend running?');
+      setFlow('start-new-form');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function continueAsFounder() {
+    if (!genesis || genesis.keystores.length === 0) return;
+    // The first keystore is the founder's. Subsequent keystores are for the
+    // invitees and remain the founder's responsibility to deliver.
+    saveFounderWallet(genesis.keystores[0]);
+    navigate('/');
+  }
 
   async function createAccount() {
     setLoading(true);
@@ -251,7 +318,7 @@ export function Onboarding() {
           </button>
 
           <button
-            onClick={() => { persistNetworkMode('start'); setFlow('start-new-stub'); }}
+            onClick={() => { persistNetworkMode('start'); setFlow('start-new-form'); }}
             disabled={loading}
             className="w-full text-left bg-navy border border-navy-light hover:border-gold/60 rounded-xl p-4 transition-colors disabled:opacity-50"
           >
@@ -291,27 +358,173 @@ export function Onboarding() {
     );
   }
 
-  // "Start a new network" stub. The real flow (run genesis ceremony from
-  // inside the app, write the spec to disk, show a share/export screen)
-  // is the next milestone task.
-  if (flow === 'start-new-stub') {
+  // "Start a new network" — step 1: collect inputs.
+  if (flow === 'start-new-form') {
+    const networkIdValid = /^[a-z0-9-]{3,32}$/.test(founderNetworkId.trim());
     return (
-      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
         <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4">
           <span className="text-xl text-gold">+</span>
         </div>
-        <h2 className="text-2xl font-serif text-white mb-2">Start a new network</h2>
-        <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
-          The founder flow is being built. The next version will run the genesis ceremony from inside this app, generate a `genesis.json` you can share, and start your node as the first validator.
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Start a new network</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
+          Set up the genesis ceremony. You'll get a network spec to share with everyone, plus one keystore per validator (yours and the people you invite).
         </p>
-        <p className="text-xs text-gray-500 mb-8 max-w-sm">
-          For now you can still create a Solo wallet by going back and picking that option.
-        </p>
+
+        <div className="w-full max-w-sm space-y-4 mb-6">
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Network ID</label>
+            <input
+              value={founderNetworkId}
+              onChange={(e) => setFounderNetworkId(e.target.value.toLowerCase())}
+              placeholder="ae-devnet-matt"
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:border-teal focus:outline-none"
+            />
+            <p className="text-[11px] text-gray-500 mt-1">Lowercase letters, numbers, hyphens. 3 to 32 characters.</p>
+          </div>
+
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Number of validators</label>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={founderValidatorCount}
+              onChange={(e) => {
+                const n = Math.max(1, Math.min(50, parseInt(e.target.value, 10) || 1));
+                setFounderValidatorCount(n);
+                // Resize the names list to match.
+                setFounderNames((prev) => {
+                  const next = [...prev];
+                  while (next.length < n) next.push(`invitee-${next.length}`);
+                  return next.slice(0, n);
+                });
+              }}
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono focus:border-teal focus:outline-none"
+            />
+            <p className="text-[11px] text-gray-500 mt-1">Includes you. So 3 = you + 2 invitees.</p>
+          </div>
+
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Validator names</label>
+            <div className="space-y-2">
+              {founderNames.map((name, i) => (
+                <input
+                  key={i}
+                  value={name}
+                  onChange={(e) => setFounderNames((prev) => prev.map((n, j) => (j === i ? e.target.value : n)))}
+                  placeholder={i === 0 ? 'You (founder)' : `Invitee ${i}`}
+                  className="w-full bg-navy border border-navy-light rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:border-teal focus:outline-none"
+                />
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1">First name is yours. The rest label each invitee's keystore so you don't mix them up.</p>
+          </div>
+        </div>
+
+        {error && <p className="text-sm text-red-400 mb-4 max-w-sm text-center">{error}</p>}
+
         <button
-          onClick={() => setFlow('network-mode')}
-          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors"
+          onClick={runGenesisCeremony}
+          disabled={loading || !networkIdValid}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+        >
+          {loading ? 'Generating...' : 'Generate genesis'}
+        </button>
+
+        <button
+          onClick={() => { setFlow('network-mode'); setError(null); }}
+          className="text-xs text-gray-500 hover:text-gray-300"
         >
           Back to Network Choice
+        </button>
+      </div>
+    );
+  }
+
+  // "Start a new network" — step 2: working state while ae-node generates.
+  // buildGenesisSet is fast (key generation + spec assembly), so this is a
+  // brief flicker most of the time. Showing it explicitly avoids a blank
+  // moment if the API is slow.
+  if (flow === 'start-new-generating') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
+        <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4 animate-pulse">
+          <span className="text-xl text-gold">⋯</span>
+        </div>
+        <h2 className="text-xl font-serif text-white mb-2">Generating genesis</h2>
+        <p className="text-gray-400 text-sm max-w-sm">
+          Creating validator keystores and the shared network spec.
+        </p>
+      </div>
+    );
+  }
+
+  // "Start a new network" — step 3: result. Show the spec hash, let the
+  // founder download the public spec and each private keystore, then
+  // continue to the wallet using their own keystore as the wallet identity.
+  if (flow === 'start-new-result' && genesis) {
+    return (
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Network ready</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
+          Save these files. The genesis spec is public; each keystore is private to one validator only.
+        </p>
+
+        <div className="w-full max-w-sm bg-navy rounded-xl p-4 border border-gold/30 mb-4">
+          <p className="text-xs text-gold mb-1 font-medium">Genesis spec hash</p>
+          <p className="text-xs text-white font-mono break-all">{genesis.specHash}</p>
+          <p className="text-[11px] text-gray-500 mt-2">Compare this with every operator out-of-band before you try to peer. If their hash matches yours, you're on the same network.</p>
+        </div>
+
+        <div className="w-full max-w-sm space-y-3 mb-6">
+          <button
+            onClick={() => downloadJson('genesis.json', genesis.spec)}
+            className="w-full bg-teal/20 text-teal rounded-xl py-3 text-sm font-medium hover:bg-teal/30 transition-colors"
+          >
+            Download genesis.json (public)
+          </button>
+
+          <div className="bg-navy rounded-xl p-3 border border-navy-light">
+            <p className="text-xs text-gray-400 mb-2">Validator keystores (private)</p>
+            <div className="space-y-2">
+              {genesis.keystores.map((ks, i) => (
+                <div key={ks.accountId} className="flex items-center justify-between gap-2 bg-navy-dark rounded-lg p-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white truncate">
+                      {ks.name}
+                      {i === 0 && <span className="text-[10px] text-teal ml-2">(yours)</span>}
+                    </p>
+                    <p className="text-[10px] text-gray-500 font-mono truncate">{truncateId(ks.accountId, 12)}</p>
+                  </div>
+                  <button
+                    onClick={() => downloadJson(`${ks.name}.keystore.json`, ks)}
+                    className="text-xs bg-gold/15 text-gold px-3 py-1.5 rounded-lg hover:bg-gold/25 transition-colors shrink-0"
+                  >
+                    Download
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-red-400 leading-relaxed">
+            Send each keystore privately to its named operator only (DM, encrypted email). Anyone with a keystore controls that validator. Share the genesis.json publicly.
+          </p>
+        </div>
+
+        <button
+          onClick={continueAsFounder}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
+        >
+          I&apos;ve saved everything, continue
+        </button>
+
+        <button
+          onClick={() => setFlow('start-new-form')}
+          className="text-xs text-gray-500 hover:text-gray-300"
+        >
+          Generate again
         </button>
       </div>
     );
