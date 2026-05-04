@@ -218,42 +218,39 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 
 **Working in this codebase:** When you finish a milestone task, check it off here AND add the matching one-liner to "Done (Fixed / Shipped)." When a milestone fully completes, mark it ✅ and start on the next.
 
-### Milestone A: LAN multi-validator install (NEXT)
+### Milestone 1: Downloadable public testnet (NEXT)
 
-Goal: Three people in the same room on the same WiFi can each install the wallet, run the genesis ceremony together, and end up with a real shared chain. Multi-validator BFT, real protocol semantics, no public infra needed.
+Goal: Anyone can download an installer, run it, and join a real Alignment Economy network with friends over the public internet. Multi-validator BFT, real txs, real verification, real court. The protocol already works (Phases 12-65). The missing layer is the install/join UX, public infra, NAT traversal, and the polish that makes the whole thing usable.
 
-The protocol already supports this (Phases 12-65). What's missing is the install/join UX.
+LAN testing happens *as we build* — don't ship a LAN-only release as a separate milestone. LAN is the dev environment. The shipping target is "you and your friends each download this installer and end up on the same chain."
 
+**Install/join UX (no networking complexity needed for these tasks):**
 - [ ] **Bundle `ae-node` inside `ae-miner`** (currently only the wallet bundles it; `ae-miner/electron/main.cjs` is just the UI). Mirror the wallet's pattern: spawn ae-node as a child, poll /health, store DB under userData.
-- [ ] **First-launch network mode picker.** When the wallet boots and there's no wallet yet, show a chooser: (1) Solo / Authority node (current default) (2) Start a new network (run genesis, become founder) (3) Join an existing network (paste genesis hash + bootstrap address + your validator keystore).
-- [ ] **"Start a new network" flow.** Run the existing `genesis:init` CLI from inside the app, write the spec to disk, show the user a "share this `genesis.json` with the people you want to invite" screen with a copy/export action.
-- [ ] **"Join existing network" flow.** Form for genesis hash + bootstrap node URL + path to keystore (or generate one inline via `validator:setup`). Wire bundled ae-node to validator mode (not authority mode) when this path is taken.
-- [ ] **End-to-end LAN test on dev machine.** Spin up 3 simulated runners on `localhost:3001/3002/3003`, run them through the chooser flow, verify they peer, validators register, blocks commit, txs flow, court works.
-- [ ] **Build installers.** Run `electron:build:win`, `:mac`, `:linux` for both wallet and miner. Verify installers actually launch on a clean machine.
-- [ ] **Write `docs/start-a-network.md`.** One page: "How to start an AE network with friends." Steps to run genesis ceremony, share the spec, invite joiners.
+- [ ] **First-launch network mode picker.** When the wallet boots and there's no wallet yet, show a chooser: (1) Solo / Authority node (current default), (2) Start a new network (run genesis, become founder), (3) Join an existing network (paste genesis hash + bootstrap address + your validator keystore, or scan an invite link).
+- [ ] **"Start a new network" flow.** Run the existing `genesis:init` CLI from inside the app, write the spec to disk, show the user a "share this `genesis.json` with the people you want to invite" screen with a copy/export action AND an invite link (see invite-link task below).
+- [ ] **"Join existing network" flow.** Form for genesis hash + bootstrap address (or invite link), generate the validator keystore inline via `validator:setup`. Wire bundled ae-node to validator mode (not authority mode) when this path is taken.
+- [ ] **Invite link / QR code.** A founder generates a shareable URL/QR encoding genesis hash + bootstrap address. Joiner scans or pastes, app fills the join form automatically.
 
-### Milestone B: Internet-reachable testnet
+**Internet reach:**
+- [ ] **Public bootstrap node.** Cheapest VPS (~$5/mo Hetzner / DigitalOcean). Permanent address, runs `ae-node` in validator mode, holds the canonical AE testnet genesis spec.
+- [ ] **Bake testnet address into installer.** "Join the AE testnet" button on first launch hits the bootstrap node, downloads genesis spec, runs validator setup automatically.
+- [ ] **NAT traversal.** Two laptops on home WiFi can't peer directly. Pick one approach (tunnel service like tailscale embedded, WebRTC peer connections, or a hosted relay) and ship it.
 
-Goal: Friends on different home WiFi networks can join the same chain over the public internet.
-
-- [ ] **Stand up a public bootstrap node.** Cheapest VPS (~$5/mo). Permanent address, runs `ae-node` in validator mode, holds the canonical genesis spec.
-- [ ] **Bake bootstrap address into the installer.** "Join the AE testnet" button on first launch — hits the known bootstrap node, downloads genesis spec, runs validator setup automatically.
-- [ ] **NAT traversal.** Two laptops on home WiFi can't peer directly without help. Options: tunnel service (tailscale, ngrok) embedded; or WebRTC for peer connections; or a hosted relay node. Pick one, ship it.
-- [ ] **Auto-update mechanism.** `electron-updater` wired to GitHub Releases so testers don't need to re-download every commit.
-- [ ] **End-to-end public test.** Two machines on different networks join the testnet, transact, verify each other.
-
-### Milestone C: Polished public install
-
-Goal: Anyone can download and use it without reading docs.
-
-- [ ] **"Invite link" / QR code.** Existing network member generates a shareable link/QR encoding genesis hash + bootstrap address. Joiner scans, the app does the rest.
+**Polish so non-technical users can actually use it:**
 - [ ] **Onboarding tuned for non-technical users.** Today's flow assumes you know what a recovery phrase is. Add education, not just a 12-word screen.
 - [ ] **Better error states.** "Could not reach bootstrap node" with retry. "You're offline." "Your wallet is on a different network than this transaction expected."
+- [ ] **Auto-update.** `electron-updater` wired to GitHub Releases so testers don't re-download by hand.
+
+**Verification + ship:**
+- [ ] **End-to-end LAN test on dev machine.** 3 simulated runners on `localhost:3001/3002/3003`, walked through the chooser flow, peer up, register, commit blocks, transact, court works. (This is the dev gate, NOT a release.)
+- [ ] **End-to-end internet test.** Two machines on different home networks join the public testnet, transact, verify each other.
+- [ ] **Build + sign installers** for Win/Mac/Linux, both apps.
+- [ ] **Write `docs/start-a-network.md`** (founder flow) and `docs/join-a-network.md` (joiner flow). One page each.
 - [ ] **Wider tester rollout.** Friends, family, early supporters.
 
-### Milestone D: Whitepaper completeness
+### Milestone 2: Whitepaper completeness
 
-Real protocol features the whitepaper requires that aren't built yet. These don't block A/B/C above (those work with what's already built), but the AE isn't fully the AE without these.
+Real protocol features the whitepaper requires that aren't built yet. The AE isn't fully the AE without these. Milestone 1 ships without them; they're additive.
 
 - [ ] **In-person co-sign (+2.5% credit).** Two parties dual-sign a tx, both get a percent-human bump. Whitepaper §6.3 / Vegas Guy plan Phase 1.6 + 3.5.
 - [ ] **Inheritance: multi-sig + dead-man-switch.** Lost-key accounts pollute the rebase target forever otherwise. Whitepaper §10. Vegas Guy plan Phase 7.9.
@@ -262,7 +259,7 @@ Real protocol features the whitepaper requires that aren't built yet. These don'
 - [ ] **TypeScript SDK + dev portal.** So third parties can integrate. Vegas Guy plan Phases 9.5, 9.6.
 - [ ] **Treasury / ecosystem fund.** Today the 0.5% fee goes 100% to miners. Nothing funds the explorer, audits, or the nonprofit running this. Whitepaper is silent on this.
 
-### Milestone E: Mainnet readiness
+### Milestone 3: Mainnet readiness
 
 The credibility layer. None of this is fast.
 
