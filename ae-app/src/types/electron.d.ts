@@ -15,6 +15,7 @@ declare global {
         spec?: unknown;
         keystore?: unknown;
       }) => Promise<{ ok: boolean; error?: string; mode?: string; configPath?: string }>;
+      relaunch: () => Promise<void>;
     };
   }
 }

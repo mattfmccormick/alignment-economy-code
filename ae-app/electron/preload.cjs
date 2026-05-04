@@ -26,4 +26,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('aeNetwork', {
   isElectron: true,
   saveConfig: (opts) => ipcRenderer.invoke('aeNetwork:saveConfig', opts),
+  // Cleanly tear down + relaunch the Electron process so a freshly-saved
+  // network config takes effect. The currently-running ae-node child only
+  // sees its old spawn env, which is why a relaunch is needed instead of
+  // hot-swapping in place.
+  relaunch: () => ipcRenderer.invoke('aeNetwork:relaunch'),
 });

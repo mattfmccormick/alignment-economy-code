@@ -12,6 +12,7 @@ type Flow =
   | 'start-new-generating'
   | 'start-new-result'
   | 'join-existing-form'
+  | 'restart-to-apply'
   | 'creating'
   | 'show-key'
   | 'confirm-key'
@@ -111,6 +112,12 @@ export function Onboarding() {
   const [joinKeystoreFilename, setJoinKeystoreFilename] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
+  // Summary card shown on the restart-to-apply screen — the network ID +
+  // accountId the user just committed to, regardless of which onboarding
+  // path they took.
+  const [pendingNetworkSummary, setPendingNetworkSummary] = useState<{ networkId: string; accountId: string } | null>(null);
+  const [relaunching, setRelaunching] = useState(false);
+
   const navigate = useNavigate();
 
   // For confirm-key step: pick three random word indices the user must re-enter.
@@ -152,19 +159,31 @@ export function Onboarding() {
     if (!genesis || genesis.keystores.length === 0) return;
     // The first keystore is the founder's. Subsequent keystores are for the
     // invitees and remain the founder's responsibility to deliver.
-    saveFounderWallet(genesis.keystores[0]);
+    const founderKeystore = genesis.keystores[0];
+    saveFounderWallet(founderKeystore);
     saveJoinedNetwork(genesis.spec);
-    // When running inside Electron, ask main to persist the spec + keystore
-    // to userData and flip the next ae-node spawn into BFT mode. The user
-    // will need to restart the app for the change to take effect — we
-    // surface a notice on the wallet's first screen for that. In plain
-    // browser dev there's no main process so we silently skip.
+    let savedToDisk = false;
     if (window.aeNetwork) {
       try {
-        await window.aeNetwork.saveConfig({ mode: 'bft', spec: genesis.spec, keystore: genesis.keystores[0] });
+        await window.aeNetwork.saveConfig({ mode: 'bft', spec: genesis.spec, keystore: founderKeystore });
+        savedToDisk = true;
       } catch { /* non-fatal; localStorage is still set */ }
     }
-    navigate('/');
+    // After the spec is on disk, the running ae-node is still in solo mode
+    // until a relaunch picks up the new spawn env. Surface that explicitly
+    // so the founder doesn't expect peering to start without a restart.
+    // In plain browser dev (no Electron), there's nothing to relaunch and
+    // ae-node config-on-disk doesn't exist, so we skip straight to /.
+    if (savedToDisk) {
+      const specWithId = genesis.spec as { networkId?: string };
+      setPendingNetworkSummary({
+        networkId: specWithId.networkId ?? '(unknown)',
+        accountId: founderKeystore.accountId,
+      });
+      setFlow('restart-to-apply');
+    } else {
+      navigate('/');
+    }
   }
 
   // Joiner: file pickers parse JSON and stash the parsed object in state.
@@ -228,12 +247,22 @@ export function Onboarding() {
     }
     saveJoinerWallet({ accountId: joinKeystore.accountId, account: joinKeystore.account });
     saveJoinedNetwork(joinSpec);
+    let savedToDisk = false;
     if (window.aeNetwork) {
       try {
         await window.aeNetwork.saveConfig({ mode: 'bft', spec: joinSpec, keystore: joinKeystore });
+        savedToDisk = true;
       } catch { /* non-fatal; localStorage is still set */ }
     }
-    navigate('/');
+    if (savedToDisk) {
+      setPendingNetworkSummary({
+        networkId: joinSpec.networkId ?? '(unknown)',
+        accountId: joinKeystore.accountId,
+      });
+      setFlow('restart-to-apply');
+    } else {
+      navigate('/');
+    }
   }
 
   async function createAccount() {
@@ -747,6 +776,66 @@ export function Onboarding() {
           className="text-xs text-gray-500 hover:text-gray-300"
         >
           Back to Network Choice
+        </button>
+      </div>
+    );
+  }
+
+  // Restart-to-apply gate. Shown after Start-new or Join-existing has
+  // pushed a fresh network config to disk. The currently running ae-node
+  // child still has its old (solo-mode) spawn env, so the network choice
+  // doesn't actually take effect until the Electron app relaunches. Two
+  // explicit options: relaunch now (recommended), or continue without
+  // relaunching (the wallet works against the old solo node until the
+  // user quits + reopens manually). We only land here when
+  // window.aeNetwork is present, so the relaunch button is always wired.
+  if (flow === 'restart-to-apply' && pendingNetworkSummary) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
+        <div className="w-12 h-12 rounded-full bg-teal/20 flex items-center justify-center mb-4">
+          <span className="text-xl text-teal">✓</span>
+        </div>
+        <h2 className="text-2xl font-serif text-white mb-2">Network saved</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
+          Your network config is on disk. Restart the app to start running on it.
+        </p>
+
+        <div className="bg-navy rounded-xl p-4 w-full max-w-sm border border-navy-light mb-6">
+          <div className="mb-2">
+            <p className="text-[11px] text-gray-500 mb-0.5">Network</p>
+            <p className="text-sm text-white font-mono">{pendingNetworkSummary.networkId}</p>
+          </div>
+          <div>
+            <p className="text-[11px] text-gray-500 mb-0.5">Your validator</p>
+            <p className="text-sm text-white font-mono">{truncateId(pendingNetworkSummary.accountId, 16)}</p>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-gray-500 mb-4 max-w-sm">
+          Until you restart, the wallet runs against the previous local node. Validators won&apos;t peer up.
+        </p>
+
+        <button
+          onClick={async () => {
+            if (!window.aeNetwork) return;
+            setRelaunching(true);
+            try {
+              await window.aeNetwork.relaunch();
+            } catch {
+              setRelaunching(false);
+            }
+          }}
+          disabled={relaunching}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+        >
+          {relaunching ? 'Relaunching...' : 'Apply now (restart app)'}
+        </button>
+
+        <button
+          onClick={() => navigate('/')}
+          className="text-xs text-gray-500 hover:text-gray-300"
+        >
+          Continue without restarting
         </button>
       </div>
     );

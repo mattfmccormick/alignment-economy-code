@@ -234,6 +234,11 @@ ipcMain.handle('aeNetwork:saveConfig', async (_event, opts) => {
   return { ok: true, mode: 'bft', configPath: np.config };
 });
 
+ipcMain.handle('aeNetwork:relaunch', () => {
+  app.relaunch();
+  app.exit(0);
+});
+
 app.whenReady().then(async () => {
   try {
     await startAeNode();

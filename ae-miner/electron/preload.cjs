@@ -26,4 +26,5 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('aeNetwork', {
   isElectron: true,
   saveConfig: (opts) => ipcRenderer.invoke('aeNetwork:saveConfig', opts),
+  relaunch: () => ipcRenderer.invoke('aeNetwork:relaunch'),
 });

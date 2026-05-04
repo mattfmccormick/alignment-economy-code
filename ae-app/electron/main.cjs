@@ -234,6 +234,16 @@ ipcMain.handle('aeNetwork:saveConfig', async (_event, opts) => {
   return { ok: true, mode: 'bft', configPath: np.config };
 });
 
+// Renderer asks main to relaunch the Electron app. Used by the
+// "Apply now / restart" button after onboarding writes a new network
+// config — the running ae-node child has stale spawn env until the next
+// startup, so we cleanly tear down + relaunch. Returns nothing because
+// the process is gone immediately after.
+ipcMain.handle('aeNetwork:relaunch', () => {
+  app.relaunch();
+  app.exit(0);
+});
+
 app.whenReady().then(async () => {
   try {
     await startAeNode();
