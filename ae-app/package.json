@@ -1,0 +1,98 @@
+{
+  "name": "ae-app",
+  "productName": "Alignment Economy Wallet",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Participant wallet for the Alignment Economy network.",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:5173 && cross-env ELECTRON_DEV=1 electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux"
+  },
+  "build": {
+    "appId": "org.alignmenteconomy.wallet",
+    "productName": "Alignment Economy Wallet",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../ae-node/dist",
+        "to": "ae-node/dist"
+      },
+      {
+        "from": "../ae-node/package.json",
+        "to": "ae-node/package.json"
+      },
+      {
+        "from": "../ae-node/node_modules",
+        "to": "ae-node/node_modules",
+        "filter": ["**/*", "!**/.cache/**", "!**/.bin/**"]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "dir", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.finance"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Finance"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.2.0",
+    "@noble/post-quantum": "^0.6.0",
+    "@scure/bip39": "^2.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "react-router-dom": "^7.14.0",
+    "recharts": "^3.8.1",
+    "tailwindcss": "^4.2.2",
+    "tweetnacl": "^1.0.3",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.0",
+    "vite": "^8.0.4",
+    "vite-plugin-pwa": "^1.2.0",
+    "wait-on": "^9.0.5"
+  }
+}

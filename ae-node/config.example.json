@@ -1,0 +1,17 @@
+{
+  "nodeId": "your-node-id-here",
+  "authorityNodeId": "authority-node-001",
+  "apiPort": 3000,
+  "p2pPort": 9000,
+  "apiHost": "0.0.0.0",
+  "p2pHost": "0.0.0.0",
+  "dbPath": "./data/ae-node.db",
+  "seedNodes": [
+    { "host": "seed1.alignmenteconomy.org", "port": 9000 },
+    { "host": "seed2.alignmenteconomy.org", "port": 9000 }
+  ],
+  "maxPeers": 20,
+  "dayCycleIntervalMs": 86400000,
+  "blockIntervalMs": 10000,
+  "logLevel": "info"
+}

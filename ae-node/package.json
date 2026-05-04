@@ -1,0 +1,36 @@
+{
+  "name": "ae-node",
+  "version": "0.1.0",
+  "description": "Alignment Economy protocol node",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/node/cli.ts",
+    "start": "node dist/node/cli.js",
+    "test": "tsx --test tests/*.test.ts",
+    "seed:test": "tsx src/scripts/seed-test.ts",
+    "genesis:init": "tsx src/scripts/init-genesis.ts",
+    "validator:setup": "tsx src/scripts/setup-validator.ts"
+  },
+  "bin": {
+    "ae-node": "dist/node/cli.js"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@noble/post-quantum": "^0.6.0",
+    "express": "^5.2.1",
+    "tweetnacl": "^1.0.3",
+    "uuid": "^11.1.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

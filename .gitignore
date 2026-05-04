@@ -1,0 +1,72 @@
+# Root-level gitignore. Each subproject has its own .gitignore for project-
+# specific build/test artifacts; this file covers everything that lives at
+# the workspace level.
+
+# Dependencies (usually inside subprojects, but cover here for safety)
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+.next/
+release/
+*.tsbuildinfo
+
+# Test artifacts
+coverage/
+.nyc_output/
+*.log
+test-output*.log
+phase*.log
+
+# Local DBs (SQLite + WAL/SHM sidecars). NEVER commit data.
+**/data/*.db
+**/data/*.db-shm
+**/data/*.db-wal
+
+# Secrets - private keys, keystores, env files. NEVER commit these.
+.env
+.env.*
+!.env.example
+*-key.json
+*-keys.json
+data/node-key.json
+data/test-keys.json
+*.pem
+*.key
+genesis-keystores/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# OneDrive sync metadata
+*.tmp
+.tmp_*
+
+# Big binaries that shouldn't be in source
+*.msi
+*.dmg
+*.exe
+*.AppImage
+
+# Stale dumps
+AE_FULL_CODEBASE.txt
+
+# PWA service worker dev output
+dev-dist/
+
+# Vite cache
+.vite/
+
+# Local Claude/agent scratch
+.claude/scheduled_tasks.lock

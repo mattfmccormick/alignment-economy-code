@@ -1,0 +1,68 @@
+version: "3.8"
+
+services:
+  # Authority node (produces blocks, runs day cycle)
+  ae-authority:
+    build: ./ae-node
+    container_name: ae-authority
+    environment:
+      AE_NODE_ID: authority-node-001
+      AE_AUTHORITY_NODE_ID: authority-node-001
+      AE_API_PORT: "3000"
+      AE_P2P_PORT: "9000"
+      AE_DB_PATH: /data/ae-node.db
+      AE_LOG_LEVEL: info
+      AE_BLOCK_INTERVAL_MS: "10000"
+      AE_DAY_CYCLE_MS: "86400000"
+    ports:
+      - "3000:3000"   # API
+      - "9000:9000"   # P2P
+    volumes:
+      - authority-data:/data
+    restart: unless-stopped
+
+  # Follower node (syncs blocks, serves API)
+  ae-follower:
+    build: ./ae-node
+    container_name: ae-follower
+    environment:
+      AE_NODE_ID: follower-node-001
+      AE_AUTHORITY_NODE_ID: authority-node-001
+      AE_API_PORT: "3001"
+      AE_P2P_PORT: "9001"
+      AE_DB_PATH: /data/ae-node.db
+      AE_SEED_NODES: ae-authority:9000
+      AE_LOG_LEVEL: info
+    ports:
+      - "3001:3001"   # API
+      - "9001:9001"   # P2P
+    volumes:
+      - follower-data:/data
+    depends_on:
+      ae-authority:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Wallet app
+  ae-app:
+    build: ./ae-app
+    container_name: ae-app
+    ports:
+      - "5173:80"
+    depends_on:
+      - ae-authority
+    restart: unless-stopped
+
+  # Miner dashboard
+  ae-miner:
+    build: ./ae-miner
+    container_name: ae-miner
+    ports:
+      - "5174:80"
+    depends_on:
+      - ae-authority
+    restart: unless-stopped
+
+volumes:
+  authority-data:
+  follower-data:
