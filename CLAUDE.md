@@ -210,18 +210,81 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 - ~~**`tweetnacl` dependency is dead.**~~ Removed from `ae-node/package.json`. No source under `alignment-economy-code/` imports it (full-codebase grep, and crypto fully runs on `@noble/post-quantum` for ML-DSA + `@noble/curves` for Ed25519 VRF + `@noble/hashes` for SHA-256). Phase 1 + Phase 65 still pass post-removal.
 - ~~**Admin endpoint protection / docs.**~~ Already gated by `AE_ADMIN_SECRET` (constant-time compare, fail-closed when unset). Now documented in `README.md` under "Configuration" with usage example. Operators set the env var to a long random value (`openssl rand -hex 32`) to enable `/admin/advance-day`; without it the endpoint returns `403 ADMIN_DISABLED`.
 
-### Next (Before / During 2-Person Testing)
+## Roadmap to Full Build
 
-These are real but not test-blockers. Matt and his wife will hit some of them; document and patch as needed.
+**End state:** Anyone can download an installer and join a real Alignment Economy network with friends. Multi-validator BFT, real txs, real verification, real court. Not a demo, not a "two-person test." A working network.
 
-- **No "request a vouch" UI in `ae-app`.** Backend endpoint exists (`POST /api/v1/miners/vouch-requests`) and the miner side handles incoming requests. The wallet's `Verify.tsx` shows received vouches but has no button to *send* a request. Add a small modal mirroring the miner's send form. (Note: also already shipped per the AE Code session — verify here before re-implementing.)
-- **`dev-bump-ph.mjs` is the dev shortcut to bump test accounts to 100% and seed earned balance.** Used during testing instead of running the full genesis CLI. Run from `ae-node/` with `node scripts/dev-bump-ph.mjs`. Document this so testers don't re-discover.
+**Why this section exists:** Without a goal-driven roadmap we keep picking small fixes (which are easy to identify) and never make decisive progress on the big build (which is where the value is). Pick the top open milestone below and march to it. Don't drift back into small fixes unless a critical bug forces it.
 
-### Before Public Beta (Not Blocking 2-Person Test)
+**Working in this codebase:** When you finish a milestone task, check it off here AND add the matching one-liner to "Done (Fixed / Shipped)." When a milestone fully completes, mark it ✅ and start on the next.
 
-(All previously listed items are now in Done.)
+### Milestone A: LAN multi-validator install (NEXT)
 
-### Future (Phase 2+)
+Goal: Three people in the same room on the same WiFi can each install the wallet, run the genesis ceremony together, and end up with a real shared chain. Multi-validator BFT, real protocol semantics, no public infra needed.
+
+The protocol already supports this (Phases 12-65). What's missing is the install/join UX.
+
+- [ ] **Bundle `ae-node` inside `ae-miner`** (currently only the wallet bundles it; `ae-miner/electron/main.cjs` is just the UI). Mirror the wallet's pattern: spawn ae-node as a child, poll /health, store DB under userData.
+- [ ] **First-launch network mode picker.** When the wallet boots and there's no wallet yet, show a chooser: (1) Solo / Authority node (current default) (2) Start a new network (run genesis, become founder) (3) Join an existing network (paste genesis hash + bootstrap address + your validator keystore).
+- [ ] **"Start a new network" flow.** Run the existing `genesis:init` CLI from inside the app, write the spec to disk, show the user a "share this `genesis.json` with the people you want to invite" screen with a copy/export action.
+- [ ] **"Join existing network" flow.** Form for genesis hash + bootstrap node URL + path to keystore (or generate one inline via `validator:setup`). Wire bundled ae-node to validator mode (not authority mode) when this path is taken.
+- [ ] **End-to-end LAN test on dev machine.** Spin up 3 simulated runners on `localhost:3001/3002/3003`, run them through the chooser flow, verify they peer, validators register, blocks commit, txs flow, court works.
+- [ ] **Build installers.** Run `electron:build:win`, `:mac`, `:linux` for both wallet and miner. Verify installers actually launch on a clean machine.
+- [ ] **Write `docs/start-a-network.md`.** One page: "How to start an AE network with friends." Steps to run genesis ceremony, share the spec, invite joiners.
+
+### Milestone B: Internet-reachable testnet
+
+Goal: Friends on different home WiFi networks can join the same chain over the public internet.
+
+- [ ] **Stand up a public bootstrap node.** Cheapest VPS (~$5/mo). Permanent address, runs `ae-node` in validator mode, holds the canonical genesis spec.
+- [ ] **Bake bootstrap address into the installer.** "Join the AE testnet" button on first launch — hits the known bootstrap node, downloads genesis spec, runs validator setup automatically.
+- [ ] **NAT traversal.** Two laptops on home WiFi can't peer directly without help. Options: tunnel service (tailscale, ngrok) embedded; or WebRTC for peer connections; or a hosted relay node. Pick one, ship it.
+- [ ] **Auto-update mechanism.** `electron-updater` wired to GitHub Releases so testers don't need to re-download every commit.
+- [ ] **End-to-end public test.** Two machines on different networks join the testnet, transact, verify each other.
+
+### Milestone C: Polished public install
+
+Goal: Anyone can download and use it without reading docs.
+
+- [ ] **"Invite link" / QR code.** Existing network member generates a shareable link/QR encoding genesis hash + bootstrap address. Joiner scans, the app does the rest.
+- [ ] **Onboarding tuned for non-technical users.** Today's flow assumes you know what a recovery phrase is. Add education, not just a 12-word screen.
+- [ ] **Better error states.** "Could not reach bootstrap node" with retry. "You're offline." "Your wallet is on a different network than this transaction expected."
+- [ ] **Wider tester rollout.** Friends, family, early supporters.
+
+### Milestone D: Whitepaper completeness
+
+Real protocol features the whitepaper requires that aren't built yet. These don't block A/B/C above (those work with what's already built), but the AE isn't fully the AE without these.
+
+- [ ] **In-person co-sign (+2.5% credit).** Two parties dual-sign a tx, both get a percent-human bump. Whitepaper §6.3 / Vegas Guy plan Phase 1.6 + 3.5.
+- [ ] **Inheritance: multi-sig + dead-man-switch.** Lost-key accounts pollute the rebase target forever otherwise. Whitepaper §10. Vegas Guy plan Phase 7.9.
+- [ ] **Smart contract DSL execution engine.** `tagging/smart-contracts.ts` is a schema today, no VM. Whitepaper §5. Vegas Guy plan Phase 6.4.
+- [ ] **Block explorer (separate viewer).** Public read-only chain inspection. Vegas Guy plan Phase 9.1.
+- [ ] **TypeScript SDK + dev portal.** So third parties can integrate. Vegas Guy plan Phases 9.5, 9.6.
+- [ ] **Treasury / ecosystem fund.** Today the 0.5% fee goes 100% to miners. Nothing funds the explorer, audits, or the nonprofit running this. Whitepaper is silent on this.
+
+### Milestone E: Mainnet readiness
+
+The credibility layer. None of this is fast.
+
+- [ ] External cryptographic audit (Ed25519, ML-DSA, VRF, canonical encoding)
+- [ ] External protocol audit (rebase math, fee distribution, court flow correctness)
+- [ ] Sybil + vouching-ring threat modeling and hardening
+- [ ] Privacy review (no PII on-chain confirmed, evidence storage standards)
+- [ ] Regulatory posture (money transmitter, securities, KYC/AML interface)
+- [ ] Bug bounty program (HackerOne or Immunefi)
+- [ ] Mainnet genesis ceremony + initial validator set
+- [ ] Disaster recovery playbooks
+
+---
+
+### Open small items (NOT in the milestones)
+
+These are real but small. They go here so they don't get lost, but they should NOT pull us off the milestone above. Pick them up only if convenient, or batch them at the end of a milestone.
+
+- **`dev-bump-ph.mjs`.** Dev shortcut to bump test accounts to 100% and seed earned balance. Documented in CLAUDE.md but worth a short README mention so testers find it.
+- **`ae-platform` (now `alignment-economy-website`) is half-built.** `/demo`, `/memes`, `/api` routes are stubs. No "Download wallet" or "Join beta" CTA. Lives in the sibling `alignment-economy-website` repo — touch when shipping installers, not before.
+
+### Future (Phase 2+ scaling — not on the immediate roadmap)
 
 - **Rebase precision loss.** Integer division in the rebase loop truncates fractional dust each cycle. Over many rebases, small accounts slowly lose value. Add a remainder-distribution pass or a dust accumulator.
 - **Fee math loses precision at scale.** Mixed bigint/Number arithmetic caps precision at ~2^53. Use pure bigint arithmetic throughout.
@@ -237,6 +300,8 @@ These are real but not test-blockers. Matt and his wife will hit some of them; d
 
 ## Development Approach
 
+- **Work from the roadmap.** The "Roadmap to Full Build" section is the path. Pick the top open milestone and march. Don't drift into small fixes unless something is genuinely broken and blocking. If you find yourself proposing a small one-off change, ask whether it's on the milestone path or whether it's a distraction.
+- **Don't frame work as "two-person testing."** The goal is a downloadable network multiple people can join, not a one-off test with Matt's wife. The wife test has happened in earlier sessions; it's not the destination.
 - Build each platform side as its own app (ae-app, ae-miner) with shared backend (ae-node)
 - Make it look real and polished, this will be shown to potential funders and collaborators
 - Mobile-responsive from the start
