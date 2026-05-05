@@ -25,6 +25,7 @@ import type {
   Space,
   Transaction,
   TransactionPayload,
+  Vouch,
   VouchesForAccount,
 } from './types.js';
 
@@ -222,6 +223,30 @@ export class AlignmentEconomyClient {
    */
   async getVouches(accountId: string): Promise<VouchesForAccount> {
     return this.request('GET', `/miners/vouches/${encodeURIComponent(accountId)}`);
+  }
+
+  /**
+   * Vouch for another account. The voucher commits `stakeAmount` of their
+   * earned balance: it locks until released, and burns if the vouchee is
+   * later proven non-human in court. `stakeAmount` is in base units
+   * (PRECISION = 10^8 — the same encoding the bigint balances use).
+   *
+   * NOTE: ae-node's `/miners/vouches` endpoint currently does not enforce
+   * caller authentication. The voucher's id is taken from the request body
+   * verbatim. Do not call this method from contexts where the
+   * `voucherId` field could be tampered with by a third party until
+   * ae-node ships the auth-middleware fix on this route.
+   */
+  async submitVouch(opts: {
+    voucherId: string;
+    vouchedId: string;
+    stakeAmountBaseUnits: bigint;
+  }): Promise<{ vouch: Vouch }> {
+    return this.request('POST', '/miners/vouches', {
+      voucherId: opts.voucherId,
+      vouchedId: opts.vouchedId,
+      stakeAmount: opts.stakeAmountBaseUnits.toString(),
+    });
   }
 
   // ─── Tags (read-only) ───────────────────────────────────────────────

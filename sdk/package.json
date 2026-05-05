@@ -1,6 +1,6 @@
 {
   "name": "@alignmenteconomy/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TypeScript SDK for the Alignment Economy. Typed wrappers around the ae-node HTTP API + crypto primitives for signing transactions and managing wallets.",
   "type": "module",
   "main": "dist/index.js",

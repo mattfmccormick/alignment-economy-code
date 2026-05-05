@@ -174,6 +174,26 @@ describe('SDK v0.1 smoke', () => {
     assert.ok(typeof d.cyclePhase === 'string');
   });
 
+  it('v0.3 submitVouch rejects when voucher has insufficient balance to stake', async () => {
+    const { SDKError } = await import('../src/index.js');
+    const client = new AlignmentEconomyClient({ baseUrl });
+    // Two fresh accounts. Neither has any earned balance, so the voucher
+    // can't actually back the stake — protocol returns 400. We assert the
+    // SDK surfaces this as an SDKError with the right httpStatus.
+    const voucher = generateKeyPair();
+    const vouchee = generateKeyPair();
+    const v = await client.createAccount('individual', voucher.publicKey);
+    const u = await client.createAccount('individual', vouchee.publicKey);
+    await assert.rejects(
+      () => client.submitVouch({
+        voucherId: v.account.id,
+        vouchedId: u.account.id,
+        stakeAmountBaseUnits: 100_00000000n,  // 100 points display
+      }),
+      (err: unknown) => err instanceof SDKError && err.httpStatus >= 400 && err.httpStatus < 500,
+    );
+  });
+
   it('signTransaction produces a valid signature against verifyPayload', () => {
     const sender = generateKeyPair();
     const recipient = generateKeyPair();
