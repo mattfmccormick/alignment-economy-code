@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { createMessage, parseMessage, buildHandshake, verifyHandshake } from './messages.js';
 import type { PeerInfo, Handshake, NetworkMessage } from './types.js';
 import type { NodeIdentity } from './node-identity.js';
+import { logger } from '../node/logger.js';
 
 const HANDSHAKE_REPLAY_WINDOW_SEC = 300; // 5 minutes
 
@@ -146,22 +147,39 @@ export class PeerManager extends EventEmitter {
         if (msg) this.handleMessage(msg, ws, host, port);
       });
 
-      ws.on('close', () => {
+      // Track whether the close that follows is from a peer that completed
+      // the handshake (peer in this.peers) or from a connection that never
+      // got that far. The latter is what we want to surface — it's the only
+      // signal an operator gets when seed connections silently fail. close
+      // codes 4000-4004 carry the validateHandshake reason; lower codes
+      // (1006 abnormal closure) usually mean the dial itself failed.
+      ws.on('close', (code, reasonBuf) => {
+        let knownPeer = false;
         for (const [id, peer] of this.peers) {
           if (peer.info.host === host && peer.info.port === port) {
             peer.info.status = 'disconnected';
             this.emit('peer:disconnected', peer.info);
             this.peers.delete(id);
+            knownPeer = true;
             break;
           }
         }
+        if (!knownPeer) {
+          const reason = reasonBuf?.toString() || '(no reason)';
+          logger.warn('p2p', `outbound connect to ${host}:${port} closed before handshake (code=${code}, reason=${reason})`);
+        }
       });
 
-      ws.on('error', () => {
-        // Connection failed; close handler will run.
+      ws.on('error', (err) => {
+        // The follow-up close handler always fires too. Surface the actual
+        // dial error here (ECONNREFUSED, ENOTFOUND, etc.) so operators
+        // can tell "wrong port" from "handshake rejected."
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn('p2p', `outbound connect error to ${host}:${port}: ${msg}`);
       });
-    } catch {
-      // ignore connection errors
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn('p2p', `outbound connect threw for ${host}:${port}: ${msg}`);
     }
   }
 

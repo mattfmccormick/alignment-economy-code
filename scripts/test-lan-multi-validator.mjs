@@ -91,6 +91,13 @@ function spawnNode({ idx, accountId, keystorePath, specPath, dbPath, apiPort, p2
     AE_BFT_LOCAL_ACCOUNT_ID: accountId,
     AE_NODE_ID: accountId,
     AE_SEED_NODES: seedNodes.join(','),
+    // Hold off on BFT round 0 until every node has had time to spawn, bind
+    // its WebSocket port, and finish the handshake with the others. The
+    // default 3000ms is too tight for a sequential 3-process spawn (each
+    // /health wait costs ~1s, so node-0 has often raced through round 0
+    // before node-2 is even alive). 12s gives generous headroom while
+    // still keeping the script under 90s.
+    AE_BFT_STARTUP_DELAY_MS: '12000',
   };
   const child = spawn(process.execPath, [aeNodeCli], { cwd: aeNodeRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => {
