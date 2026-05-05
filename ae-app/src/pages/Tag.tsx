@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
+import { signPayload } from '../lib/crypto';
 import { displayPoints } from '../lib/formatting';
 
 const DAILY_SUPPORTIVE = '14400000000';   // 144.00 supportive points (raw units)
@@ -137,8 +138,19 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
     if (day === null) return;
     setSaving(true); setError(null);
     const submit = tagRows.filter((r) => r.minutesUsed > 0);
+    // Sign with the wallet's private key. The backend reads accountId
+    // from the signature, not the body, so a third party can't redirect
+    // the signer's daily supportive flow.
+    const w = loadWallet();
+    if (!w) { setSaving(false); setError('No wallet loaded'); return; }
+    const ts = Math.floor(Date.now() / 1000);
+    const payload = { day, tags: submit.map((t) => ({ productId: t.productId, minutesUsed: t.minutesUsed })) };
+    const signature = signPayload(payload, ts, w.privateKey);
     const r = await api.submitSupportiveTags({
-      accountId, day, tags: submit.map((t) => ({ productId: t.productId, minutesUsed: t.minutesUsed })),
+      accountId,
+      timestamp: ts,
+      signature,
+      payload,
     });
     setSaving(false);
     if (r.success) {
@@ -374,8 +386,18 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
     if (day === null) return;
     setSaving(true); setError(null);
     const submit = tagRows.filter((r) => r.minutesOccupied > 0);
+    // Sign with the wallet's private key. Same reason as supportive:
+    // backend reads accountId from the signature.
+    const w = loadWallet();
+    if (!w) { setSaving(false); setError('No wallet loaded'); return; }
+    const ts = Math.floor(Date.now() / 1000);
+    const payload = { day, tags: submit.map((t) => ({ spaceId: t.spaceId, minutesOccupied: t.minutesOccupied })) };
+    const signature = signPayload(payload, ts, w.privateKey);
     const r = await api.submitAmbientTags({
-      accountId, day, tags: submit.map((t) => ({ spaceId: t.spaceId, minutesOccupied: t.minutesOccupied })),
+      accountId,
+      timestamp: ts,
+      signature,
+      payload,
     });
     setSaving(false);
     if (r.success) {

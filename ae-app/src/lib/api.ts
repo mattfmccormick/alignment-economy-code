@@ -249,14 +249,21 @@ export const api = {
   getSupportiveTags: (accountId: string, day: number) =>
     request<{ tags: any[] }>('GET', `/tags/supportive/${accountId}/${day}`),
 
-  submitSupportiveTags: (body: { accountId: string; day: number; tags: Array<{ productId: string; minutesUsed: number }> }) =>
-    request<{ tags: any[] }>('POST', '/tags/supportive', body),
+  // Auth-required: caller signs the tag payload with their private key,
+  // ae-node verifies via authMiddleware, accountId is read from the
+  // signature. Without this gate any third party could redirect the
+  // signer's daily 144 supportive points to a product they own.
+  submitSupportiveTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { day: number; tags: Array<{ productId: string; minutesUsed: number }> } }) =>
+    request<{ tags: any[] }>('POST', '/tags/supportive', envelope),
 
   getAmbientTags: (accountId: string, day: number) =>
     request<{ tags: any[] }>('GET', `/tags/ambient/${accountId}/${day}`),
 
-  submitAmbientTags: (body: { accountId: string; day: number; tags: Array<{ spaceId: string; minutesOccupied: number }> }) =>
-    request<{ tags: any[] }>('POST', '/tags/ambient', body),
+  // Auth-required: same auth shape as submitSupportiveTags. Without this,
+  // a third party could redirect the signer's daily 14.4 ambient points
+  // to a space they own.
+  submitAmbientTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { day: number; tags: Array<{ spaceId: string; minutesOccupied: number }> } }) =>
+    request<{ tags: any[] }>('POST', '/tags/ambient', envelope),
 
   getTodayDay: () =>
     request<{ day: number; cyclePhase: string }>('GET', '/tags/today'),

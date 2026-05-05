@@ -13,15 +13,19 @@
 //   GET  /products/mine/:owner  list products created by an account
 //   POST /spaces                register a space
 //   GET  /spaces                list all active spaces
-//   POST /supportive            replace today's supportive tag set for an account
+//   POST /supportive            replace today's supportive tag set for an account (auth-required)
 //   GET  /supportive/:owner/:day  list supportive tags for an account+day
-//   POST /ambient               replace today's ambient tag set for an account
+//   POST /ambient               replace today's ambient tag set for an account (auth-required)
 //   GET  /ambient/:owner/:day   list ambient tags for an account+day
 //
-// No signature requirement (matches contacts/recurring): the 2-person test runs
-// in a closed network and tag forgery has no economic gain (the spend
-// multiplier still gates value movement at finalization). Tighten before
-// public beta.
+// /supportive and /ambient are signature-gated: the caller signs the tag
+// payload with their own private key, ae-node verifies via authMiddleware,
+// and the route reads accountId from req.accountId. Without this gate, any
+// third party can redirect a victim's daily 144 supportive + 14.4 ambient
+// point flows toward a product or space that benefits the attacker. (The
+// header used to claim "tag forgery has no economic gain"; that was wrong.
+// Tagging redirects the victim's flow at the victim's percentHuman, so a
+// fully-verified victim is the most valuable target.)
 
 import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
@@ -39,6 +43,7 @@ import {
   getAmbientTags,
   type AmbientTagInput,
 } from '../../tagging/ambient.js';
+import { authMiddleware } from '../middleware/auth.js';
 import type { SpaceType } from '../../tagging/types.js';
 
 const VALID_SPACE_TYPES: SpaceType[] = [
@@ -151,10 +156,21 @@ export function tagRoutes(db: DatabaseSync): Router {
 
   // ----- Supportive tags -----
 
-  router.post('/supportive', (req, res) => {
-    const { accountId, day, tags } = req.body || {};
-    if (!accountId || day === undefined || !Array.isArray(tags)) {
-      return res.status(400).json({ error: 'accountId, day, and tags[] are required' });
+  // POST /tags/supportive — auth-required. The signed account is taken to
+  // be the tag owner; a top-level `accountId` in the body is back-compat
+  // only and rejected with 403 if it disagrees with the signed caller.
+  router.post('/supportive', authMiddleware(db), (req, res) => {
+    const accountId = req.accountId!;
+    const { day, tags } = req.body.payload || req.body;
+    const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
+    if (claimedAccountId && claimedAccountId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'accountId does not match the authenticated account' },
+      });
+    }
+    if (day === undefined || !Array.isArray(tags)) {
+      return res.status(400).json({ error: 'day and tags[] are required' });
     }
     const owner = getAccount(db, accountId);
     if (!owner) return res.status(404).json({ error: 'account not found' });
@@ -200,10 +216,19 @@ export function tagRoutes(db: DatabaseSync): Router {
 
   // ----- Ambient tags -----
 
-  router.post('/ambient', (req, res) => {
-    const { accountId, day, tags } = req.body || {};
-    if (!accountId || day === undefined || !Array.isArray(tags)) {
-      return res.status(400).json({ error: 'accountId, day, and tags[] are required' });
+  // POST /tags/ambient — auth-required. Mirrors /supportive's auth shape.
+  router.post('/ambient', authMiddleware(db), (req, res) => {
+    const accountId = req.accountId!;
+    const { day, tags } = req.body.payload || req.body;
+    const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
+    if (claimedAccountId && claimedAccountId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'accountId does not match the authenticated account' },
+      });
+    }
+    if (day === undefined || !Array.isArray(tags)) {
+      return res.status(400).json({ error: 'day and tags[] are required' });
     }
     const owner = getAccount(db, accountId);
     if (!owner) return res.status(404).json({ error: 'account not found' });
