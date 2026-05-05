@@ -172,6 +172,7 @@ function SendRequestCard({ fromId, onSent }: { fromId: string; onSent: () => voi
     setSubmitting(true);
     try {
       const w = loadMinerWallet();
+      if (!w) { setErr('Wallet not loaded. Sign in again.'); setSubmitting(false); return; }
       const ts = Math.floor(Date.now() / 1000);
       const payload = { toId: toId.trim(), message: message.trim() };
       const signature = signPayload(payload, ts, w.privateKey);
@@ -300,6 +301,7 @@ function IncomingRow({
       // voucherId from the signature, not the body, so a third party
       // can't drain another miner's earned balance.
       const w = loadMinerWallet();
+      if (!w) { setRowErr('Wallet not loaded. Sign in again.'); return; }
       const ts = Math.floor(Date.now() / 1000);
       const payload = { vouchedId: request.fromId, stakeAmount: Number(stakeRaw) };
       const signature = signPayload(payload, ts, w.privateKey);
@@ -340,6 +342,7 @@ function IncomingRow({
     setBusy('decline');
     try {
       const w = loadMinerWallet();
+      if (!w) { setRowErr('Wallet not loaded. Sign in again.'); return; }
       const ts = Math.floor(Date.now() / 1000);
       const payload = { status: 'declined' as const };
       const signature = signPayload(payload, ts, w.privateKey);

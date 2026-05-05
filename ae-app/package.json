@@ -12,16 +12,18 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:5173 && cross-env ELECTRON_DEV=1 electron .\"",
-    "electron:build": "npm run build && electron-builder",
-    "electron:build:win": "npm run build && electron-builder --win",
-    "electron:build:mac": "npm run build && electron-builder --mac",
-    "electron:build:linux": "npm run build && electron-builder --linux"
+    "icons:build": "node scripts/build-icons.mjs",
+    "electron:build": "npm run icons:build && npm run build && electron-builder",
+    "electron:build:win": "npm run icons:build && npm run build && electron-builder --win",
+    "electron:build:mac": "npm run icons:build && npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run icons:build && npm run build && electron-builder --linux"
   },
   "build": {
     "appId": "org.alignmenteconomy.wallet",
     "productName": "Alignment Economy Wallet",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
@@ -74,7 +76,13 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Alignment Economy Wallet"
     },
     "publish": {
       "provider": "github",
@@ -106,8 +114,10 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "png-to-ico": "^2.1.8",
     "react-router-dom": "^7.14.0",
     "recharts": "^3.8.1",
+    "sharp": "^0.33.5",
     "tailwindcss": "^4.2.2",
     "tweetnacl": "^1.0.3",
     "typescript": "~6.0.2",

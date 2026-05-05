@@ -1,4 +1,11 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+// HashRouter (not BrowserRouter) is critical here. In a packaged Electron
+// build the app loads from file:///.../app.asar/dist/index.html. BrowserRouter
+// reads window.location.pathname, which would be the absolute file path, not
+// any of our configured routes — so React Router falls through to the *
+// catch-all and the page renders blank. HashRouter uses #/path fragments,
+// which are protocol-agnostic and work the same in dev (vite at localhost)
+// and production (Electron file://).
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { hasWallet } from './lib/keys';
 import { AppShell } from './components/layout/AppShell';
 import { Onboarding } from './pages/Onboarding';
@@ -21,7 +28,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/onboarding" element={<Onboarding />} />
         <Route
@@ -45,6 +52,6 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
