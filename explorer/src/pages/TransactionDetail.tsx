@@ -2,26 +2,9 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { client } from '../sdk';
 import type { Transaction } from '@alignmenteconomy/sdk';
+import { SDKError } from '@alignmenteconomy/sdk';
 import { Loading, ErrorBox } from '../components/Loading';
 import { formatTimestamp, pointsDisplay, truncateId } from '../lib/format';
-
-// Tx-by-id lookup: ae-node doesn't expose a direct /transactions/:id
-// endpoint yet, so we paginate the latest blocks' transactions until we
-// find the requested one. Acceptable for small networks; future ae-node
-// PR will add a direct endpoint.
-async function findTransaction(id: string): Promise<Transaction | null> {
-  // First check the most recent 100 blocks worth of txs.
-  const r = await client.getBlocks({ limit: 100 });
-  for (const b of r.blocks ?? []) {
-    // No /accounts/{id}/transactions filter by id, so we have to walk
-    // through. For now, give up if not in latest 100; v0.2 SDK will
-    // expose a tx-by-id endpoint.
-    void b;
-  }
-  // TODO: hit a future /transactions/:id endpoint on ae-node.
-  void id;
-  return null;
-}
 
 export function TransactionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -31,17 +14,18 @@ export function TransactionDetail() {
   useEffect(() => {
     let active = true;
     async function load() {
+      if (!id) return;
       try {
-        const t = await findTransaction(id!);
+        const t = await client.getTransaction(id);
         if (!active) return;
-        if (!t) {
-          setError("Transaction lookup by id isn't wired yet. ae-node needs a GET /transactions/:id endpoint; landing in SDK v0.2.");
-          return;
-        }
         setTx(t);
       } catch (e) {
         if (!active) return;
-        setError(e instanceof Error ? e.message : String(e));
+        if (e instanceof SDKError && e.httpStatus === 404) {
+          setError(`No transaction found with id ${truncateId(id, 8, 8)}. The id may be wrong, or the transaction may live on a different network.`);
+        } else {
+          setError(e instanceof Error ? e.message : String(e));
+        }
       }
     }
     load();

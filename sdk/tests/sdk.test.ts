@@ -129,6 +129,15 @@ describe('SDK v0.1 smoke', () => {
     assert.ok(typeof s.minerCount === 'number');
   });
 
+  it('client.getTransaction throws SDKError NOT_FOUND for unknown id', async () => {
+    const { SDKError } = await import('../src/index.js');
+    const client = new AlignmentEconomyClient({ baseUrl });
+    await assert.rejects(
+      () => client.getTransaction('not-a-real-tx-id'),
+      (err: unknown) => err instanceof SDKError && err.httpStatus === 404,
+    );
+  });
+
   it('signTransaction produces a valid signature against verifyPayload', () => {
     const sender = generateKeyPair();
     const recipient = generateKeyPair();

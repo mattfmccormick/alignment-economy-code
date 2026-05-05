@@ -113,6 +113,16 @@ export class AlignmentEconomyClient {
     return this.request('POST', '/transactions', opts);
   }
 
+  /**
+   * Look up a single transaction by id. Returns the full Transaction
+   * (incl. receiverSignature on in-person txs and blockNumber once
+   * committed). Throws SDKError with code='NOT_FOUND' (httpStatus=404)
+   * for unknown ids.
+   */
+  async getTransaction(id: string): Promise<Transaction> {
+    return this.request('GET', `/transactions/${encodeURIComponent(id)}`);
+  }
+
   // ─── Network ────────────────────────────────────────────────────────
 
   async getNetworkStatus(): Promise<NetworkStatus> {
