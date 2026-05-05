@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react';
 import { api, type VouchData, type VouchRequests, type Account } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
+import { signPayload } from '../lib/crypto';
 import { displayPoints, truncateId, timeAgo } from '../lib/formatting';
 
 const PRECISION = 100_000_000n;
@@ -291,7 +292,19 @@ function IncomingRow({
     }
     setBusy('accept');
     try {
-      const v = await api.submitVouch(myAccountId, request.fromId, Number(stakeRaw));
+      // Sign the vouch with the miner's private key. The route now reads
+      // voucherId from the signature, not the body, so a third party
+      // can't drain another miner's earned balance.
+      const w = loadMinerWallet();
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { vouchedId: request.fromId, stakeAmount: Number(stakeRaw) };
+      const signature = signPayload(payload, ts, w.privateKey);
+      const v = await api.submitVouch({
+        accountId: myAccountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
       if (!v.success) {
         setRowErr(v.error?.message ?? 'Failed to lock stake.');
         return;

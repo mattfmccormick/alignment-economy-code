@@ -217,9 +217,13 @@ export const api = {
   getEvidenceScore: (accountId: string) =>
     request<ApiResponse<EvidenceScore>>('GET', `/miners/evidence/score/${accountId}`),
 
-  // Vouches
-  submitVouch: (voucherId: string, vouchedId: string, stakeAmount: number) =>
-    request<ApiResponse<unknown>>('POST', '/miners/vouches', { voucherId, vouchedId, stakeAmount }),
+  // Vouches.
+  // Authenticated: the voucher (caller) signs `{ vouchedId, stakeAmount }`
+  // with their own private key. The route reads voucherId from the
+  // signature, not the body, so a third party can't stake someone
+  // else's balance.
+  submitVouch: (envelope: { accountId: string; timestamp: number; signature: string; payload: { vouchedId: string; stakeAmount: number } }) =>
+    request<ApiResponse<unknown>>('POST', '/miners/vouches', envelope),
 
   getVouches: (accountId: string) =>
     request<ApiResponse<VouchData>>('GET', `/miners/vouches/${accountId}`),

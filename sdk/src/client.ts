@@ -231,21 +231,28 @@ export class AlignmentEconomyClient {
    * later proven non-human in court. `stakeAmount` is in base units
    * (PRECISION = 10^8 — the same encoding the bigint balances use).
    *
-   * NOTE: ae-node's `/miners/vouches` endpoint currently does not enforce
-   * caller authentication. The voucher's id is taken from the request body
-   * verbatim. Do not call this method from contexts where the
-   * `voucherId` field could be tampered with by a third party until
-   * ae-node ships the auth-middleware fix on this route.
+   * The voucher's identity is taken from the signature, not the body,
+   * so a third party cannot stake someone else's balance. Callers pass
+   * the voucher's private key; the SDK signs `{vouchedId, stakeAmount}`
+   * locally and sends the signed envelope.
    */
   async submitVouch(opts: {
     voucherId: string;
+    voucherPrivateKey: string;
     vouchedId: string;
     stakeAmountBaseUnits: bigint;
   }): Promise<{ vouch: Vouch }> {
-    return this.request('POST', '/miners/vouches', {
-      voucherId: opts.voucherId,
+    const timestamp = Math.floor(Date.now() / 1000);
+    const payload = {
       vouchedId: opts.vouchedId,
-      stakeAmount: opts.stakeAmountBaseUnits.toString(),
+      stakeAmount: Number(opts.stakeAmountBaseUnits),
+    };
+    const signature = signPayload(payload, timestamp, opts.voucherPrivateKey);
+    return this.request('POST', '/miners/vouches', {
+      accountId: opts.voucherId,
+      timestamp,
+      signature,
+      payload,
     });
   }
 
