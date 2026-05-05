@@ -1,7 +1,17 @@
 import { useState, useEffect } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
+import { signPayload } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
+
+// Build a signed envelope for one of the auth-protected contact routes.
+// Centralized here so every callsite uses the same shape — the routes
+// reject mismatched body accountId with 403, so we don't pass it.
+function signEnvelope<P>(payload: P, accountId: string, privateKey: string) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = signPayload(payload as object, timestamp, privateKey);
+  return { accountId, timestamp, signature, payload };
+}
 
 interface Contact {
   id: string;
@@ -48,7 +58,12 @@ export function Contacts() {
     setAddLoading(true);
     setAddError(null);
     try {
-      const res = await api.addContact(wallet.accountId, addAccountId.trim(), addNickname.trim() || addAccountId.trim().slice(0, 8));
+      const env = signEnvelope(
+        { contactAccountId: addAccountId.trim(), nickname: addNickname.trim() || addAccountId.trim().slice(0, 8) },
+        wallet.accountId,
+        wallet.privateKey,
+      );
+      const res = await api.addContact(env);
       if (res.success) {
         setShowAdd(false);
         setAddAccountId('');
@@ -64,23 +79,28 @@ export function Contacts() {
   }
 
   async function handleToggleFavorite(contact: Contact) {
+    if (!wallet?.accountId) return;
     try {
-      await api.toggleFavorite(contact.id, !contact.isFavorite);
+      const env = signEnvelope({ isFavorite: !contact.isFavorite }, wallet.accountId, wallet.privateKey);
+      await api.toggleFavorite(contact.id, env);
       setContacts(prev => prev.map(c => c.id === contact.id ? { ...c, isFavorite: !c.isFavorite } : c));
     } catch { /* ignore */ }
   }
 
   async function handleDelete(id: string) {
+    if (!wallet?.accountId) return;
     try {
-      await api.deleteContact(id);
+      const env = signEnvelope({}, wallet.accountId, wallet.privateKey);
+      await api.deleteContact(id, env);
       setContacts(prev => prev.filter(c => c.id !== id));
     } catch { /* ignore */ }
   }
 
   async function handleSaveEdit(id: string) {
-    if (!editNickname.trim()) return;
+    if (!wallet?.accountId || !editNickname.trim()) return;
     try {
-      await api.updateContact(id, editNickname.trim());
+      const env = signEnvelope({ nickname: editNickname.trim() }, wallet.accountId, wallet.privateKey);
+      await api.updateContact(id, env);
       setContacts(prev => prev.map(c => c.id === id ? { ...c, nickname: editNickname.trim() } : c));
       setEditingId(null);
     } catch { /* ignore */ }

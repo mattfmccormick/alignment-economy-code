@@ -283,12 +283,16 @@ function AddProductForm({ accountId, onCreated }: { accountId: string; onCreated
   const submit = async () => {
     if (!name.trim()) return;
     setSubmitting(true); setErr(null);
-    const r = await api.registerProduct({
+    const w = loadWallet();
+    if (!w) { setSubmitting(false); setErr('No wallet loaded'); return; }
+    const ts = Math.floor(Date.now() / 1000);
+    const payload = {
       name: name.trim(),
       category,
-      createdBy: accountId,
       manufacturerId: manufacturerId.trim() || undefined,
-    });
+    };
+    const signature = signPayload(payload, ts, w.privateKey);
+    const r = await api.registerProduct({ accountId, timestamp: ts, signature, payload });
     setSubmitting(false);
     if (r.success) {
       setName(''); setManufacturerId('');
@@ -525,11 +529,16 @@ function AddSpaceForm({ onCreated }: { onCreated: () => void }) {
   const submit = async () => {
     if (!name.trim()) return;
     setSubmitting(true); setErr(null);
-    const r = await api.registerSpace({
+    const w = loadWallet();
+    if (!w) { setSubmitting(false); setErr('No wallet loaded'); return; }
+    const ts = Math.floor(Date.now() / 1000);
+    const payload = {
       name: name.trim(),
       type,
       entityId: entityId.trim() || undefined,
-    });
+    };
+    const signature = signPayload(payload, ts, w.privateKey);
+    const r = await api.registerSpace({ accountId: w.accountId, timestamp: ts, signature, payload });
     setSubmitting(false);
     if (r.success) {
       setName(''); setEntityId('');

@@ -55,13 +55,22 @@ export function tagRoutes(db: DatabaseSync): Router {
 
   // ----- Products -----
 
-  router.post('/products', (req, res) => {
-    const { name, category, createdBy, manufacturerId } = req.body || {};
-    if (!name || !category || !createdBy) {
-      return res.status(400).json({ error: 'name, category, and createdBy are required' });
+  // POST /tags/products — auth-required. The signed account is taken to be
+  // the product creator (`createdBy`). Body createdBy is back-compat;
+  // 403 ACCOUNT_MISMATCH if it disagrees with the signature.
+  router.post('/products', authMiddleware(db), (req, res) => {
+    const createdBy = req.accountId!;
+    const { name, category, manufacturerId } = req.body.payload || req.body;
+    const claimedCreatedBy = (req.body.payload && req.body.payload.createdBy) ?? req.body.createdBy;
+    if (claimedCreatedBy && claimedCreatedBy !== createdBy) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'createdBy does not match the authenticated account' },
+      });
     }
-    const owner = getAccount(db, createdBy);
-    if (!owner) return res.status(404).json({ error: 'createdBy account not found' });
+    if (!name || !category) {
+      return res.status(400).json({ error: 'name and category are required' });
+    }
     if (manufacturerId) {
       const mfg = getAccount(db, manufacturerId);
       if (!mfg) return res.status(404).json({ error: 'manufacturer account not found' });
@@ -109,8 +118,12 @@ export function tagRoutes(db: DatabaseSync): Router {
 
   // ----- Spaces -----
 
-  router.post('/spaces', (req, res) => {
-    const { name, type, parentId, entityId, collectionRate } = req.body || {};
+  // POST /tags/spaces — auth-required. The signed account is the space
+  // creator. Spaces don't currently track `createdBy` in the schema, but
+  // we still gate on signature so future schema additions or analytics
+  // can attribute correctly.
+  router.post('/spaces', authMiddleware(db), (req, res) => {
+    const { name, type, parentId, entityId, collectionRate } = req.body.payload || req.body;
     if (!name || !type) {
       return res.status(400).json({ error: 'name and type are required' });
     }

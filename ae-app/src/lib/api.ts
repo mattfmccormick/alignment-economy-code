@@ -110,17 +110,19 @@ export const api = {
   getContacts: (ownerId: string) =>
     request<{ contacts: any[] }>('GET', `/contacts/${ownerId}`),
 
-  addContact: (ownerId: string, contactAccountId: string, nickname: string) =>
-    request<any>('POST', '/contacts', { ownerId, contactAccountId, nickname }),
+  // Auth-required: signed account is the contact owner.
+  addContact: (envelope: { accountId: string; timestamp: number; signature: string; payload: { contactAccountId: string; nickname: string } }) =>
+    request<any>('POST', '/contacts', envelope),
 
-  updateContact: (id: string, nickname: string) =>
-    request<any>('PUT', `/contacts/${id}`, { nickname }),
+  // Auth + ownership-checked: only the contact's owner can modify.
+  updateContact: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { nickname: string } }) =>
+    request<any>('PUT', `/contacts/${id}`, envelope),
 
-  toggleFavorite: (id: string, isFavorite: boolean) =>
-    request<any>('PUT', `/contacts/${id}/favorite`, { isFavorite }),
+  toggleFavorite: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { isFavorite: boolean } }) =>
+    request<any>('PUT', `/contacts/${id}/favorite`, envelope),
 
-  deleteContact: (id: string) =>
-    request<any>('DELETE', `/contacts/${id}`),
+  deleteContact: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
+    request<any>('DELETE', `/contacts/${id}`, envelope),
 
   searchAccounts: (query: string) =>
     request<{ accounts: any[] }>('GET', `/contacts/search/accounts?q=${encodeURIComponent(query)}`),
@@ -241,14 +243,17 @@ export const api = {
   getMyProducts: (ownerId: string) =>
     request<{ products: any[] }>('GET', `/tags/products/mine/${ownerId}`),
 
-  registerProduct: (body: { name: string; category: string; createdBy: string; manufacturerId?: string }) =>
-    request<{ product: any }>('POST', '/tags/products', body),
+  // Auth-required: the signed account is the product creator.
+  registerProduct: (envelope: { accountId: string; timestamp: number; signature: string; payload: { name: string; category: string; manufacturerId?: string } }) =>
+    request<{ product: any }>('POST', '/tags/products', envelope),
 
   getSpaces: () =>
     request<{ spaces: any[] }>('GET', '/tags/spaces'),
 
-  registerSpace: (body: { name: string; type: string; parentId?: string; entityId?: string; collectionRate?: number }) =>
-    request<{ space: any }>('POST', '/tags/spaces', body),
+  // Auth-required: signed account is the space creator. Spaces don't store
+  // createdBy in the schema today, but the auth gate is still applied.
+  registerSpace: (envelope: { accountId: string; timestamp: number; signature: string; payload: { name: string; type: string; parentId?: string; entityId?: string; collectionRate?: number } }) =>
+    request<{ space: any }>('POST', '/tags/spaces', envelope),
 
   getSupportiveTags: (accountId: string, day: number) =>
     request<{ tags: any[] }>('GET', `/tags/supportive/${accountId}/${day}`),
