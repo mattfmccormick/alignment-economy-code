@@ -8,6 +8,7 @@ import { encodeInviteLink, decodeInviteLink } from '../lib/invite';
 
 type Flow =
   | 'welcome'
+  | 'what-is-ae'
   | 'network-mode'
   | 'start-new-form'
   | 'start-new-generating'
@@ -15,6 +16,7 @@ type Flow =
   | 'join-existing-form'
   | 'restart-to-apply'
   | 'creating'
+  | 'learn-recovery'
   | 'show-key'
   | 'confirm-key'
   | 'how-balance'
@@ -289,7 +291,12 @@ export function Onboarding() {
           publicKey,
           mnemonic,
         });
-        setFlow('show-key');
+        // Route through the recovery-phrase explainer first instead of
+        // dropping the user straight onto 12 words. Most non-technical
+        // users have never seen a BIP-39 phrase before; they need to
+        // know what it is, why it can't be reset, and how to store it
+        // before they're shown the actual words.
+        setFlow('learn-recovery');
       } else {
         setError(res.error?.message || 'Failed to create account');
       }
@@ -412,12 +419,79 @@ export function Onboarding() {
 
         <button
           onClick={() => setFlow('login')}
-          className="w-full max-w-xs py-3.5 bg-navy text-gray-300 rounded-xl font-medium border border-navy-light hover:border-gray-500 transition-colors"
+          className="w-full max-w-xs py-3.5 bg-navy text-gray-300 rounded-xl font-medium border border-navy-light hover:border-gray-500 transition-colors mb-4"
         >
           I Already Have an Account
         </button>
 
+        <button
+          onClick={() => setFlow('what-is-ae')}
+          className="text-xs text-gray-500 hover:text-gray-300 underline-offset-2 hover:underline"
+        >
+          New here? What is this?
+        </button>
+
         {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
+      </div>
+    );
+  }
+
+  // "What is this?" explainer. Optional, opt-in from the welcome screen.
+  // Plain language for someone who has never used a wallet, never heard
+  // of crypto, has no idea what a "point" is in this context. The whole
+  // point is to give a non-technical user enough context that the rest
+  // of the flow makes sense.
+  if (flow === 'what-is-ae') {
+    return (
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">What is the Alignment Economy?</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center leading-relaxed">
+          The 60-second version.
+        </p>
+
+        <div className="w-full max-w-sm space-y-3 mb-8">
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-teal font-medium mb-1">Everyone gets points daily</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Every person on the network gets the same daily allocation. No one buys their way in. No one mines them with electricity. They just arrive, every day, for being a person.
+            </p>
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-teal font-medium mb-1">Most points expire daily</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              You get 1,440 active points each day, one for every minute. Spend them or they disappear at 4 AM. This kills hoarding and keeps points moving.
+            </p>
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-teal font-medium mb-1">Earned points last forever</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              When someone pays you for work, care, or anything else, those points become yours to keep. This is how teaching, caregiving, and community work finally show up in the economy.
+            </p>
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-teal font-medium mb-1">Real humans only</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Each account has a percent-human score. You start at 0%. You gain percentage by getting verified or having other verified humans vouch for you. Until you're verified, you can receive points but not spend them at full value.
+            </p>
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-gold/30">
+            <p className="text-sm text-gold font-medium mb-1">No bank, no company runs this</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              You hold your own keys. Nobody can freeze, take, or block your account. The trade-off: if you lose your recovery phrase, no one can recover it for you. Save it carefully.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setFlow('welcome')}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
+        >
+          Got it, take me back
+        </button>
       </div>
     );
   }
@@ -889,6 +963,71 @@ export function Onboarding() {
         >
           Continue without restarting
         </button>
+      </div>
+    );
+  }
+
+  // Recovery-phrase education. Shown immediately after the account is
+  // created but BEFORE the 12 words are revealed. Most non-technical
+  // users have never seen a BIP-39 phrase before; without this screen,
+  // the show-key step is just 12 random words and a "Copy" button. This
+  // explains what they're about to see and what to do with it. The four
+  // points below come from real failure modes we've watched users hit:
+  // (1) treating the phrase like a normal password they can reset,
+  // (2) screenshotting it into a cloud-synced photo album, (3) not
+  // realizing nobody can help them get it back, (4) thinking the phrase
+  // and the Account ID are the same thing.
+  if (flow === 'learn-recovery') {
+    return (
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
+        <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4">
+          <span className="text-xl text-gold">!</span>
+        </div>
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Before you see your phrase</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center leading-relaxed">
+          On the next screen we'll show you 12 words. This is the most important part of using the wallet. Read this first.
+        </p>
+
+        <div className="w-full max-w-sm space-y-3 mb-6">
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-white font-medium mb-1">It's the only key to your account</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              The 12 words ARE your account. Anyone with these words can spend everything you own. Treat them like cash, not a password.
+            </p>
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-white font-medium mb-1">No one can reset it</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              We don't have your phrase. No support team has it. No company has it. If you lose it, the account is gone forever. Nobody can help.
+            </p>
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-white font-medium mb-1">Write it on paper</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Pen and paper. Two copies in different places. Don't take a screenshot, don't email it to yourself, don't save it in your notes app. If a phone or laptop gets stolen or hacked, the words go with it.
+            </p>
+          </div>
+
+          <div className="bg-navy rounded-xl p-4 border border-navy-light">
+            <p className="text-sm text-white font-medium mb-1">You'll need it on a new device</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              If you ever switch phones or computers, these 12 words plus your Account ID are how you get your wallet back. Without them, you start over.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setFlow('show-key')}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
+        >
+          I'm ready, show me the words
+        </button>
+
+        <p className="text-[11px] text-gray-500 max-w-sm text-center leading-relaxed">
+          Find a pen and paper before you continue.
+        </p>
       </div>
     );
   }
