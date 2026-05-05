@@ -36,10 +36,28 @@ export function createSmartContract(
   endMinute?: number,
   daysOfWeek?: number[],
 ): SmartContract {
-  if (allocationPercent <= 0 || allocationPercent > 100) throw new Error('allocationPercent must be 1-100');
+  // For most types, allocationPercent is a percentage (1..100). For
+  // earned_recurring it's repurposed as a fixed display-unit amount of
+  // earned points (1..unbounded), so the validator branches on type.
+  if (type === 'earned_recurring') {
+    if (allocationPercent <= 0) throw new Error('earned_recurring requires a positive amount');
+  } else {
+    if (allocationPercent <= 0 || allocationPercent > 100) throw new Error('allocationPercent must be 1-100');
+  }
 
   const acct = getAccount(db, accountId);
   if (!acct) throw new Error('Account not found');
+
+  // For account-targeted contracts the recipient must exist + be active
+  // at creation time. (We don't re-check on every execution; if the
+  // recipient is later deactivated, executeContracts catches that and
+  // skips the run with reason='recipient inactive'.)
+  if (type === 'active_standing' || type === 'earned_recurring') {
+    const recipient = getAccount(db, targetId);
+    if (!recipient) throw new Error(`Target account not found: ${targetId}`);
+    if (!recipient.isActive) throw new Error(`Target account is inactive: ${targetId}`);
+    if (targetId === accountId) throw new Error('Cannot target your own account');
+  }
 
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);
@@ -131,6 +149,51 @@ export function executeContracts(
 
       submitAmbientTags(db, accountId, day, [{ spaceId: contract.targetId, minutesOccupied: minutes }]);
       results.push({ contractId: contract.id, type: contract.type, executed: true });
+    } else if (contract.type === 'earned_recurring') {
+      // Fixed display-unit amount stored in allocationPercent (legacy
+      // column reuse to avoid a schema bump). Convert to base units and
+      // attempt the transfer. Skip silently if the sender is short —
+      // recurring transfers don't accumulate IOUs.
+      const acct = getAccount(db, accountId)!;
+      const PRECISION = 100_000_000n;
+      const amount = BigInt(Math.round(contract.allocationPercent)) * PRECISION;
+      if (amount <= 0n) {
+        results.push({ contractId: contract.id, type: contract.type, executed: false, reason: 'zero amount' });
+      } else if (acct.earnedBalance < amount) {
+        results.push({ contractId: contract.id, type: contract.type, executed: false, reason: 'insufficient earned balance' });
+      } else {
+        const recipient = getAccount(db, contract.targetId);
+        if (!recipient || !recipient.isActive) {
+          results.push({ contractId: contract.id, type: contract.type, executed: false, reason: 'recipient inactive' });
+        } else {
+          // percentHuman applies to recurring earned transfers too —
+          // unverified accounts can't move value via standing contracts
+          // either, otherwise sybil setups would route around the spend
+          // multiplier just by configuring an active_standing.
+          const effective = (amount * BigInt(acct.percentHuman)) / 100n;
+          const burned = amount - effective;
+          const fee = calculateFee(effective);
+          const net = effective - fee;
+          const now = Math.floor(Date.now() / 1000);
+
+          runTransaction(db, () => {
+            const newEarned = acct.earnedBalance - amount;
+            updateBalance(db, accountId, 'earned_balance', newEarned);
+            recordLog(db, accountId, 'tx_send', 'earned', amount, acct.earnedBalance, newEarned, contract.id, now);
+
+            const recipBefore = recipient.earnedBalance;
+            const recipAfter = recipBefore + net;
+            updateBalance(db, contract.targetId, 'earned_balance', recipAfter);
+            recordLog(db, contract.targetId, 'tx_receive', 'earned', net, recipBefore, recipAfter, contract.id, now);
+
+            addToFeePool(db, fee);
+            if (burned > 0n) {
+              recordLog(db, accountId, 'burn_unverified', 'earned', burned, acct.earnedBalance, newEarned, contract.id, now);
+            }
+          });
+          results.push({ contractId: contract.id, type: contract.type, executed: true });
+        }
+      }
     } else if (contract.type === 'active_standing') {
       // Send active points to target account
       const acct = getAccount(db, accountId)!;
