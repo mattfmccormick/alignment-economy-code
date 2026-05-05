@@ -6,7 +6,7 @@
 // through IAccountStore only.
 
 import { DatabaseSync } from 'node:sqlite';
-import type { Account, AccountType } from '../types.js';
+import type { Account, AccountInheritance, AccountType } from '../types.js';
 import type { AccountInsert, BalanceField, IAccountStore } from './IAccountStore.js';
 
 const ALLOWED_BALANCE_FIELDS: ReadonlySet<BalanceField> = new Set([
@@ -16,6 +16,22 @@ const ALLOWED_BALANCE_FIELDS: ReadonlySet<BalanceField> = new Set([
   'ambient_balance',
   'locked_balance',
 ]);
+
+function parseInheritance(raw: unknown): AccountInheritance | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.beneficiaries)) {
+      return {
+        beneficiaries: parsed.beneficiaries.filter((b: unknown): b is string => typeof b === 'string'),
+        threshold: typeof parsed.threshold === 'number' ? parsed.threshold : 1,
+        deadManSwitchDays: typeof parsed.deadManSwitchDays === 'number' ? parsed.deadManSwitchDays : 365,
+        configuredAt: typeof parsed.configuredAt === 'number' ? parsed.configuredAt : 0,
+      };
+    }
+  } catch { /* fall through */ }
+  return null;
+}
 
 function rowToAccount(row: Record<string, unknown>): Account {
   return {
@@ -32,6 +48,8 @@ function rowToAccount(row: Record<string, unknown>): Account {
     isActive: (row.is_active as number) === 1,
     protectionWindowEnd: row.protection_window_end as number | null,
     createdAt: row.created_at as number,
+    lastActivityAt: (row.last_activity_at as number | null) ?? null,
+    inheritance: parseInheritance(row.inheritance),
   };
 }
 
@@ -78,10 +96,19 @@ export class SqliteAccountStore implements IAccountStore {
       .prepare(
         `INSERT INTO accounts (id, public_key, type, earned_balance, active_balance,
          supportive_balance, ambient_balance, locked_balance, percent_human,
-         joined_day, is_active, protection_window_end, created_at)
-         VALUES (?, ?, ?, '0', '0', '0', '0', '0', ?, ?, 1, NULL, ?)`,
+         joined_day, is_active, protection_window_end, created_at, last_activity_at, inheritance)
+         VALUES (?, ?, ?, '0', '0', '0', '0', '0', ?, ?, 1, NULL, ?, NULL, NULL)`,
       )
       .run(input.id, input.publicKey, input.type, input.percentHuman, input.joinedDay, input.createdAt);
+  }
+
+  setLastActivity(accountId: string, timestamp: number): void {
+    this.db.prepare('UPDATE accounts SET last_activity_at = ? WHERE id = ?').run(timestamp, accountId);
+  }
+
+  setInheritance(accountId: string, config: AccountInheritance | null): void {
+    const json = config ? JSON.stringify(config) : null;
+    this.db.prepare('UPDATE accounts SET inheritance = ? WHERE id = ?').run(json, accountId);
   }
 
   updateBalance(accountId: string, field: BalanceField, newValue: bigint): void {

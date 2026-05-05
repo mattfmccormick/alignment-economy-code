@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { verifyPayload } from './crypto.js';
 import { TRANSACTION_FEE_RATE, FEE_DENOMINATOR } from './constants.js';
-import { getAccount, updateBalance } from './account.js';
+import { getAccount, updateBalance, accountStore } from './account.js';
 import { addToFeePool } from './fee-pool.js';
 import { runTransaction } from '../db/connection.js';
 import { SqliteTransactionStore } from './stores/SqliteTransactionStore.js';
@@ -133,6 +133,13 @@ function applyTransactionInternal(
     updateBalance(db, opts.from, opts.senderField, opts.newSenderBalance);
     updateBalance(db, opts.to, 'earned_balance', opts.newRecipientEarned);
     addToFeePool(db, opts.fee);
+    // Stamp the sender's last-activity clock. The dead-man-switch
+    // inheritance flow reads this; without it, an account that never
+    // sends could have inheritance config but the clock would never
+    // start, leaving the switch permanently disarmed. We bump on the
+    // SENDER specifically — receiving doesn't prove the owner has the
+    // key, sending does.
+    accountStore(db).setLastActivity(opts.from, opts.timestamp);
 
     txStore.insertTransaction({
       id: opts.txId,

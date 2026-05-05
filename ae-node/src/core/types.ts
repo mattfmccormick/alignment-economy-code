@@ -21,6 +21,33 @@ export interface Account {
   isActive: boolean;
   protectionWindowEnd: number | null;
   createdAt: number;                   // unix timestamp
+  /**
+   * Last unix timestamp this account took an outbound action (sent a tx,
+   * registered a validator, etc.). Used by the dead-man-switch inheritance
+   * flow to decide when an account is "abandoned." Updated on every state
+   * change initiated by this account. Null until the first such action.
+   */
+  lastActivityAt: number | null;
+  /**
+   * Inheritance config for this account, if the owner set one. When the
+   * account has been inactive for >= deadManSwitchDays, beneficiaries can
+   * submit a claim that, if signed by `threshold` of them, drains the
+   * account's earned balance into their accounts (split equally).
+   * Null = no inheritance configured (legacy default; the rebase target
+   * still includes this account until it's manually deactivated).
+   */
+  inheritance: AccountInheritance | null;
+}
+
+export interface AccountInheritance {
+  /** Account ids of the beneficiaries authorized to claim. */
+  beneficiaries: string[];
+  /** How many beneficiaries must sign a claim. 1 <= threshold <= beneficiaries.length. */
+  threshold: number;
+  /** Days of inactivity before the dead-man-switch arms. Min 30 to prevent abuse. */
+  deadManSwitchDays: number;
+  /** Unix seconds the config was set. Used for audit + future "config-grace" rules. */
+  configuredAt: number;
 }
 
 export interface AccountCreationResult {

@@ -16,7 +16,7 @@
 //   - PostgresAccountStore (future Phase 2 work)
 //   - InMemoryAccountStore (tests, or speculative state in the consensus engine)
 
-import type { Account, AccountType } from '../types.js';
+import type { Account, AccountInheritance, AccountType } from '../types.js';
 
 export type BalanceField =
   | 'earned_balance'
@@ -64,4 +64,19 @@ export interface IAccountStore {
 
   /** Sum of (earned + locked) balances across all accounts. Used by rebase. */
   totalEarnedPool(): bigint;
+
+  /**
+   * Stamp the owner's last outbound action time. The dead-man-switch
+   * inheritance flow uses this to decide when an account is abandoned —
+   * if `now - lastActivityAt >= deadManSwitchDays`, beneficiaries can
+   * claim. Called from processTransaction (and similar code paths).
+   */
+  setLastActivity(accountId: string, timestamp: number): void;
+
+  /**
+   * Set or clear the inheritance config for an account. Pass null to
+   * remove. Called by the inheritance helpers in core/inheritance.ts;
+   * direct callers should use setInheritance there for validation.
+   */
+  setInheritance(accountId: string, config: AccountInheritance | null): void;
 }

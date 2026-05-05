@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -20,7 +20,15 @@ const TABLES = `
     joined_day INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
     protection_window_end INTEGER,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    -- Phase 69: dead-man-switch inheritance.
+    --   last_activity_at: unix sec of the owner's last outbound action.
+    --     NULL until the first such action. Drives the dead-man-switch.
+    --   inheritance: JSON config or NULL when not configured. Shape:
+    --     {beneficiaries:[id,...], threshold:n, deadManSwitchDays:d,
+    --      configuredAt:ts}
+    last_activity_at INTEGER,
+    inheritance TEXT
   );
 
   CREATE TABLE IF NOT EXISTS transactions (
@@ -570,6 +578,21 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       .all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === 'receiver_signature')) {
       db.exec('ALTER TABLE transactions ADD COLUMN receiver_signature TEXT');
+    }
+  }
+  if (from < 9) {
+    // accounts.last_activity_at + accounts.inheritance columns. Adds
+    // dead-man-switch inheritance support per whitepaper §10. Existing
+    // rows get NULL for both, matching the no-inheritance-configured
+    // default; the dead-man-switch can't fire on a NULL config.
+    const cols = db
+      .prepare("PRAGMA table_info(accounts)")
+      .all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'last_activity_at')) {
+      db.exec('ALTER TABLE accounts ADD COLUMN last_activity_at INTEGER');
+    }
+    if (!cols.some((c) => c.name === 'inheritance')) {
+      db.exec('ALTER TABLE accounts ADD COLUMN inheritance TEXT');
     }
   }
 }
