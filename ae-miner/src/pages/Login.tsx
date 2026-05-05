@@ -5,7 +5,15 @@ import { saveMinerWalletFromMnemonic } from '../lib/keys';
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
 
 type Mode = 'signin' | 'create';
-type Step = 'enter_id' | 'checking' | 'not_miner' | 'registering' | 'show_key' | 'creating' | 'error';
+type Step =
+  | 'enter_id'
+  | 'checking'
+  | 'not_miner'
+  | 'registering'
+  | 'learn_recovery'
+  | 'show_key'
+  | 'creating'
+  | 'error';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -96,7 +104,12 @@ export default function Login() {
       setPublicKey(kp.publicKey);
       setPrivateKey(kp.privateKey);
       setMnemonic(phrase);
-      setStep('show_key');
+      // Route through the recovery-phrase explainer first instead of
+      // dropping the user straight onto 12 words. Same pattern the
+      // wallet uses on first-launch onboarding (Onboarding.tsx
+      // 'learn-recovery'). Most non-technical users have never seen
+      // a BIP-39 phrase before.
+      setStep('learn_recovery');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect to node. Is it running?');
       setStep('enter_id');
@@ -283,6 +296,62 @@ export default function Login() {
               </svg>
               <p className="text-sm text-muted">Generating your account...</p>
             </div>
+          )}
+
+          {/* LEARN RECOVERY (educational gate before the 12 words appear).
+              Mirrors the wallet's onboarding 'learn-recovery' screen so
+              first-time miners get the same four warnings before they
+              see the phrase. */}
+          {step === 'learn_recovery' && (
+            <>
+              <div className="text-center mb-6">
+                <div className="w-12 h-12 rounded-full bg-gold/15 flex items-center justify-center mx-auto mb-3">
+                  <span className="text-xl text-gold font-semibold">!</span>
+                </div>
+                <h2 className="text-lg font-semibold">Before you see your phrase</h2>
+                <p className="text-sm text-muted mt-1">
+                  We&apos;re about to show you 12 words. They&apos;re the most important part of using this miner. Read this first.
+                </p>
+              </div>
+
+              <div className="space-y-2.5 mb-5">
+                <div className="bg-bg border border-border rounded-lg p-3">
+                  <p className="text-sm font-medium text-white mb-0.5">It&apos;s the only key to your account</p>
+                  <p className="text-xs text-muted leading-relaxed">
+                    The 12 words ARE your account. Anyone with these words can move your funds and impersonate your verifications. Treat them like cash, not a password.
+                  </p>
+                </div>
+                <div className="bg-bg border border-border rounded-lg p-3">
+                  <p className="text-sm font-medium text-white mb-0.5">No one can reset it</p>
+                  <p className="text-xs text-muted leading-relaxed">
+                    We don&apos;t have your phrase. No support team, no company, no Anthropic, no Anyone. If you lose it, the account is gone forever and your miner reputation goes with it.
+                  </p>
+                </div>
+                <div className="bg-bg border border-border rounded-lg p-3">
+                  <p className="text-sm font-medium text-white mb-0.5">Write it on paper</p>
+                  <p className="text-xs text-muted leading-relaxed">
+                    Pen and paper. Two copies in different places. Don&apos;t take a screenshot, don&apos;t email it to yourself, don&apos;t save it in your notes app. If a phone or laptop gets stolen, the words go with it.
+                  </p>
+                </div>
+                <div className="bg-bg border border-border rounded-lg p-3">
+                  <p className="text-sm font-medium text-white mb-0.5">You&apos;ll need it on a new device</p>
+                  <p className="text-xs text-muted leading-relaxed">
+                    Switching laptops or reinstalling? These 12 words plus your Account ID are how you get back in. Without them, you start over.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setStep('show_key')}
+                className="w-full py-2.5 bg-teal text-white rounded-lg text-sm font-medium hover:bg-teal-dark transition-colors"
+              >
+                I&apos;m ready, show me the words
+              </button>
+
+              <p className="text-[11px] text-muted/70 mt-3 text-center">
+                Find a pen and paper before you continue.
+              </p>
+            </>
           )}
 
           {/* SHOW KEY (one-time reveal) */}
