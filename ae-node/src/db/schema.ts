@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -32,6 +32,10 @@ const TABLES = `
     net_amount TEXT NOT NULL,
     point_type TEXT NOT NULL CHECK(point_type IN ('active', 'supportive', 'ambient', 'earned')),
     is_in_person INTEGER NOT NULL DEFAULT 0,
+    -- Receiver's countersignature on isInPerson transactions. NULL for
+    -- normal (non-in-person) transactions. NOT NULL would break existing
+    -- rows from before schema v8.
+    receiver_signature TEXT,
     memo TEXT NOT NULL DEFAULT '',
     signature TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
@@ -555,5 +559,17 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       );
       CREATE INDEX IF NOT EXISTS idx_court_arguments_case ON court_arguments(case_id, created_at);
     `);
+  }
+  if (from < 8) {
+    // transactions.receiver_signature column. The whitepaper requires both
+    // parties to dual-sign an in-person tx (sender + receiver). Pre-v8 rows
+    // had only the sender's sig, so we ALTER instead of recreate. New rows
+    // populate this when isInPerson=true; non-in-person rows leave it NULL.
+    const cols = db
+      .prepare("PRAGMA table_info(transactions)")
+      .all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'receiver_signature')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN receiver_signature TEXT');
+    }
   }
 }

@@ -27,6 +27,12 @@ export interface TransactionRow {
   isInPerson: boolean;
   memo: string;
   signature: string;
+  /**
+   * Receiver's countersignature (hex). Required (non-null) on
+   * isInPerson rows since schema v8 — the protocol rejects in-person
+   * txs without one. Null on regular non-in-person rows.
+   */
+  receiverSignature: string | null;
   timestamp: number;
   blockNumber: number | null;
 }

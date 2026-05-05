@@ -140,6 +140,7 @@ export class AENode {
             isInPerson: Boolean(tx.isInPerson),
             memo: String(tx.memo ?? ''),
             signature: String(tx.signature ?? ''),
+            receiverSignature: tx.receiverSignature ?? null,
             timestamp: Number(tx.timestamp ?? 0),
           });
           this.peerManager.emit('transaction:applied', tx);

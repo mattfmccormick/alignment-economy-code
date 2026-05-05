@@ -67,6 +67,14 @@ export interface Transaction {
   isInPerson: boolean;
   memo: string;
   signature: string;
+  /**
+   * Receiver's countersignature. Required (non-null) on isInPerson
+   * transactions per the whitepaper's dual-signature requirement; both
+   * parties must consent to the in-person attestation, otherwise a
+   * malicious sender could spam isInPerson=true txs to inflate either
+   * party's percent-human score. Null on regular transactions.
+   */
+  receiverSignature: string | null;
   timestamp: number;
   blockNumber: number | null;
 }

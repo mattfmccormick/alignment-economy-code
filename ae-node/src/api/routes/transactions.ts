@@ -28,7 +28,7 @@ export function transactionRoutes(
   router.post('/', (req, res, next) => {
     try {
       const { payload, accountId, timestamp, signature } = req.body;
-      const { to, amount, pointType, isInPerson, memo } = payload;
+      const { to, amount, pointType, isInPerson, memo, receiverSignature } = payload;
 
       if (!to || amount == null || !pointType) {
         res.status(400).json({
@@ -53,6 +53,9 @@ export function transactionRoutes(
       // The API auth middleware already verified the user's identity.
       // processTransaction does its own verification using the internal payload format.
       // We pass the original signature; the caller must sign the internal format.
+      // For isInPerson=true the caller must also include receiverSignature
+      // (the recipient's signature over the same canonical payload+timestamp);
+      // processTransaction enforces this and rejects without it.
       const input: TransactionInput = {
         from: accountId,
         to,
@@ -62,6 +65,7 @@ export function transactionRoutes(
         memo: memo ?? '',
         timestamp,
         signature,
+        receiverSignature: typeof receiverSignature === 'string' ? receiverSignature : undefined,
       };
 
       const result = processTransaction(db, input);
@@ -82,6 +86,7 @@ export function transactionRoutes(
             netAmount: result.netAmount.toString(),
             pointType: result.transaction.pointType,
             isInPerson: result.transaction.isInPerson,
+            receiverSignature: result.transaction.receiverSignature,
             memo: result.transaction.memo,
             signature: result.transaction.signature,
             timestamp: result.transaction.timestamp,

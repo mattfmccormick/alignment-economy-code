@@ -52,6 +52,14 @@ export interface TransactionInput {
   memo?: string;
   timestamp: number;
   signature: string;
+  /**
+   * Receiver's countersignature, signed by the recipient over the same
+   * canonical payload + timestamp the sender signed. Required when
+   * isInPerson is true; ignored otherwise. Without this, processTransaction
+   * rejects in-person flagged transactions to prevent score inflation
+   * via unilateral attestations.
+   */
+  receiverSignature?: string;
 }
 
 export interface TransactionResult {
@@ -107,6 +115,7 @@ function applyTransactionInternal(
     isInPerson: boolean;
     memo: string;
     signature: string;
+    receiverSignature: string | null;
     timestamp: number;
     blockNumber: number | null;
     senderBalance: bigint;
@@ -136,6 +145,7 @@ function applyTransactionInternal(
       isInPerson: opts.isInPerson,
       memo: opts.memo,
       signature: opts.signature,
+      receiverSignature: opts.receiverSignature,
       timestamp: opts.timestamp,
     });
 
@@ -181,6 +191,7 @@ export interface ReplayInput {
   isInPerson: boolean;
   memo: string;
   signature: string;
+  receiverSignature: string | null;
   timestamp: number;
 }
 
@@ -221,6 +232,18 @@ export function replayTransaction(
   const validSig = verifyPayload(payload, input.timestamp, input.signature, sender.publicKey);
   if (!validSig) throw new Error(`Replay: invalid signature on tx ${input.id}`);
 
+  // In-person txs must also carry a valid receiver countersignature over the
+  // same canonical bytes. We re-verify on replay so a follower can't be
+  // tricked into accepting a forged in-person tx that the authority somehow
+  // missed.
+  if (input.isInPerson) {
+    if (!input.receiverSignature) {
+      throw new Error(`Replay: in-person tx ${input.id} missing receiver countersignature`);
+    }
+    const validCounter = verifyPayload(payload, input.timestamp, input.receiverSignature, recipient.publicKey);
+    if (!validCounter) throw new Error(`Replay: invalid receiver countersignature on tx ${input.id}`);
+  }
+
   // Balance check. If a follower's state is corrupted we'd rather fail
   // loudly than silently produce a negative balance.
   const senderField = BALANCE_FIELD_MAP[input.pointType];
@@ -250,6 +273,7 @@ export function replayTransaction(
     isInPerson: input.isInPerson,
     memo: input.memo,
     signature: input.signature,
+    receiverSignature: input.receiverSignature,
     timestamp: input.timestamp,
     blockNumber,
     senderBalance,
@@ -303,6 +327,19 @@ export function processTransaction(
   const validSig = verifyPayload(payload, input.timestamp, input.signature, sender.publicKey);
   if (!validSig) throw new Error('Invalid transaction signature');
 
+  // In-person attestation requires the receiver's countersignature over the
+  // same payload bytes. Without it, the sender alone could mark any
+  // transaction as in-person and inflate both parties' decay-offset counter,
+  // which the whitepaper specifically guards against (§6.3 / Vegas Guy gap
+  // 2.6 — counterparty consent is the whole point of the in-person attestation).
+  if (input.isInPerson === true) {
+    if (!input.receiverSignature) {
+      throw new Error('In-person transactions require the receiver countersignature');
+    }
+    const validCounter = verifyPayload(payload, input.timestamp, input.receiverSignature, recipient.publicKey);
+    if (!validCounter) throw new Error('Invalid receiver countersignature on in-person transaction');
+  }
+
   // Check balance
   const senderBalance = getBalanceForType(sender, input.pointType);
   if (senderBalance < input.amount) {
@@ -337,6 +374,7 @@ export function processTransaction(
     isInPerson: input.isInPerson ?? false,
     memo: input.memo ?? '',
     signature: input.signature,
+    receiverSignature: input.isInPerson ? (input.receiverSignature ?? null) : null,
     timestamp: now,
     blockNumber: null,
     senderBalance,
@@ -360,6 +398,7 @@ export function processTransaction(
     isInPerson: input.isInPerson ?? false,
     memo: input.memo ?? '',
     signature: input.signature,
+    receiverSignature: input.isInPerson ? (input.receiverSignature ?? null) : null,
     timestamp: now,
     blockNumber: null,
   };

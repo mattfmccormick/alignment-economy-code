@@ -23,6 +23,7 @@ function rowToTransaction(row: Record<string, unknown>): TransactionRow {
     isInPerson: (row.is_in_person as number) === 1,
     memo: (row.memo as string) ?? '',
     signature: row.signature as string,
+    receiverSignature: (row.receiver_signature as string | null) ?? null,
     timestamp: row.timestamp as number,
     blockNumber: row.block_number === null ? null : (row.block_number as number),
   };
@@ -36,8 +37,8 @@ export class SqliteTransactionStore implements ITransactionStore {
   insertTransaction(tx: Omit<TransactionRow, 'blockNumber'>): void {
     this.db
       .prepare(
-        `INSERT INTO transactions (id, "from", "to", amount, fee, net_amount, point_type, is_in_person, memo, signature, timestamp, block_number)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO transactions (id, "from", "to", amount, fee, net_amount, point_type, is_in_person, receiver_signature, memo, signature, timestamp, block_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
       )
       .run(
         tx.id,
@@ -48,6 +49,7 @@ export class SqliteTransactionStore implements ITransactionStore {
         tx.netAmount,
         tx.pointType,
         tx.isInPerson ? 1 : 0,
+        tx.receiverSignature,
         tx.memo,
         tx.signature,
         tx.timestamp,
