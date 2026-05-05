@@ -280,7 +280,7 @@ The credibility layer. None of this is fast.
 
 These are real but small. They go here so they don't get lost, but they should NOT pull us off the milestone above. Pick them up only if convenient, or batch them at the end of a milestone.
 
-- **`dev-bump-ph.mjs`.** Dev shortcut to bump test accounts to 100% and seed earned balance. Documented in CLAUDE.md but worth a short README mention so testers find it.
+- ~~**`dev-bump-ph.mjs`.** Dev shortcut to bump test accounts to 100% and seed earned balance. Documented in CLAUDE.md but worth a short README mention so testers find it.~~ Done. Added "Dev shortcut: bump every account to 100% verified" + "LAN multi-validator test" sections to the repo-root `README.md`. Testers cloning the repo see them in the Quick start area.
 - **`ae-platform` (now `alignment-economy-website`) is half-built.** `/demo`, `/memes`, `/api` routes are stubs. No "Download wallet" or "Join beta" CTA. Lives in the sibling `alignment-economy-website` repo — touch when shipping installers, not before.
 
 ### Future (Phase 2+ scaling — not on the immediate roadmap)

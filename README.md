@@ -38,6 +38,35 @@ cd ae-miner && npm install && npm run dev     # miner dashboard on :5174
 
 For the 2-person test setup see `CLAUDE.md` (search "2-Person Testing").
 
+### Dev shortcut: bump every account to 100% verified
+
+Local testing constantly hits the percent-human gate (new accounts at 0%
+can mint but spend 0). To skip past it on a dev DB, run the bump script
+from `ae-node/`:
+
+```bash
+node scripts/dev-bump-ph.mjs            # uses ./data/ae-node.db
+node scripts/dev-bump-ph.mjs path.db    # explicit DB path
+```
+
+It opens the DB in WAL mode, sets every active individual's
+`percentHuman` to 100, and seeds each with 5,000 earned points so you
+have something to spend. Safe to run while the node is running.
+
+### LAN multi-validator test
+
+Want to confirm 3-validator BFT works end-to-end on this machine?
+
+```bash
+node scripts/test-lan-multi-validator.mjs
+```
+
+Spawns three ae-node subprocesses with a shared genesis spec, peers
+them up over WebSocket, runs BFT consensus, and asserts they all
+converge on the same chain head with matching block hashes. ~80s.
+Pass criterion: "PASS: 3-validator BFT chain advanced past min height
+with matching hashes." Set `LAN_TEST_VERBOSE=1` to see all node logs.
+
 ## Configuration
 
 ### Environment variables
