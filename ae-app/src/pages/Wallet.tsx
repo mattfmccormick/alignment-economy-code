@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAccount } from '../hooks/useAccount';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
@@ -67,7 +68,7 @@ export function Wallet() {
       <div className="mx-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium text-gray-300">Recent Activity</h3>
-          <a href="/history" className="text-xs text-teal hover:text-teal-dark">See all</a>
+          <Link to="/history" className="text-xs text-teal hover:text-teal-dark">See all</Link>
         </div>
         {transactions.length === 0 ? (
           <p className="text-xs text-gray-500 text-center py-4">No transactions yet</p>
@@ -109,8 +110,8 @@ function VerificationStatus({ percentHuman }: { percentHuman: number }) {
 
   if (unverified) {
     return (
-      <a
-        href="/verify"
+      <Link
+        to="/verify"
         className="block mx-4 bg-red-500/10 rounded-xl p-4 border border-red-500/40 hover:border-red-500/70 transition-colors"
       >
         <div className="flex items-center justify-between">
@@ -122,13 +123,13 @@ function VerificationStatus({ percentHuman }: { percentHuman: number }) {
           </div>
           <span className="text-red-300 text-xl">→</span>
         </div>
-      </a>
+      </Link>
     );
   }
 
   return (
-    <a
-      href="/verify"
+    <Link
+      to="/verify"
       className="block mx-4 bg-gold/10 rounded-xl p-4 border border-gold/40 hover:border-gold/70 transition-colors"
     >
       <div className="flex items-center justify-between">
@@ -140,6 +141,6 @@ function VerificationStatus({ percentHuman }: { percentHuman: number }) {
         </div>
         <span className="text-gold text-xl">→</span>
       </div>
-    </a>
+    </Link>
   );
 }

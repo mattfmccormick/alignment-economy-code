@@ -13,10 +13,11 @@
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:5173 && cross-env ELECTRON_DEV=1 electron .\"",
     "icons:build": "node scripts/build-icons.mjs",
-    "electron:build": "npm run icons:build && npm run build && electron-builder",
-    "electron:build:win": "npm run icons:build && npm run build && electron-builder --win",
-    "electron:build:mac": "npm run icons:build && npm run build && electron-builder --mac",
-    "electron:build:linux": "npm run icons:build && npm run build && electron-builder --linux"
+    "build:verify": "node scripts/verify-electron-build.mjs",
+    "electron:build": "npm run icons:build && npm run build && npm run build:verify && electron-builder",
+    "electron:build:win": "npm run icons:build && npm run build && npm run build:verify && electron-builder --win",
+    "electron:build:mac": "npm run icons:build && npm run build && npm run build:verify && electron-builder --mac",
+    "electron:build:linux": "npm run icons:build && npm run build && npm run build:verify && electron-builder --linux"
   },
   "build": {
     "appId": "org.alignmenteconomy.wallet",

@@ -183,7 +183,8 @@ function createWindow() {
     minHeight: 600,
     title: 'Alignment Economy Miner',
     backgroundColor: '#0f1a2e',
-    autoHideMenuBar: true,
+    // Menu bar visible by default. See ae-app/electron/main.cjs.
+    autoHideMenuBar: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

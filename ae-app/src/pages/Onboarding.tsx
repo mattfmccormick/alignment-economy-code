@@ -419,16 +419,9 @@ export function Onboarding() {
 
         <button
           onClick={() => setFlow('login')}
-          className="w-full max-w-xs py-3.5 bg-navy text-gray-300 rounded-xl font-medium border border-navy-light hover:border-gray-500 transition-colors mb-4"
+          className="w-full max-w-xs py-3.5 bg-navy text-gray-300 rounded-xl font-medium border border-navy-light hover:border-gray-500 transition-colors"
         >
           I Already Have an Account
-        </button>
-
-        <button
-          onClick={() => setFlow('what-is-ae')}
-          className="text-xs text-gray-500 hover:text-gray-300 underline-offset-2 hover:underline"
-        >
-          New here? What is this?
         </button>
 
         {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
@@ -1138,17 +1131,20 @@ export function Onboarding() {
         <h2 className="text-2xl font-serif text-white mb-6">How Your Balance Works</h2>
         <div className="text-gray-400 text-sm leading-relaxed max-w-sm space-y-4 mb-8">
           <p>
-            Your point balance goes down a little each day. This is normal.
-            It is how the system keeps prices stable as the economy grows.
+            Your point balance goes down a little each day as new people
+            join the network. This is normal and not a loss.
           </p>
           <p>
-            What matters is your <span className="text-gold font-medium">share</span> of the economy.
-            If you hold 0.042% today, you will hold 0.042% tomorrow.
-            The number changes. Your purchasing power does not.
+            What matters is your <span className="text-gold font-medium">share</span> of the whole economy.
+            If you hold 0.042% today, you will hold 0.042% tomorrow,
+            even if the absolute number goes down.
           </p>
           <p>
-            Think of it like a stock split: more people join, everyone's
-            number adjusts, but your slice of the pie stays the same.
+            Picture a pie. As more people join, the pie grows. Your slice
+            of the pie keeps the same proportion, even as the total gets
+            bigger. The point count next to your name is just the size of
+            your slice in raw numbers, which the system adjusts so the
+            proportion stays right.
           </p>
         </div>
         <button
@@ -1173,10 +1169,10 @@ export function Onboarding() {
           100% verified = full spending power.
         </p>
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/verify')}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
         >
-          Enter Wallet
+          Add Proof of Human
         </button>
         <button onClick={() => navigate('/')} className="text-sm text-gray-500 hover:text-gray-300">
           Skip for now

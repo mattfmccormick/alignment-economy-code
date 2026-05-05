@@ -186,7 +186,10 @@ function createWindow() {
     minHeight: 600,
     title: 'Alignment Economy Wallet',
     backgroundColor: '#0f1a2e',
-    autoHideMenuBar: true,
+    // Menu bar visible by default (File / Edit / View / Window / Help).
+    // The default Electron menu has Reload, DevTools, Zoom, Copy/Paste, etc.
+    // Useful for testers and we'll customize with our own File entries later.
+    autoHideMenuBar: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
