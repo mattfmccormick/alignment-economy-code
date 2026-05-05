@@ -4,6 +4,14 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // Critical for the packaged Electron build. Without this, vite emits an
+  // index.html that references assets at /assets/index-abc.js (absolute
+  // path). Electron loads via file://, so the browser resolves that to
+  // file:///assets/index-abc.js — the root of the user's filesystem, not
+  // the bundle — and the page renders blank because no JS loads.
+  // base: './' makes paths relative: ./assets/index-abc.js, which works
+  // under file:// and http:// alike. Same fix is in ae-miner/vite.config.ts.
+  base: './',
   plugins: [
     react(),
     tailwindcss(),

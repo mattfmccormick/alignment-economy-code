@@ -4,6 +4,10 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // See ae-app/vite.config.ts for the full explanation. tl;dr: required for
+  // the packaged Electron build. Without it, the index.html references
+  // /assets/... which fails under file:// and the page renders blank.
+  base: './',
   plugins: [
     react(),
     tailwindcss(),

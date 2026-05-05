@@ -202,6 +202,23 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
+  // Allow F12 / Ctrl+Shift+I to open DevTools in the packaged build too.
+  // While the wallet is in alpha and we're catching first-install bugs by
+  // looking at console output, having a way to surface errors is critical.
+  // Production-final builds may want to gate this behind a setting.
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    const isToggleDevtools =
+      input.key === 'F12' ||
+      (input.control && input.shift && input.key.toLowerCase() === 'i');
+    if (isToggleDevtools) {
+      if (mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.closeDevTools();
+      } else {
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
+      }
+    }
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http')) {
       shell.openExternal(url);
