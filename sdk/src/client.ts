@@ -18,9 +18,14 @@ import type {
   Account,
   ApiResponse,
   Block,
+  CourtCase,
+  MinerStatus,
   NetworkStatus,
+  Product,
+  Space,
   Transaction,
   TransactionPayload,
+  VouchesForAccount,
 } from './types.js';
 
 export interface ClientOptions {
@@ -156,6 +161,84 @@ export class AlignmentEconomyClient {
     specHash: string;
   }> {
     return this.request('POST', '/founder/generate-genesis', opts);
+  }
+
+  // ─── Court (read-only) ──────────────────────────────────────────────
+
+  /** All currently-active cases (arbitration + voting). */
+  async getCases(): Promise<{ cases: CourtCase[] }> {
+    return this.request('GET', '/court/cases');
+  }
+
+  /** Single case detail including jury panel + cumulative argument log. */
+  async getCase(id: string): Promise<{
+    case: CourtCase;
+    jury: Array<{ accountId: string; vote: string | null }>;
+    arguments: Array<{ id: string; caseId: string; authorId: string; role: string; content: string; createdAt: number }>;
+  }> {
+    return this.request('GET', `/court/cases/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Cases this miner has been selected to judge. Each assignment carries
+   * the case basics + this juror's stake and (if cast) their own vote.
+   */
+  async getJuryDuty(accountId: string): Promise<{
+    assignments: Array<{
+      caseId: string;
+      caseType: string;
+      caseLevel: string;
+      caseStatus: string;
+      challengerId: string;
+      defendantId: string;
+      votingDeadline: number;
+      verdict: string | null;
+      stakeAmount: string;
+      myVote: string | null;
+      votedAt: number | null;
+    }>;
+  }> {
+    return this.request('GET', `/court/jury-duty/${encodeURIComponent(accountId)}`);
+  }
+
+  /** Cases this account is a party in (challenger or defendant). */
+  async getMyCases(accountId: string): Promise<{ cases: CourtCase[] }> {
+    return this.request('GET', `/court/my-cases/${encodeURIComponent(accountId)}`);
+  }
+
+  // ─── Miners / Vouches (read-only) ───────────────────────────────────
+
+  /**
+   * Whether an account is registered as a miner. Returns `{isMiner: false}`
+   * for non-miner accounts, `{isMiner: true, miner: {...}}` otherwise.
+   */
+  async getMinerStatus(accountId: string): Promise<MinerStatus> {
+    return this.request('GET', `/miners/status/${encodeURIComponent(accountId)}`);
+  }
+
+  /**
+   * Active vouches received and given by this account. Each carries the
+   * staked amount (bigint as base-10 string).
+   */
+  async getVouches(accountId: string): Promise<VouchesForAccount> {
+    return this.request('GET', `/miners/vouches/${encodeURIComponent(accountId)}`);
+  }
+
+  // ─── Tags (read-only) ───────────────────────────────────────────────
+
+  /** All registered durable-good products eligible to receive supportive flow. */
+  async getProducts(): Promise<{ products: Product[] }> {
+    return this.request('GET', '/tags/products');
+  }
+
+  /** All registered physical spaces eligible to receive ambient flow. */
+  async getSpaces(): Promise<{ spaces: Space[] }> {
+    return this.request('GET', '/tags/spaces');
+  }
+
+  /** Current day number + cycle phase (idle / between_cycles / ...) */
+  async getCurrentDay(): Promise<{ day: number; cyclePhase: string }> {
+    return this.request('GET', '/tags/today');
   }
 }
 

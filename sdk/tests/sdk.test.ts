@@ -138,6 +138,42 @@ describe('SDK v0.1 smoke', () => {
     );
   });
 
+  it('v0.2 court reads: getCases / getJuryDuty / getMyCases return well-formed shapes', async () => {
+    const client = new AlignmentEconomyClient({ baseUrl });
+    const all = await client.getCases();
+    assert.ok(Array.isArray(all.cases));
+    // Use a fake account id; the endpoints should still respond cleanly
+    // (empty arrays are valid; we just want to know the wiring is right).
+    const jd = await client.getJuryDuty('not-a-real-account');
+    assert.ok(Array.isArray(jd.assignments));
+    const mine = await client.getMyCases('not-a-real-account');
+    assert.ok(Array.isArray(mine.cases));
+  });
+
+  it('v0.2 miner reads: getMinerStatus returns isMiner=false for unknown account', async () => {
+    const client = new AlignmentEconomyClient({ baseUrl });
+    const s = await client.getMinerStatus('not-a-real-account');
+    assert.equal(s.isMiner, false);
+  });
+
+  it('v0.2 miner reads: getVouches returns received/given arrays', async () => {
+    const client = new AlignmentEconomyClient({ baseUrl });
+    const v = await client.getVouches('not-a-real-account');
+    assert.ok(Array.isArray(v.received));
+    assert.ok(Array.isArray(v.given));
+  });
+
+  it('v0.2 tag reads: getProducts / getSpaces / getCurrentDay return well-formed shapes', async () => {
+    const client = new AlignmentEconomyClient({ baseUrl });
+    const p = await client.getProducts();
+    assert.ok(Array.isArray(p.products));
+    const s = await client.getSpaces();
+    assert.ok(Array.isArray(s.spaces));
+    const d = await client.getCurrentDay();
+    assert.ok(typeof d.day === 'number');
+    assert.ok(typeof d.cyclePhase === 'string');
+  });
+
   it('signTransaction produces a valid signature against verifyPayload', () => {
     const sender = generateKeyPair();
     const recipient = generateKeyPair();
