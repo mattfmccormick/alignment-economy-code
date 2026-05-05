@@ -259,7 +259,7 @@ Real protocol features the whitepaper requires that aren't built yet. The AE isn
 - [ ] **Smart contract DSL execution engine.** `tagging/smart-contracts.ts` is a schema today, no VM. Whitepaper §5. Vegas Guy plan Phase 6.4.
 - [ ] **Block explorer (separate viewer).** Public read-only chain inspection. Vegas Guy plan Phase 9.1.
 - [ ] **TypeScript SDK + dev portal.** So third parties can integrate. Vegas Guy plan Phases 9.5, 9.6.
-- [ ] **Treasury / ecosystem fund.** Today the 0.5% fee goes 100% to miners. Nothing funds the explorer, audits, or the nonprofit running this. Whitepaper is silent on this.
+- [x] **Treasury / ecosystem fund.** ~~Today the 0.5% fee goes 100% to miners. Nothing funds the explorer, audits, or the nonprofit running this. Whitepaper is silent on this.~~ Phase 68. New `treasury.fee_share` param (default 0.10) carves a slice off the top of every block's fee distribution and routes it to a deterministic protocol-owned account whose private key isn't held by anyone (sentinel publicKey of all zeros, accountId derived from that). `mining.tier1_fee_share` reduced 0.20 → 0.18 to make room; tier2 gets the implicit 0.72. New `core/treasury.ts` with `ensureTreasuryAccount(db)` + `TREASURY_ACCOUNT_ID` constant. Wired into `distributeFeesPublicLottery` (the production path). Treasury auto-creates on first fee distribution; balance accumulates across blocks. Phase 68 test (7/7) covers default 10%, accumulation, 3-way split arithmetic, opt-out via 0 share, no-miners edge case, idempotency, and accountId determinism. Phase 4 + 63 expectations updated for the new defaults. Spending from treasury (governance) is a follow-up.
 
 ### Milestone 3: Mainnet readiness
 

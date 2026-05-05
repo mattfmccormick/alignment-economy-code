@@ -139,20 +139,23 @@ describe('Phase 4: Mining System', () => {
     const dist = distributeFees(db, 1, totalFees, 'abc123previoushash', keys);
     assert.ok(dist, 'Distribution should not be null');
 
-    // tier1Pool = 20% of 100 = 20.00
+    // tier1Pool = 18% of 100 = 18.00 (Phase 68 redirected 2 percentage
+    // points to the protocol treasury). The legacy distributeFees path
+    // tested here does NOT subtract treasury, so tier2 gets the full 82
+    // remainder. Phase 68 / treasury-aware path is in distributeFeesPublicLottery.
     assert.equal(dist!.tier1MinerCount, 4);
     assert.equal(dist!.tier2MinerCount, 6);
 
-    // Per Tier 1 = 20 / 4 = 5.00
+    // Per Tier 1 = 18 / 4 = 4.50
     const perTier1Display = Number(dist!.perTier1Miner) / Number(PRECISION);
-    assert.ok(Math.abs(perTier1Display - 5.0) < 0.01, `Per T1 should be ~5.00, got ${perTier1Display}`);
+    assert.ok(Math.abs(perTier1Display - 4.5) < 0.01, `Per T1 should be ~4.50, got ${perTier1Display}`);
 
-    // Tier 2 pool = 80.00
-    // Lottery = 80 * 0.60 = 48.00
-    // Baseline = 80 * 0.40 = 32.00
-    // Per T2 baseline = 32 / 6 = 5.33
+    // Tier 2 pool = 82.00 (100 - 18; legacy path doesn't reserve treasury)
+    // Lottery = 82 * 0.60 = 49.20
+    // Baseline = 82 * 0.40 = 32.80
+    // Per T2 baseline = 32.80 / 6 = 5.47
     const perT2Display = Number(dist!.perTier2MinerBaseline) / Number(PRECISION);
-    assert.ok(Math.abs(perT2Display - 5.33) < 0.1, `Per T2 baseline should be ~5.33, got ${perT2Display}`);
+    assert.ok(Math.abs(perT2Display - 5.47) < 0.1, `Per T2 baseline should be ~5.47, got ${perT2Display}`);
 
     // Lottery winner should exist
     assert.ok(dist!.lotteryWinnerId, 'Should have a lottery winner');

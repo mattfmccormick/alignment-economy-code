@@ -6,6 +6,7 @@ import { runTransaction } from '../db/connection.js';
 import { sha256 } from '../core/crypto.js';
 import { getActiveMiners } from './registration.js';
 import { selectLotteryWinner } from './vrf.js';
+import { ensureTreasuryAccount } from '../core/treasury.js';
 import type { FeeDistribution } from './types.js';
 
 export function distributeFees(
@@ -158,26 +159,62 @@ export function distributeFeesPublicLottery(
 
   const tier1FeeShare = getParam<number>(db, 'mining.tier1_fee_share');
   const tier2LotteryShare = getParam<number>(db, 'mining.tier2_lottery_share');
+  const treasuryFeeShare = getParam<number>(db, 'treasury.fee_share');
+
+  // Treasury cut comes off the top regardless of miner counts. If
+  // treasuryFeeShare is 0 the treasury account isn't even created and
+  // this slice falls through to the existing tier1/tier2 path. A genuine
+  // misconfiguration (negative share, > 1, etc.) downgrades to 0 so
+  // a bad governance change can't burn the whole fee pool.
+  let treasuryPool = 0n;
+  let treasuryAccountId: string | null = null;
+  if (treasuryFeeShare > 0 && treasuryFeeShare < 1) {
+    treasuryPool = BigInt(Math.floor(Number(totalFees) * treasuryFeeShare));
+    if (treasuryPool > 0n) {
+      treasuryAccountId = ensureTreasuryAccount(db);
+    }
+  }
+  const minerPool = totalFees - treasuryPool;
 
   const tier1Miners = getActiveMiners(db, 1);
   const tier2Miners = getActiveMiners(db, 2);
   const tier1Count = tier1Miners.length;
   const tier2Count = tier2Miners.length;
 
-  if (tier1Count === 0 && tier2Count === 0) return null;
+  if (tier1Count === 0 && tier2Count === 0) {
+    // No miners. The miner pool would burn; treasury still receives
+    // its slice if configured. Insert the distribution row so we can
+    // see exactly what happened post-block.
+    if (treasuryPool > 0n && treasuryAccountId) {
+      runTransaction(db, () => {
+        const acct = getAccount(db, treasuryAccountId)!;
+        const newEarned = acct.earnedBalance + treasuryPool;
+        updateBalance(db, treasuryAccountId, 'earned_balance', newEarned);
+        recordLog(db, treasuryAccountId, 'fee_distribution', 'earned', treasuryPool, acct.earnedBalance, newEarned, `block-${blockNumber}`, Math.floor(Date.now() / 1000));
+      });
+    }
+    return null;
+  }
 
   let tier1Pool: bigint;
   let tier2Pool: bigint;
   if (tier2Count === 0) {
-    // No tier 2 yet — bootstrap phase. Everything to tier 1.
-    tier1Pool = totalFees;
+    // No tier 2 yet — bootstrap phase. Everything (after treasury) to tier 1.
+    tier1Pool = minerPool;
     tier2Pool = 0n;
   } else if (tier1Count === 0) {
     tier1Pool = 0n;
-    tier2Pool = totalFees;
+    tier2Pool = minerPool;
   } else {
+    // tier1FeeShare is expressed as a fraction of TOTAL fees in the
+    // params, but the treasury slice already came out, so re-scale to
+    // make the tier1 share land on the same total fraction the operator
+    // expects (params describe the global split, not the post-treasury
+    // remainder). Concretely: tier1=0.18, treasury=0.10, tier2=0.72;
+    // tier1Pool/totalFees == 0.18 still holds.
     tier1Pool = BigInt(Math.floor(Number(totalFees) * tier1FeeShare));
-    tier2Pool = totalFees - tier1Pool;
+    if (tier1Pool > minerPool) tier1Pool = minerPool;
+    tier2Pool = minerPool - tier1Pool;
   }
 
   let tier2Lottery = 0n;
@@ -189,6 +226,15 @@ export function distributeFeesPublicLottery(
   const now = Math.floor(Date.now() / 1000);
 
   runTransaction(db, () => {
+    // Treasury credit first. Recorded with change_type 'fee_distribution'
+    // and reference 'block-N' so historical sync replays it consistently.
+    if (treasuryPool > 0n && treasuryAccountId) {
+      const acct = getAccount(db, treasuryAccountId)!;
+      const newEarned = acct.earnedBalance + treasuryPool;
+      updateBalance(db, treasuryAccountId, 'earned_balance', newEarned);
+      recordLog(db, treasuryAccountId, 'fee_distribution', 'earned', treasuryPool, acct.earnedBalance, newEarned, `block-${blockNumber}`, now);
+    }
+
     if (tier1Count > 0 && tier1Pool > 0n) {
       perTier1 = tier1Pool / BigInt(tier1Count);
       for (const miner of tier1Miners) {

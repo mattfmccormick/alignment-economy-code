@@ -45,7 +45,7 @@ function makeMiner(db: DatabaseSync, tier: 1 | 2) {
 }
 
 describe('Phase 63: per-block fee distribution (WP economics)', () => {
-  it('distributes 20/80 between Tier 1 and Tier 2', () => {
+  it('distributes 18/72 between Tier 1 and Tier 2 with 10% to treasury (post-Phase 68 defaults)', () => {
     const db = freshDb();
     const t1 = makeMiner(db, 1);
     const t2 = makeMiner(db, 2);
@@ -53,41 +53,42 @@ describe('Phase 63: per-block fee distribution (WP economics)', () => {
 
     const dist = distributeFeesPublicLottery(db, 1, 'block-hash-1', totalFees);
     assert.ok(dist);
-    // 20% of 100 to tier 1 = 20
-    assert.equal(dist!.tier1Pool, pts(20));
-    // 80% of 100 to tier 2 = 80
-    assert.equal(dist!.tier2Pool, pts(80));
-    // Tier 1 has 1 miner → all 20 pts goes to them on top of starting 1000.
+    // 18% of 100 to tier 1 = 18 (Phase 68 redirected 2 percentage points to treasury)
+    assert.equal(dist!.tier1Pool, pts(18));
+    // 72% of 100 to tier 2 = 72 (was 80 before treasury slice)
+    assert.equal(dist!.tier2Pool, pts(72));
+    // Tier 1 has 1 miner → all 18 pts goes to them on top of starting 1000.
     const t1Acct = getAccount(db, t1.accountId)!;
-    assert.equal(t1Acct.earnedBalance, pts(1000) + pts(20));
+    assert.equal(t1Acct.earnedBalance, pts(1000) + pts(18));
     // Tier 2 has 1 miner → they win the lottery (only entry) AND get baseline.
-    // = full 80 pts on top of 1000.
+    // = full 72 pts on top of 1000.
     const t2Acct = getAccount(db, t2.accountId)!;
-    assert.equal(t2Acct.earnedBalance, pts(1000) + pts(80));
+    assert.equal(t2Acct.earnedBalance, pts(1000) + pts(72));
     assert.equal(dist!.lotteryWinnerId, t2.minerId);
     db.close();
   });
 
-  it('Tier 2 split: 60% lottery winner, 40% baseline', () => {
+  it('Tier 2 split: 60% lottery winner, 40% baseline (after treasury slice)', () => {
     const db = freshDb();
     const t2a = makeMiner(db, 2);
     const t2b = makeMiner(db, 2);
     const t2c = makeMiner(db, 2);
     const totalFees = pts(100);
 
-    // No tier 1 miners → all 100 pts to tier 2.
-    // 60% lottery (60), 40% baseline divided across 3 (~13.33 each).
+    // No tier 1 miners → all of the miner pool (90 = 100 - 10 treasury) goes
+    // to tier 2. Within tier 2: 60% lottery (54), 40% baseline (36) split
+    // across 3 miners (~12 each).
     const dist = distributeFeesPublicLottery(db, 1, 'fixed-block-hash', totalFees);
     assert.ok(dist);
     assert.equal(dist!.tier1Pool, 0n);
-    assert.equal(dist!.tier2Pool, totalFees);
-    assert.equal(dist!.tier2Lottery, pts(60));
-    assert.equal(dist!.tier2Baseline, pts(40));
+    assert.equal(dist!.tier2Pool, pts(90));
+    assert.equal(dist!.tier2Lottery, pts(54));
+    assert.equal(dist!.tier2Baseline, pts(36));
 
     // Verify the winner got lottery + baseline, others got just baseline.
     const winnerId = dist!.lotteryWinnerId!;
-    const baselinePerMiner = pts(40) / 3n; // integer truncation
-    const winningPayout = baselinePerMiner + pts(60);
+    const baselinePerMiner = pts(36) / 3n; // integer truncation
+    const winningPayout = baselinePerMiner + pts(54);
     for (const m of [t2a, t2b, t2c]) {
       const acct = getAccount(db, m.accountId)!;
       const expected = pts(1000) + (m.minerId === winnerId ? winningPayout : baselinePerMiner);
@@ -173,17 +174,18 @@ describe('Phase 63: per-block fee distribution (WP economics)', () => {
     db.close();
   });
 
-  it('only Tier 1 (no Tier 2 yet) → all fees flow to Tier 1', () => {
+  it('only Tier 1 (no Tier 2 yet) → miner pool flows to Tier 1; treasury still gets its slice', () => {
     const db = freshDb();
     const t1a = makeMiner(db, 1);
     const t1b = makeMiner(db, 1);
     const dist = distributeFeesPublicLottery(db, 1, 'h', pts(100));
     assert.ok(dist);
-    assert.equal(dist!.tier1Pool, pts(100));
+    // Treasury takes 10 off the top, leaving 90 for the miner pool.
+    assert.equal(dist!.tier1Pool, pts(90));
     assert.equal(dist!.tier2Pool, 0n);
-    // Each Tier 1 miner gets 50.
-    assert.equal(getAccount(db, t1a.accountId)!.earnedBalance, pts(1000) + pts(50));
-    assert.equal(getAccount(db, t1b.accountId)!.earnedBalance, pts(1000) + pts(50));
+    // Each Tier 1 miner gets 45 (90 split 2 ways).
+    assert.equal(getAccount(db, t1a.accountId)!.earnedBalance, pts(1000) + pts(45));
+    assert.equal(getAccount(db, t1b.accountId)!.earnedBalance, pts(1000) + pts(45));
     db.close();
   });
 
