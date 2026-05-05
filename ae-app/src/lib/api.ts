@@ -131,14 +131,16 @@ export const api = {
   getRecurring: (accountId: string) =>
     request<{ transfers: any[] }>('GET', `/recurring/${accountId}`),
 
-  createRecurring: (body: { fromId: string; toId: string; amount: number; pointType: string; schedule: string }) =>
-    request<any>('POST', '/recurring', body),
+  // Auth-required: signed account is the sender. fromId is implicit.
+  createRecurring: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; amount: number; pointType: string; schedule: string } }) =>
+    request<any>('POST', '/recurring', envelope),
 
-  updateRecurring: (id: string, body: { amount?: number; pointType?: string; schedule?: string; isActive?: boolean }) =>
-    request<any>('PUT', `/recurring/${id}`, body),
+  // Auth + ownership-checked: only the recurring-transfer creator can modify.
+  updateRecurring: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { amount?: number; pointType?: string; schedule?: string; isActive?: boolean } }) =>
+    request<any>('PUT', `/recurring/${id}`, envelope),
 
-  deleteRecurring: (id: string) =>
-    request<any>('DELETE', `/recurring/${id}`),
+  deleteRecurring: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
+    request<any>('DELETE', `/recurring/${id}`, envelope),
 
   // Miners
   // Auth-required: only the account being registered can register itself.

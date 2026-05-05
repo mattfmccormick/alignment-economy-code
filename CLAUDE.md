@@ -302,10 +302,12 @@ The May 5 sweep added `authMiddleware(db)` to every previously-unauthenticated P
 - ~~**`POST /tags/spaces`**~~ — Fixed. Auth-gated even though the schema doesn't track creator today; future analytics or schema additions will be attributable.
 - ~~**`POST /contacts/`**~~ — Fixed. Signed account becomes `ownerId`; 403 OWNER_MISMATCH.
 - ~~**`PUT /contacts/:id/favorite`**, **`PUT /contacts/:id`**, **`DELETE /contacts/:id`**~~ — Fixed. Auth'd AND ownership-checked via the new `ownsContact` helper; 403 NOT_CONTACT_OWNER if the caller isn't the row's owner.
+- ~~**`POST /recurring/`**~~ — Fixed. Signed account becomes `fromId`; 403 FROM_MISMATCH on disagreement. Vestigial today (no executor wires the day cycle to fire recurring rows), but auth is in place so when that wiring lands the path is safe by default.
+- ~~**`PUT /recurring/:id`**, **`DELETE /recurring/:id`**~~ — Fixed. Auth'd AND ownership-checked via a new `ownsRecurring` helper; 403 NOT_TRANSFER_OWNER if the caller didn't create the row.
 
-**Regression coverage:** new `phase71.test.ts` (10/10 pass) exercises the auth gate on `/miners/vouches`, `/tags/supportive`, and `/contacts/` POST. For each it covers: unsigned body → 401 AUTH_MISSING, forged signature (different keypair) → 401 AUTH_INVALID, mismatched body identity field → 403 *_MISMATCH, correctly signed envelope → auth passes (subsequent failure modes are protocol-layer, not auth-layer). Same pattern can be extended to other routes as needed; the three covered are diverse enough to catch a regression in the shared `authMiddleware` shape.
+**Regression coverage:** `phase71.test.ts` (10/10 pass) exercises the auth gate on `/miners/vouches`, `/tags/supportive`, and `/contacts/` POST. For each it covers: unsigned body → 401 AUTH_MISSING, forged signature (different keypair) → 401 AUTH_INVALID, mismatched body identity field → 403 *_MISMATCH, correctly signed envelope → auth passes (subsequent failure modes are protocol-layer, not auth-layer). Three diverse routes are enough to catch a regression in the shared `authMiddleware` shape.
 
-**Vestigial routes still without auth:** `POST /recurring/`, `PUT /recurring/:id`, `DELETE /recurring/:id`. The schema has a `recurring_transfers` table but no executor wires it into the day cycle, so these are write-only with no economic effect today. They'll become a real theft vector the moment an executor lands; add auth before that wiring.
+**Audit complete.** Every previously-unauthenticated POST/PUT/DELETE route that takes an accountId-like field now runs through `authMiddleware(db)`.
 
 ### Future (Phase 2+ scaling — not on the immediate roadmap)
 

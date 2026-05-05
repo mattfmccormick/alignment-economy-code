@@ -1,7 +1,17 @@
 import { useState, useEffect } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
+import { signPayload } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
+
+// Centralize the ts/sig/payload envelope shape so all four recurring
+// mutations look the same. Auth-required routes (auth-fix round 4)
+// derive the caller from the signature, not the body.
+function signEnvelope<P extends object>(payload: P, accountId: string, privateKey: string) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = signPayload(payload, timestamp, privateKey);
+  return { accountId, timestamp, signature, payload };
+}
 
 interface RecurringTransfer {
   id: string;
@@ -69,13 +79,12 @@ export function Recurring() {
     setCreateLoading(true);
     setCreateError(null);
     try {
-      const res = await api.createRecurring({
-        fromId: wallet.accountId,
-        toId: newToId.trim(),
-        amount: Number(newAmount),
-        pointType: newPointType,
-        schedule: newSchedule,
-      });
+      const env = signEnvelope(
+        { toId: newToId.trim(), amount: Number(newAmount), pointType: newPointType, schedule: newSchedule },
+        wallet.accountId,
+        wallet.privateKey,
+      );
+      const res = await api.createRecurring(env);
       if (res.success) {
         setShowCreate(false);
         setNewToId('');
@@ -91,23 +100,33 @@ export function Recurring() {
   }
 
   async function handleToggleActive(transfer: RecurringTransfer) {
+    if (!wallet?.accountId) return;
     try {
-      await api.updateRecurring(transfer.id, { isActive: !transfer.isActive });
+      const env = signEnvelope({ isActive: !transfer.isActive }, wallet.accountId, wallet.privateKey);
+      await api.updateRecurring(transfer.id, env);
       setTransfers(prev => prev.map(t => t.id === transfer.id ? { ...t, isActive: !t.isActive } : t));
     } catch { /* ignore */ }
   }
 
   async function handleSaveEdit(id: string) {
+    if (!wallet?.accountId) return;
     try {
-      await api.updateRecurring(id, { amount: Number(editAmount), schedule: editSchedule });
+      const env = signEnvelope(
+        { amount: Number(editAmount), schedule: editSchedule },
+        wallet.accountId,
+        wallet.privateKey,
+      );
+      await api.updateRecurring(id, env);
       setTransfers(prev => prev.map(t => t.id === id ? { ...t, amount: Number(editAmount), schedule: editSchedule } : t));
       setEditingId(null);
     } catch { /* ignore */ }
   }
 
   async function handleDelete(id: string) {
+    if (!wallet?.accountId) return;
     try {
-      await api.deleteRecurring(id);
+      const env = signEnvelope({}, wallet.accountId, wallet.privateKey);
+      await api.deleteRecurring(id, env);
       setTransfers(prev => prev.filter(t => t.id !== id));
     } catch { /* ignore */ }
   }
