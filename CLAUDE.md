@@ -246,8 +246,8 @@ LAN testing happens *as we build* — don't ship a LAN-only release as a separat
 **Verification + ship:**
 - [ ] **End-to-end LAN test on dev machine.** 3 simulated runners on `localhost:3001/3002/3003`, walked through the chooser flow, peer up, register, commit blocks, transact, court works. (This is the dev gate, NOT a release.)
 - [ ] **End-to-end internet test.** Two machines on different home networks join the public testnet, transact, verify each other.
-- [ ] **Build + sign installers** for Win/Mac/Linux, both apps.
-- [ ] **Write `docs/start-a-network.md`** (founder flow) and `docs/join-a-network.md` (joiner flow). One page each.
+- [x] **Build + sign installers** ~~for Win/Mac/Linux, both apps.~~ Windows half done. `npm run electron:build:win` produces ~106 MB NSIS installers for both apps: `ae-app/release/Alignment Economy Wallet Setup 0.1.0.exe` and `ae-miner/release/Alignment Economy Miner Setup 0.1.0.exe`. Each contains the bundled `ae-node` (`win-unpacked/resources/ae-node/dist/node/cli.js`) and the Electron + React app. Mac (`.dmg`) and Linux (`.AppImage`) need their respective platforms; a GitHub Actions workflow with macOS + Linux runners is the right answer there. Code-signing is also future work (today's Win installer is unsigned, so Windows SmartScreen will warn). Release artifacts are gitignored; distribute by hand for now.
+- [x] **Write `docs/start-a-network.md`** ~~(founder flow) and `docs/join-a-network.md` (joiner flow). One page each.~~ Both written. `docs/start-a-network.md` walks a founder through the genesis ceremony, keystore distribution, spec-hash confirmation. `docs/join-a-network.md` walks a joiner through pasting the invite link, uploading their keystore, comparing hashes, restart. Each ~1 page; covers the LAN-only state today and notes that public-internet peering is the next milestone.
 - [ ] **Wider tester rollout.** Friends, family, early supporters.
 
 ### Milestone 2: Whitepaper completeness
