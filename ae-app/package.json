@@ -40,13 +40,27 @@
       {
         "from": "../ae-node/node_modules",
         "to": "ae-node/node_modules",
-        "filter": ["**/*", "!**/.cache/**", "!**/.bin/**"]
+        "filter": [
+          "**/*",
+          "!**/.cache/**",
+          "!**/.bin/**"
+        ]
       }
     ],
     "win": {
       "target": [
-        { "target": "dir", "arch": ["x64"] },
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "signAndEditExecutable": false
     },
@@ -61,12 +75,19 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "mattfmccormick",
+      "repo": "alignment-economy-code",
+      "releaseType": "release"
     }
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0",
     "@noble/post-quantum": "^0.6.0",
     "@scure/bip39": "^2.2.0",
+    "electron-updater": "^6.8.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

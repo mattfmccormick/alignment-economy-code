@@ -17,6 +17,17 @@ const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
 
+// Auto-update via electron-updater. Loaded lazily so plain dev runs without
+// a published GitHub release just no-op the update check; the require()
+// is wrapped in a try/catch in case electron-updater isn't installed yet
+// (the package.json may have it but a fresh checkout might not).
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require('electron-updater'));
+} catch (err) {
+  console.warn('[updater] electron-updater not available:', err.message);
+}
+
 const isDev = process.env.ELECTRON_DEV === '1';
 const NODE_PORT = 3000;
 const HEALTH_URL = `http://localhost:${NODE_PORT}/api/v1/health`;
@@ -255,6 +266,18 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+
+  // Check for updates in packaged production builds only. In dev (running
+  // electron . from source) skip — there's no installer to swap. The check
+  // is fire-and-forget; downloads run in the background and a notification
+  // appears when ready. Reads the publish config from package.json's build
+  // block (GitHub Releases provider).
+  if (autoUpdater && app.isPackaged && !isDev) {
+    autoUpdater.on('error', (err) => console.warn('[updater] error:', err && err.message));
+    autoUpdater.on('update-available', (info) => console.log('[updater] update available:', info && info.version));
+    autoUpdater.on('update-downloaded', (info) => console.log('[updater] downloaded, will install on quit:', info && info.version));
+    try { autoUpdater.checkForUpdatesAndNotify(); } catch (err) { console.warn('[updater] check failed:', err && err.message); }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

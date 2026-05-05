@@ -15,6 +15,30 @@ export interface ApiResponse<T = unknown> {
   meta?: { timestamp: number };
 }
 
+// Track the last failure mode so the UI can decide whether to show a
+// banner ("Local node not running") vs an inline error. Updated on every
+// request; consumers can subscribe via subscribeNodeStatus() below.
+type NodeStatus = 'ok' | 'offline' | 'node-down' | 'unknown';
+let lastNodeStatus: NodeStatus = 'unknown';
+const nodeStatusListeners = new Set<(s: NodeStatus) => void>();
+
+function setNodeStatus(s: NodeStatus): void {
+  if (s === lastNodeStatus) return;
+  lastNodeStatus = s;
+  for (const cb of nodeStatusListeners) {
+    try { cb(s); } catch { /* listener should not break the request */ }
+  }
+}
+
+export function getNodeStatus(): NodeStatus {
+  return lastNodeStatus;
+}
+
+export function subscribeNodeStatus(cb: (s: NodeStatus) => void): () => void {
+  nodeStatusListeners.add(cb);
+  return () => nodeStatusListeners.delete(cb);
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<ApiResponse<T>> {
   const opts: RequestInit = {
     method,
@@ -26,15 +50,36 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   try {
     res = await fetch(`${API_URL}${path}`, opts);
   } catch {
-    return { success: false, data: {} as T, error: { code: 'NETWORK_ERROR', message: 'Network error' } };
+    // Distinguish "your machine is offline" from "the local ae-node we're
+    // trying to talk to isn't responding." navigator.onLine is a coarse
+    // signal but it's the only one available to a sandboxed renderer.
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (offline) {
+      setNodeStatus('offline');
+      return { success: false, data: {} as T, error: { code: 'OFFLINE', message: "You're offline. Check your internet connection." } };
+    }
+    setNodeStatus('node-down');
+    return {
+      success: false,
+      data: {} as T,
+      error: {
+        code: 'NODE_UNREACHABLE',
+        message: 'Could not reach the local node. If you just restarted the app, give it a few seconds. If this keeps happening, the bundled node may have failed to start.',
+      },
+    };
   }
 
   let json: any;
   try {
     json = await res.json();
   } catch {
+    setNodeStatus('node-down');
     return { success: false, data: {} as T, error: { code: 'PARSE_ERROR', message: `Server returned ${res.status}` } };
   }
+
+  // Reaching here means the node responded with parseable JSON, regardless
+  // of the wrapped success value. Treat that as "node alive".
+  setNodeStatus('ok');
 
   // Some newer routes return plain JSON without success wrapper
   if (typeof json.success === 'boolean') {

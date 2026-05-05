@@ -26,6 +26,13 @@ const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
 
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require('electron-updater'));
+} catch (err) {
+  console.warn('[updater] electron-updater not available:', err.message);
+}
+
 const isDev = process.env.ELECTRON_DEV === '1';
 const NODE_PORT = 3001;
 const HEALTH_URL = `http://localhost:${NODE_PORT}/api/v1/health`;
@@ -250,6 +257,13 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+
+  if (autoUpdater && app.isPackaged && !isDev) {
+    autoUpdater.on('error', (err) => console.warn('[updater] error:', err && err.message));
+    autoUpdater.on('update-available', (info) => console.log('[updater] update available:', info && info.version));
+    autoUpdater.on('update-downloaded', (info) => console.log('[updater] downloaded, will install on quit:', info && info.version));
+    try { autoUpdater.checkForUpdatesAndNotify(); } catch (err) { console.warn('[updater] check failed:', err && err.message); }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

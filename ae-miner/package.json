@@ -19,7 +19,9 @@
   "build": {
     "appId": "org.alignmenteconomy.miner",
     "productName": "Alignment Economy Miner",
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -37,13 +39,27 @@
       {
         "from": "../ae-node/node_modules",
         "to": "ae-node/node_modules",
-        "filter": ["**/*", "!**/.cache/**", "!**/.bin/**"]
+        "filter": [
+          "**/*",
+          "!**/.cache/**",
+          "!**/.bin/**"
+        ]
       }
     ],
     "win": {
       "target": [
-        { "target": "dir", "arch": ["x64"] },
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "signAndEditExecutable": false
     },
@@ -58,11 +74,18 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "mattfmccormick",
+      "repo": "alignment-economy-code",
+      "releaseType": "release"
     }
   },
   "dependencies": {
     "@noble/post-quantum": "^0.6.1",
     "@scure/bip39": "^2.2.0",
+    "electron-updater": "^6.8.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
