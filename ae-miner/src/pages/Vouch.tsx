@@ -171,7 +171,11 @@ function SendRequestCard({ fromId, onSent }: { fromId: string; onSent: () => voi
     if (toId.trim() === fromId) { setErr('Cannot request a vouch from yourself.'); return; }
     setSubmitting(true);
     try {
-      const r = await api.sendVouchRequest(fromId, toId.trim(), message.trim());
+      const w = loadMinerWallet();
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { toId: toId.trim(), message: message.trim() };
+      const signature = signPayload(payload, ts, w.privateKey);
+      const r = await api.sendVouchRequest({ accountId: fromId, timestamp: ts, signature, payload });
       if (r.success) {
         setOkFor(toId.trim());
         setToId(''); setMessage('');
@@ -309,7 +313,17 @@ function IncomingRow({
         setRowErr(v.error?.message ?? 'Failed to lock stake.');
         return;
       }
-      const u = await api.updateVouchRequest(request.id, 'accepted');
+      // updateVouchRequest is now signed too; only the request's recipient
+      // (this miner) can accept it. Reuse the wallet we already loaded.
+      const ts2 = Math.floor(Date.now() / 1000);
+      const payload2 = { status: 'accepted' as const };
+      const sig2 = signPayload(payload2, ts2, w.privateKey);
+      const u = await api.updateVouchRequest(request.id, {
+        accountId: myAccountId,
+        timestamp: ts2,
+        signature: sig2,
+        payload: payload2,
+      });
       if (!u.success) {
         setRowErr(u.error?.message ?? 'Stake locked but failed to mark request accepted — refreshing.');
       }
@@ -325,7 +339,16 @@ function IncomingRow({
     setRowErr('');
     setBusy('decline');
     try {
-      const r = await api.updateVouchRequest(request.id, 'declined');
+      const w = loadMinerWallet();
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { status: 'declined' as const };
+      const signature = signPayload(payload, ts, w.privateKey);
+      const r = await api.updateVouchRequest(request.id, {
+        accountId: myAccountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
       if (!r.success) setRowErr(r.error?.message ?? 'Failed to decline.');
       onChanged();
     } catch (e) {

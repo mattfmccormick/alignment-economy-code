@@ -105,6 +105,11 @@ export interface IVerificationStore {
 
   insertVouchRequest(input: VouchRequestInsert): void;
 
+  /** Single vouch request by id, or null if missing. Used by the auth check
+   *  on PUT /miners/vouch-requests/:id to confirm the responder is the
+   *  request's actual recipient. */
+  findVouchRequestById(id: string): VouchRequest | null;
+
   /** Pending requests where this account is the recipient (someone is asking them to vouch). */
   findPendingIncomingRequests(accountId: string): VouchRequest[];
 

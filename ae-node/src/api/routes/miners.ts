@@ -12,10 +12,19 @@ import { v4 as uuid } from 'uuid';
 export function minerRoutes(db: DatabaseSync) {
   const router = Router();
 
-  // POST /miners/register - register as a miner
-  router.post('/register', (req, res) => {
-    const { accountId } = req.body;
-    if (!accountId) return res.status(400).json({ error: 'accountId required' });
+  // POST /miners/register - register as a miner. Auth-required: only the
+  // account owner can claim themselves as a miner. The signed accountId
+  // is taken to be the registrant; a top-level body accountId is back-compat
+  // and rejected if it disagrees with the signature.
+  router.post('/register', authMiddleware(db), (req, res) => {
+    const accountId = req.accountId!;
+    const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
+    if (claimedAccountId && claimedAccountId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'accountId does not match the authenticated account' },
+      });
+    }
 
     const account = getAccount(db, accountId);
     if (!account) return res.status(404).json({ error: 'Account not found' });
@@ -38,11 +47,22 @@ export function minerRoutes(db: DatabaseSync) {
     res.json({ isMiner: true, miner });
   });
 
-  // POST /evidence - submit verification evidence
-  router.post('/evidence', (req, res) => {
-    const { accountId, evidenceTypeId, evidenceHash } = req.body;
-    if (!accountId || !evidenceTypeId || !evidenceHash) {
-      return res.status(400).json({ error: 'accountId, evidenceTypeId, and evidenceHash required' });
+  // POST /evidence - submit verification evidence. Auth-required: only the
+  // account being verified can submit evidence about themselves. Without
+  // this, a third party could spam fake evidence in someone else's name
+  // (sybil farming via free percent-human bumps once a reviewer signs off).
+  router.post('/evidence', authMiddleware(db), (req, res) => {
+    const accountId = req.accountId!;
+    const { evidenceTypeId, evidenceHash } = req.body.payload || req.body;
+    const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
+    if (claimedAccountId && claimedAccountId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'accountId does not match the authenticated account' },
+      });
+    }
+    if (!evidenceTypeId || !evidenceHash) {
+      return res.status(400).json({ error: 'evidenceTypeId and evidenceHash required' });
     }
 
     try {
@@ -109,10 +129,21 @@ export function minerRoutes(db: DatabaseSync) {
     });
   });
 
-  // POST /vouch-requests - request someone to vouch for you
-  router.post('/vouch-requests', (req, res) => {
-    const { fromId, toId, message } = req.body;
-    if (!fromId || !toId) return res.status(400).json({ error: 'fromId and toId required' });
+  // POST /vouch-requests - request someone to vouch for you. Auth-required:
+  // the requestor (fromId) is the authenticated account. Without this, a
+  // third party could spam vouch requests in someone else's name, polluting
+  // miner inboxes and creating social-engineering opportunities.
+  router.post('/vouch-requests', authMiddleware(db), (req, res) => {
+    const fromId = req.accountId!;
+    const { toId, message } = req.body.payload || req.body;
+    const claimedFromId = (req.body.payload && req.body.payload.fromId) ?? req.body.fromId;
+    if (claimedFromId && claimedFromId !== fromId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FROM_MISMATCH', message: 'fromId does not match the authenticated account' },
+      });
+    }
+    if (!toId) return res.status(400).json({ error: 'toId required' });
 
     const id = uuid();
     const now = Math.floor(Date.now() / 1000);
@@ -133,14 +164,29 @@ export function minerRoutes(db: DatabaseSync) {
     });
   });
 
-  // PUT /vouch-requests/:id - respond to a vouch request
-  router.put('/vouch-requests/:id', (req, res) => {
-    const { status } = req.body; // 'accepted' or 'declined'
+  // PUT /vouch-requests/:id - respond to a vouch request. Auth-required
+  // AND ownership-checked: only the request's recipient (toId) can accept
+  // or decline. Without this, any third party could mark someone else's
+  // pending requests as 'accepted' or 'declined' and either bypass a real
+  // accept-flow stake (the now-fixed /miners/vouches gap) or hide a
+  // genuine request from the intended responder.
+  router.put('/vouch-requests/:id', authMiddleware(db), (req, res) => {
+    const responderId = req.accountId!;
+    const { status } = req.body.payload || req.body;
     if (status !== 'accepted' && status !== 'declined') {
       return res.status(400).json({ error: "status must be 'accepted' or 'declined'" });
     }
+    const verif = verificationStore(db);
+    const requestRow = verif.findVouchRequestById(req.params.id as string);
+    if (!requestRow) return res.status(404).json({ error: 'Vouch request not found' });
+    if (requestRow.toId !== responderId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'NOT_REQUEST_RECIPIENT', message: 'Only the request recipient can respond to it' },
+      });
+    }
     const now = Math.floor(Date.now() / 1000);
-    verificationStore(db).setVouchRequestStatus(req.params.id as string, status, now);
+    verif.setVouchRequestStatus(req.params.id as string, status, now);
     res.json({ success: true });
   });
 

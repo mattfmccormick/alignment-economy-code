@@ -119,7 +119,15 @@ export function Verify() {
     setVouchError(null);
     setVouchSuccess(false);
     try {
-      const res = await api.createVouchRequest(wallet.accountId, vouchToId.trim(), vouchMessage.trim());
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { toId: vouchToId.trim(), message: vouchMessage.trim() };
+      const signature = signPayload(payload, ts, wallet.privateKey);
+      const res = await api.createVouchRequest({
+        accountId: wallet.accountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
       if (res.success) {
         setVouchSuccess(true);
         setVouchToId('');
@@ -141,7 +149,15 @@ export function Verify() {
     setEvidenceError(null);
     setEvidenceSuccess(false);
     try {
-      const res = await api.submitEvidence(wallet.accountId, evidenceType, evidenceHash.trim());
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { evidenceTypeId: evidenceType, evidenceHash: evidenceHash.trim() };
+      const signature = signPayload(payload, ts, wallet.privateKey);
+      const res = await api.submitEvidence({
+        accountId: wallet.accountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
       if (res.success) {
         setEvidenceSuccess(true);
         setEvidenceHash('');
@@ -156,8 +172,17 @@ export function Verify() {
   }
 
   async function handleVouchRequestAction(id: string, status: 'accepted' | 'declined') {
+    if (!wallet?.accountId) return;
     try {
-      await api.updateVouchRequest(id, status);
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { status };
+      const signature = signPayload(payload, ts, wallet.privateKey);
+      await api.updateVouchRequest(id, {
+        accountId: wallet.accountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
       loadVouchData();
     } catch { /* ignore */ }
   }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { saveMinerWalletFromMnemonic } from '../lib/keys';
-import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
+import { newMnemonic, mnemonicToKeypair, isValidMnemonic, signPayload } from '../lib/crypto';
 
 type Mode = 'signin' | 'create';
 type Step =
@@ -22,7 +22,7 @@ export default function Login() {
   const [mnemonic, setMnemonic] = useState('');
   const [publicKey, setPublicKey] = useState('');
   // Held in-memory only between Create and Register; never persisted as raw.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Used to sign the /miners/register handshake.
   const [_privateKey, setPrivateKey] = useState('');
   const [step, setStep] = useState<Step>('enter_id');
   const [error, setError] = useState('');
@@ -130,7 +130,18 @@ export default function Login() {
     };
 
     try {
-      const res = await api.registerMiner(accountId.trim());
+      // /miners/register is now auth-required: the registrant signs an
+      // empty payload with their private key to prove key possession.
+      // _privateKey is in state from the create-account or sign-in flow.
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = {};
+      const signature = signPayload(payload, ts, _privateKey);
+      const res = await api.registerMiner({
+        accountId: accountId.trim(),
+        timestamp: ts,
+        signature,
+        payload,
+      });
       if (res.success) {
         persistAndEnter();
       } else {

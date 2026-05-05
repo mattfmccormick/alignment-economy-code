@@ -227,6 +227,13 @@ export class SqliteVerificationStore implements IVerificationStore {
       .run(input.id, input.fromId, input.toId, input.message, input.createdAt);
   }
 
+  findVouchRequestById(id: string): VouchRequest | null {
+    const row = this.db
+      .prepare('SELECT * FROM vouch_requests WHERE id = ?')
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? rowToVouchRequest(row) : null;
+  }
+
   findPendingIncomingRequests(accountId: string): VouchRequest[] {
     const rows = this.db
       .prepare("SELECT * FROM vouch_requests WHERE to_id = ? AND status = 'pending'")

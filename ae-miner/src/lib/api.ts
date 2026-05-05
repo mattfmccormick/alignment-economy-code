@@ -166,8 +166,9 @@ export const api = {
   getMinerStatus: (accountId: string) =>
     request<ApiResponse<MinerStatus>>('GET', `/miners/status/${accountId}`),
 
-  registerMiner: (accountId: string) =>
-    request<ApiResponse<{ miner: MinerStatus['miner'] }>>('POST', '/miners/register', { accountId }),
+  // Auth-required: only the account being registered can register itself.
+  registerMiner: (envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
+    request<ApiResponse<{ miner: MinerStatus['miner'] }>>('POST', '/miners/register', envelope),
 
   // Verification panels (miner-facing).
   // Get the FIFO-assigned panels for a miner account. Public: the assignment
@@ -211,8 +212,9 @@ export const api = {
       'POST', `/court/cases/${caseId}/vote`, signedBody,
     ),
 
-  submitEvidence: (accountId: string, evidenceTypeId: string, evidenceHash: string) =>
-    request<ApiResponse<unknown>>('POST', '/miners/evidence', { accountId, evidenceTypeId, evidenceHash }),
+  // Auth-required: only the account being verified can submit its own evidence.
+  submitEvidence: (envelope: { accountId: string; timestamp: number; signature: string; payload: { evidenceTypeId: string; evidenceHash: string } }) =>
+    request<ApiResponse<unknown>>('POST', '/miners/evidence', envelope),
 
   getEvidenceScore: (accountId: string) =>
     request<ApiResponse<EvidenceScore>>('GET', `/miners/evidence/score/${accountId}`),
@@ -229,14 +231,16 @@ export const api = {
     request<ApiResponse<VouchData>>('GET', `/miners/vouches/${accountId}`),
 
   // Vouch Requests
-  sendVouchRequest: (fromId: string, toId: string, message: string) =>
-    request<ApiResponse<unknown>>('POST', '/miners/vouch-requests', { fromId, toId, message }),
+  // Auth-required: the requestor (signed account) is the fromId.
+  sendVouchRequest: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; message: string } }) =>
+    request<ApiResponse<unknown>>('POST', '/miners/vouch-requests', envelope),
 
   getVouchRequests: (accountId: string) =>
     request<ApiResponse<VouchRequests>>('GET', `/miners/vouch-requests/${accountId}`),
 
-  updateVouchRequest: (id: string, status: string) =>
-    request<ApiResponse<unknown>>('PUT', `/miners/vouch-requests/${id}`, { status }),
+  // Auth-required: only the request's recipient (toId) can respond.
+  updateVouchRequest: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { status: 'accepted' | 'declined' } }) =>
+    request<ApiResponse<unknown>>('PUT', `/miners/vouch-requests/${id}`, envelope),
 
   // Network
   getNetworkStatus: () =>

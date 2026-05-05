@@ -139,14 +139,16 @@ export const api = {
     request<any>('DELETE', `/recurring/${id}`),
 
   // Miners
-  registerMiner: (accountId: string) =>
-    request<any>('POST', '/miners/register', { accountId }),
+  // Auth-required: only the account being registered can register itself.
+  registerMiner: (envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
+    request<any>('POST', '/miners/register', envelope),
 
   getMinerStatus: (accountId: string) =>
     request<{ isMiner: boolean; miner: any }>('GET', `/miners/status/${accountId}`),
 
-  submitEvidence: (accountId: string, evidenceTypeId: string, evidenceHash: string) =>
-    request<any>('POST', '/miners/evidence', { accountId, evidenceTypeId, evidenceHash }),
+  // Auth-required: only the account being verified can submit its own evidence.
+  submitEvidence: (envelope: { accountId: string; timestamp: number; signature: string; payload: { evidenceTypeId: string; evidenceHash: string } }) =>
+    request<any>('POST', '/miners/evidence', envelope),
 
   getEvidenceScore: (accountId: string) =>
     request<{ score: number; vouchCount: number }>('GET', `/miners/evidence/score/${accountId}`),
@@ -163,14 +165,16 @@ export const api = {
     request<{ received: any[]; given: any[] }>('GET', `/miners/vouches/${accountId}`),
 
   // Vouch Requests
-  createVouchRequest: (fromId: string, toId: string, message: string) =>
-    request<any>('POST', '/miners/vouch-requests', { fromId, toId, message }),
+  // Auth-required: the requestor (signed account) is the fromId.
+  createVouchRequest: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; message: string } }) =>
+    request<any>('POST', '/miners/vouch-requests', envelope),
 
   getVouchRequests: (accountId: string) =>
     request<{ incoming: any[]; outgoing: any[] }>('GET', `/miners/vouch-requests/${accountId}`),
 
-  updateVouchRequest: (id: string, status: 'accepted' | 'declined') =>
-    request<any>('PUT', `/miners/vouch-requests/${id}`, { status }),
+  // Auth-required: only the request's recipient (toId) can respond.
+  updateVouchRequest: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { status: 'accepted' | 'declined' } }) =>
+    request<any>('PUT', `/miners/vouch-requests/${id}`, envelope),
 
   // Verification panels (the real proof-of-human flow)
   // Participant requests a panel for their own account (signed).

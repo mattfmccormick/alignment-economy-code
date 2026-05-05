@@ -4,6 +4,7 @@ import { loadWallet, clearWallet } from '../lib/keys';
 import { truncateId } from '../lib/formatting';
 import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
+import { signPayload } from '../lib/crypto';
 
 const links = [
   { to: '/contacts', label: 'Contacts', desc: 'Manage your saved contacts' },
@@ -45,7 +46,17 @@ export function More() {
     if (!wallet?.accountId) return;
     setRegistering(true);
     try {
-      const res = await api.registerMiner(wallet.accountId);
+      // Sign an empty payload to prove key possession; the route now
+      // requires an authenticated caller.
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = {};
+      const signature = signPayload(payload, ts, wallet.privateKey);
+      const res = await api.registerMiner({
+        accountId: wallet.accountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
       if (res.success) {
         setMinerStatus({ isMiner: true, miner: res.data });
       }
