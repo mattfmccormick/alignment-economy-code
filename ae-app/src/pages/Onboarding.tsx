@@ -410,11 +410,11 @@ export function Onboarding() {
         </p>
 
         <button
-          onClick={() => setFlow('network-mode')}
+          onClick={() => { persistNetworkMode('solo'); createAccount(); }}
           disabled={loading}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
         >
-          Create Account
+          {loading ? 'Creating...' : 'Create Account'}
         </button>
 
         <button
