@@ -400,19 +400,16 @@ export function Onboarding() {
   if (flow === 'welcome') {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
-        {/* AE mark: an A with two horizontal crossbars instead of the
-            classic one, so the diagonals + bars together evoke a $. Same
-            geometry the installer icon uses (public/icon.svg). */}
+        {/* AE mark: an A with two horizontal crossbars that extend past
+            the diagonals — same geometry as the official website logo
+            (alignment-economy-website/src/app/icon.svg, scaled 32→512).
+            The bars + diagonals together read like a $. */}
         <div className="w-16 h-16 rounded-2xl bg-teal/20 flex items-center justify-center mb-6">
-          <svg viewBox="0 0 512 512" className="w-11 h-11" aria-hidden="true">
-            <path
-              d="M256 96 L80 416 M256 96 L432 416 M186 224 L326 224 M116 352 L396 352"
-              stroke="#0d9488"
-              strokeWidth="48"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
+          <svg viewBox="0 0 512 512" className="w-12 h-12" aria-hidden="true">
+            <path d="M256 64 L80 448" stroke="#0d9488" strokeWidth="45" strokeLinecap="round" fill="none" />
+            <path d="M256 64 L432 448" stroke="#0d9488" strokeWidth="45" strokeLinecap="round" fill="none" />
+            <path d="M112 288 L400 288" stroke="#0d9488" strokeWidth="32" strokeLinecap="round" fill="none" />
+            <path d="M88 368 L424 368" stroke="#0d9488" strokeWidth="32" strokeLinecap="round" fill="none" />
           </svg>
         </div>
         <h1 className="text-3xl font-serif text-white mb-3">Alignment Economy</h1>

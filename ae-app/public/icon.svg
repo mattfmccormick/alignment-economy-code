@@ -1,8 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Matches the website's icon (src/app/icon.svg in alignment-economy-website),
+       scaled from 32x32 to 512x512. Two diagonals form the A; two horizontal
+       crossbars extend past the diagonals on both sides so the glyph reads
+       like a $. The lower bar is wider than the upper one, both thinner than
+       the diagonals. -->
   <rect width="512" height="512" rx="96" fill="#1b2a4a"/>
-  <!-- A-shape with two crossbars (instead of the single classic bar) so the
-       glyph evokes a $ symbol: the diagonals read as the S-curve of the $,
-       the two horizontal bars read as the two short crossing strokes. -->
-  <path d="M256 96 L80 416 M256 96 L432 416 M186 224 L326 224 M116 352 L396 352"
-        stroke="#0d9488" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M256 64 L80 448" stroke="#0d9488" stroke-width="45" stroke-linecap="round" fill="none"/>
+  <path d="M256 64 L432 448" stroke="#0d9488" stroke-width="45" stroke-linecap="round" fill="none"/>
+  <path d="M112 288 L400 288" stroke="#0d9488" stroke-width="32" stroke-linecap="round" fill="none"/>
+  <path d="M88 368 L424 368" stroke="#0d9488" stroke-width="32" stroke-linecap="round" fill="none"/>
 </svg>

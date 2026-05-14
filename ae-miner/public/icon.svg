@@ -1,9 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Same geometry as the website's official AE icon (src/app/icon.svg in
+       alignment-economy-website), but in gold + an "M" badge in the corner
+       so the miner is visually distinguishable from the wallet in the taskbar. -->
   <rect width="512" height="512" rx="96" fill="#1b2a4a"/>
-  <!-- Same two-crossbar A as the wallet, in gold so the miner is visually
-       distinguishable in the taskbar, with the "M" badge to flag role. -->
-  <path d="M256 96 L80 416 M256 96 L432 416 M186 224 L326 224 M116 352 L396 352"
-        stroke="#d4a843" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M256 64 L80 448" stroke="#d4a843" stroke-width="45" stroke-linecap="round" fill="none"/>
+  <path d="M256 64 L432 448" stroke="#d4a843" stroke-width="45" stroke-linecap="round" fill="none"/>
+  <path d="M112 288 L400 288" stroke="#d4a843" stroke-width="32" stroke-linecap="round" fill="none"/>
+  <path d="M88 368 L424 368" stroke="#d4a843" stroke-width="32" stroke-linecap="round" fill="none"/>
   <circle cx="416" cy="416" r="56" fill="#d4a843"/>
   <text x="416" y="436" font-family="system-ui,sans-serif" font-size="56" font-weight="800" text-anchor="middle" fill="#1b2a4a">M</text>
 </svg>
