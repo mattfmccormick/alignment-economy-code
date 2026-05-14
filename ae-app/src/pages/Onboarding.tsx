@@ -400,8 +400,20 @@ export function Onboarding() {
   if (flow === 'welcome') {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
+        {/* AE mark: an A with two horizontal crossbars instead of the
+            classic one, so the diagonals + bars together evoke a $. Same
+            geometry the installer icon uses (public/icon.svg). */}
         <div className="w-16 h-16 rounded-2xl bg-teal/20 flex items-center justify-center mb-6">
-          <span className="text-3xl text-teal">AE</span>
+          <svg viewBox="0 0 512 512" className="w-11 h-11" aria-hidden="true">
+            <path
+              d="M256 96 L80 416 M256 96 L432 416 M186 224 L326 224 M116 352 L396 352"
+              stroke="#0d9488"
+              strokeWidth="48"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          </svg>
         </div>
         <h1 className="text-3xl font-serif text-white mb-3">Alignment Economy</h1>
         <p className="text-gray-400 mb-10 max-w-sm leading-relaxed text-sm">
@@ -421,7 +433,7 @@ export function Onboarding() {
           onClick={() => setFlow('login')}
           className="w-full max-w-xs py-3.5 bg-navy text-gray-300 rounded-xl font-medium border border-navy-light hover:border-gray-500 transition-colors"
         >
-          I Already Have an Account
+          Sign In
         </button>
 
         {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
@@ -1220,7 +1232,7 @@ export function Onboarding() {
           disabled={loading || !loginAccountId.trim() || !loginMnemonic.trim()}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
         >
-          {loading ? 'Verifying...' : 'Recover Wallet'}
+          {loading ? 'Signing in...' : 'Sign In'}
         </button>
 
         <button

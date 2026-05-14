@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <rect width="512" height="512" rx="96" fill="#1b2a4a"/>
-  <path d="M256 96 L80 416 M256 96 L432 416 M152 288 L360 288"
+  <!-- Same two-crossbar A as the wallet, in gold so the miner is visually
+       distinguishable in the taskbar, with the "M" badge to flag role. -->
+  <path d="M256 96 L80 416 M256 96 L432 416 M186 224 L326 224 M116 352 L396 352"
         stroke="#d4a843" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
   <circle cx="416" cy="416" r="56" fill="#d4a843"/>
   <text x="416" y="436" font-family="system-ui,sans-serif" font-size="56" font-weight="800" text-anchor="middle" fill="#1b2a4a">M</text>
