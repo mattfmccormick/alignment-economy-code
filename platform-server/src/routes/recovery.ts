@@ -39,9 +39,9 @@
 
 import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
-import { v4 as uuid } from 'uuid';
 import { hashPassword, randomToken, decryptRecoveryBlob } from '../crypto.js';
 import { type PlatformConfig } from '../config.js';
+import { type Mailer, recoveryEmail } from '../mailer.js';
 
 interface StartBody { email?: unknown }
 interface VerifyBody { token?: unknown }
@@ -61,11 +61,15 @@ function isString(v: unknown, minLen = 1, maxLen = 16384): v is string {
   return typeof v === 'string' && v.length >= minLen && v.length <= maxLen;
 }
 
-export function recoveryRoutes(db: DatabaseSync, config: PlatformConfig): Router {
+export function recoveryRoutes(
+  db: DatabaseSync,
+  config: PlatformConfig,
+  mailer: Mailer,
+): Router {
   const router = Router();
 
   // ── start ───────────────────────────────────────────────────────────
-  router.post('/recover/start', (req, res, next) => {
+  router.post('/recover/start', async (req, res, next) => {
     try {
       const body = (req.body ?? {}) as StartBody;
       const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
@@ -95,12 +99,21 @@ export function recoveryRoutes(db: DatabaseSync, config: PlatformConfig): Router
         now + RECOVERY_TOKEN_TTL_SECONDS,
       );
 
-      // In dev / test mode, include the token in the response so the
-      // wallet can drive the flow without an email server. Phase 4 wires
-      // a real email transport.
+      // Send the email through the configured Mailer. The route owns the
+      // try/catch so a misbehaving SMTP server can never poison the
+      // user-visible response, which is always "we sent it" regardless.
+      const cooldownHours = Math.max(1, Math.round(config.recoveryCooldownSeconds / 3600));
+      try {
+        await mailer.send(recoveryEmail({ email, token, cooldownHours }));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[recover/start] mailer failed:', err);
+      }
+      // Dev mode additionally returns the token in the response body so
+      // tests + the wallet (in pure browser dev) can drive the flow
+      // without an inbox. Production never returns this.
       if (config.emailMode === 'dev') {
         okResponse.data.devToken = token;
-        console.log(`[recover/start] dev mode: token for ${email}: ${token}`);
       }
       res.json(okResponse);
     } catch (e) { next(e); }

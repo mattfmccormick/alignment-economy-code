@@ -83,12 +83,12 @@ Phase 3 ships in the same commit cycle. 8/8 tests pass.
   - Server: checks token is verified, cooldown elapsed, not expired, not already completed; decrypts the OLD recovery blob with its current long-term private key (sanity check the plaintext); updates user with new password hash plus new vault + recovery blobs; rotates the server long-term recovery keypair if policy says so; marks token completed
 - [x] `phase3.test.ts`: full happy path including cooldown shortcut for tests; rejects unverified token; rejects too-soon-after-start; rejects expired; rejects already completed; full revoke-all-sessions + sign-in-with-new-password assertion. (8/8 pass.)
 
-### Phase 4: Email sending
+### Phase 4: Email sending (DONE)
 
-- [ ] Dev mode: log verification and recovery links to stdout so the wallet can drive flows locally without SMTP
-- [ ] Prod mode: SMTP via env-configurable provider (Resend, SendGrid, Postmark)
-- [ ] Templates: signup verification, recovery start
-- [ ] `phase4.test.ts`: dev logger captures the expected URLs, smtp wiring exercised with a mock transporter
+- [x] Dev mode: log verification and recovery links to stdout so the wallet can drive flows locally without SMTP
+- [x] Prod mode: SMTP via env-configurable provider (Resend, SendGrid, Postmark) using nodemailer
+- [x] Templates: signup verification (template exists, wiring optional), recovery start (wired into /recover/start)
+- [x] `phase4.test.ts` (6/6 pass): template renders the token + cooldown, /recover/start invokes the injected mailer with the right shape, unknown email skips the mailer entirely, mailer failure does not poison the user-facing response, SmtpMailer throws helpfully when its env vars are missing
 
 ### Phase 5: SDK additions to `@alignmenteconomy/sdk`
 
