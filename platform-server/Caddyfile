@@ -1,0 +1,32 @@
+# Caddy reverse-proxy config for the VPS deploy.
+#
+# Caddy auto-fetches a Let's Encrypt cert for {$AE_PLATFORM_DOMAIN}
+# the first time it sees a request, as long as your DNS A record
+# points at this server's public IP and ports 80 + 443 are reachable.
+#
+# Local testing without TLS: set AE_PLATFORM_DOMAIN=:80 and Caddy
+# serves plain HTTP on port 80.
+
+{$AE_PLATFORM_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy platform-server:3500 {
+        # Pass through the real client IP for the platform-server's
+        # rate limiter (when we add one).
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+    # Cap request bodies. Vault + recovery blobs are a few KB each;
+    # 1MB is generous headroom that still rejects amplification probes.
+    request_body {
+        max_size 1MB
+    }
+    # Security headers that the platform-server doesn't set itself.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Removes Caddy's identifying header.
+        -Server
+    }
+}

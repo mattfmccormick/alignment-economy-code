@@ -1,0 +1,62 @@
+# Docker Compose stack for self-hosted deploys (Hetzner, DigitalOcean,
+# any VPS that runs Docker). Two services:
+#
+#   - platform-server: the Node app, listening on 3500 internally.
+#   - caddy: reverse-proxy that handles TLS via Let's Encrypt automatically
+#            once you point a domain at the VPS. Set AE_PLATFORM_DOMAIN
+#            in .env to your hostname (e.g. platform.alignmenteconomy.org).
+#
+# Quickstart (one-time setup on the VPS):
+#   1. apt install docker.io docker-compose-plugin
+#   2. git clone the repo
+#   3. cd platform-server
+#   4. cp .env.example .env  # then fill in real secrets
+#   5. docker compose up -d --build
+#
+# To redeploy after a code push:
+#   git pull && docker compose up -d --build
+#
+# For local prod-like testing (no TLS, hit http://localhost):
+#   AE_PLATFORM_DOMAIN=localhost docker compose up
+
+services:
+  platform-server:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      AE_PLATFORM_PORT: "3500"
+      AE_PLATFORM_DB_PATH: /data/platform.db
+      AE_PLATFORM_EMAIL_MODE: ${AE_PLATFORM_EMAIL_MODE:-dev}
+      AE_PLATFORM_RECOVERY_PRIVATE_KEY: ${AE_PLATFORM_RECOVERY_PRIVATE_KEY}
+      AE_PLATFORM_SESSION_SECRET: ${AE_PLATFORM_SESSION_SECRET}
+      AE_PLATFORM_SMTP_HOST: ${AE_PLATFORM_SMTP_HOST:-}
+      AE_PLATFORM_SMTP_PORT: ${AE_PLATFORM_SMTP_PORT:-}
+      AE_PLATFORM_SMTP_USER: ${AE_PLATFORM_SMTP_USER:-}
+      AE_PLATFORM_SMTP_PASSWORD: ${AE_PLATFORM_SMTP_PASSWORD:-}
+      AE_PLATFORM_SMTP_FROM: ${AE_PLATFORM_SMTP_FROM:-}
+    volumes:
+      - platform-data:/data
+    # Internal only; caddy fronts it.
+    expose:
+      - "3500"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      AE_PLATFORM_DOMAIN: ${AE_PLATFORM_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - platform-server
+
+volumes:
+  platform-data:
+  caddy-data:
+  caddy-config:

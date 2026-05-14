@@ -1,0 +1,61 @@
+# Fly.io deployment config for the AE platform-server.
+#
+# Quickstart (one-time setup):
+#   1. Install flyctl:  https://fly.io/docs/hands-on/install-flyctl/
+#   2. From this directory:
+#        flyctl auth signup           # or `flyctl auth login`
+#        flyctl launch --no-deploy    # answers "use existing fly.toml" => yes
+#        flyctl volumes create ae_platform_data --region iad --size 1
+#        flyctl secrets set \
+#          AE_PLATFORM_RECOVERY_PRIVATE_KEY=$(openssl rand -hex 32) \
+#          AE_PLATFORM_SESSION_SECRET=$(openssl rand -hex 32)
+#        flyctl deploy
+#   3. Note the public hostname (something like ae-platform-server.fly.dev).
+#      Set VITE_PLATFORM_URL=https://<hostname>/api/v1 when packaging the
+#      wallet installer so the wallet hits production.
+
+# `app` must be globally unique on Fly.io. If it collides, change it.
+app = "ae-platform-server"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[mounts]]
+  # SQLite database lives in this volume so it survives deploys.
+  source = "ae_platform_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3500
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  # Health check so Fly knows whether the app is alive.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/v1/health"
+
+[[vm]]
+  # Fly's smallest machine. ~$1.94/mo for an always-on one; free if you
+  # leave auto_stop_machines on (it stops when idle and wakes on request).
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+# Production env defaults. Secrets (recovery private key, session secret,
+# SMTP credentials) MUST be set via `flyctl secrets set`, never in this
+# file.
+[env]
+  NODE_ENV = "production"
+  AE_PLATFORM_PORT = "3500"
+  AE_PLATFORM_DB_PATH = "/data/platform.db"
+  # Production should switch to 'smtp' once an SMTP provider is wired
+  # via secrets (AE_PLATFORM_SMTP_HOST, _PORT, _USER, _PASSWORD, _FROM).
+  # Default 'dev' logs links to stdout, which is visible in `flyctl logs`
+  # but obviously not useful for real users.
+  AE_PLATFORM_EMAIL_MODE = "dev"

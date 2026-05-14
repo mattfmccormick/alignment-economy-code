@@ -1,0 +1,47 @@
+# Render.com deployment config for the AE platform-server.
+#
+# Alternative to Fly.io. Render is even simpler to set up but the free
+# tier sleeps after 15 minutes of inactivity (cold start ~30s when
+# someone hits it again). Fine for a low-traffic platform v0; upgrade
+# when traffic warrants.
+#
+# Quickstart (one-time setup):
+#   1. Sign up at https://render.com (GitHub login is fine)
+#   2. New > Blueprint > Connect this repo > Apply
+#      Render reads this file and creates the service automatically
+#   3. In the dashboard, go to the service's Environment tab and set:
+#        AE_PLATFORM_RECOVERY_PRIVATE_KEY  (generate with: openssl rand -hex 32)
+#        AE_PLATFORM_SESSION_SECRET        (same)
+#   4. Save. Render redeploys.
+#   5. Note the .onrender.com URL and set
+#        VITE_PLATFORM_URL=https://<your-app>.onrender.com/api/v1
+#      when packaging the wallet installer.
+
+services:
+  - type: web
+    name: ae-platform-server
+    runtime: docker
+    region: oregon
+    plan: free
+    rootDir: platform-server
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AE_PLATFORM_PORT
+        value: "3500"
+      - key: AE_PLATFORM_DB_PATH
+        value: /data/platform.db
+      - key: AE_PLATFORM_EMAIL_MODE
+        value: dev
+      # Set these in the dashboard, not here. Render's env-from-yaml
+      # would commit them to git.
+      - key: AE_PLATFORM_RECOVERY_PRIVATE_KEY
+        sync: false
+      - key: AE_PLATFORM_SESSION_SECRET
+        sync: false
+    disk:
+      name: ae-platform-data
+      mountPath: /data
+      sizeGB: 1

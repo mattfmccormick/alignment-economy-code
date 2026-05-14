@@ -1,0 +1,80 @@
+# CI for the platform-server package.
+#
+# Two jobs:
+#   - test: runs `npm test` on every push and PR that touches platform-server.
+#           Phase 1-4 ship 30 tests; this catches regressions.
+#   - docker: on push to main, builds the production Docker image and
+#           pushes it to GitHub Container Registry (ghcr.io). Free for
+#           private repos within the standard storage quota. Image lives
+#           at ghcr.io/mattfmccormick/ae-platform-server:latest.
+#
+# What you (Matt) need to do once:
+#   - Settings > Actions > General > Workflow permissions:
+#       "Read and write permissions" (needed for the docker job to
+#        publish to GHCR).
+#
+# Deploys are NOT automated yet. Once the image is in GHCR, the VPS or
+# Fly.io or Render pulls the latest tag. For now `docker compose up -d
+# --build` on the VPS does its own build; the GHCR step is mostly there
+# so we have a versioned artifact history.
+
+name: platform-server CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'platform-server/**'
+      - '.github/workflows/platform-server.yml'
+  pull_request:
+    paths:
+      - 'platform-server/**'
+      - '.github/workflows/platform-server.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: platform-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+          cache: 'npm'
+          cache-dependency-path: platform-server/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  docker:
+    name: Build + push container image
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: platform-server
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ae-platform-server:latest
+            ghcr.io/${{ github.repository_owner }}/ae-platform-server:${{ github.sha }}
+          # GHA cache so subsequent builds are fast
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
