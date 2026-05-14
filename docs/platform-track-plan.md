@@ -121,7 +121,7 @@ Verified end to end in a real browser. Welcome → Create Account → track pick
 - [x] CORS opened on platform-server so the wallet at a different origin can talk to it.
 - [ ] Optional 2FA setup screen (recommended-not-required) — deferred to Phase 6.5; the protocol-level data lives in the users table already.
 - [ ] Session expiry prompt: when the wallet detects an expired session, prompt for password to re-decrypt the vault. Today the privateKey is persisted alongside the session; expiry would just send the user back to /signin where the same password decrypts the vault again. Wire the prompt-on-401 later.
-- [ ] Wallet "Switch to self-custody" action on the More page for platform users. Phase 6.6.
+- [x] Wallet "Switch to self-custody" action on the More page for platform users (Phase 6.6 shipped, `4af5f9e`). Verified end to end: platform-track user opens More → sees Switch card → warning → reveal private key → confirm checkboxes → save self-custody copy → page reloads → wallet now operates in self-custody mode with the same AE account on chain. Platform session optionally kept as a backup.
 
 ### Phase 7: Deploy (artifacts done, waiting on host choice)
 
