@@ -5,10 +5,17 @@ import { saveWalletFromMnemonic, saveFounderWallet, saveJoinerWallet, saveJoined
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
 import { encodeInviteLink, decodeInviteLink } from '../lib/invite';
+import { platformClient, savePlatformSession, sessionFromSdk } from '../lib/platform';
+import { PlatformError } from '@alignmenteconomy/sdk';
 
 type Flow =
   | 'welcome'
   | 'what-is-ae'
+  | 'track-picker'           // After Create Account: choose self-custody or platform
+  | 'platform-signup'        // Platform track: email + password form
+  | 'platform-busy'          // Platform track: in-flight network call
+  | 'platform-forgot-start'  // Platform track: enter email to begin recovery
+  | 'platform-forgot-token'  // Platform track: paste token + new password
   | 'network-mode'
   | 'start-new-form'
   | 'start-new-generating'
@@ -126,6 +133,17 @@ export function Onboarding() {
   const [inviteInput, setInviteInput] = useState('');
   const [inviteParseError, setInviteParseError] = useState<string | null>(null);
 
+  // Platform-track UI state. Email + password go through the platform-server.
+  // Token + new password drive the forgot-password flow when it's reached.
+  const [platformEmail, setPlatformEmail] = useState('');
+  const [platformPassword, setPlatformPassword] = useState('');
+  const [platformConfirm, setPlatformConfirm] = useState('');
+  const [platformError, setPlatformError] = useState<string | null>(null);
+  const [platformBusy, setPlatformBusy] = useState(false);
+  const [platformForgotToken, setPlatformForgotToken] = useState('');
+  const [platformForgotNewPassword, setPlatformForgotNewPassword] = useState('');
+  const [platformForgotInfo, setPlatformForgotInfo] = useState<string | null>(null);
+
   const navigate = useNavigate();
 
   // For confirm-key step: pick three random word indices the user must re-enter.
@@ -137,6 +155,152 @@ export function Onboarding() {
     return Array.from(set).sort((a, b) => a - b);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet?.mnemonic]);
+
+  // Platform track: full signup via the SDK. Email + password go in; the
+  // SDK generates an AE keypair locally, encrypts to a server-held vault
+  // and a server-decryptable recovery blob, hits POST /signup, returns
+  // a session plus the in-memory private key. We persist the session so
+  // restarts skip the password prompt while the token is fresh, and we
+  // route to /verify so the user can opt into proof-of-human just like
+  // self-custody users do.
+  async function handlePlatformSignup() {
+    setPlatformError(null);
+    if (!platformEmail.trim() || !platformPassword) {
+      setPlatformError('Email and password are required.');
+      return;
+    }
+    if (platformPassword.length < 8) {
+      setPlatformError('Password must be at least 8 characters.');
+      return;
+    }
+    if (platformPassword !== platformConfirm) {
+      setPlatformError('Passwords do not match.');
+      return;
+    }
+    setPlatformBusy(true);
+    setFlow('platform-busy');
+    try {
+      const session = await platformClient().signup({
+        email: platformEmail.trim(),
+        password: platformPassword,
+      });
+      savePlatformSession(sessionFromSdk(platformEmail.trim(), session));
+      setFlow('how-balance');
+    } catch (e) {
+      if (e instanceof PlatformError && e.code === 'EMAIL_TAKEN') {
+        setPlatformError("That email is already registered. Try signing in instead.");
+      } else if (e instanceof PlatformError && e.code === 'WEAK_PASSWORD') {
+        setPlatformError('Password must be 8 to 1024 characters.');
+      } else {
+        setPlatformError(e instanceof Error ? e.message : 'Network error. Is the platform server running?');
+      }
+      setFlow('platform-signup');
+    } finally {
+      setPlatformBusy(false);
+    }
+  }
+
+  // Platform track: sign in. Same screen handles "I forgot my password"
+  // by routing to the forgot-start state.
+  async function handlePlatformSignin() {
+    setPlatformError(null);
+    if (!platformEmail.trim() || !platformPassword) {
+      setPlatformError('Enter your email and password.');
+      return;
+    }
+    setPlatformBusy(true);
+    setFlow('platform-busy');
+    try {
+      const session = await platformClient().signin({
+        email: platformEmail.trim(),
+        password: platformPassword,
+      });
+      savePlatformSession(sessionFromSdk(platformEmail.trim(), session));
+      navigate('/');
+    } catch (e) {
+      if (e instanceof PlatformError && e.httpStatus === 401) {
+        setPlatformError('Wrong email or password.');
+      } else {
+        setPlatformError(e instanceof Error ? e.message : 'Network error. Is the platform server running?');
+      }
+      setFlow('login');
+    } finally {
+      setPlatformBusy(false);
+    }
+  }
+
+  // Step 1 of forgot-password: send an email (or in dev mode return the
+  // token directly so we can show it in the UI for testing). Always
+  // surfaces the same "check your email" message so a probing attacker
+  // can't enumerate which emails are registered.
+  async function handlePlatformForgotStart() {
+    setPlatformError(null);
+    if (!platformEmail.trim()) {
+      setPlatformError('Email is required.');
+      return;
+    }
+    setPlatformBusy(true);
+    setFlow('platform-busy');
+    try {
+      const r = await platformClient().recoverStart({ email: platformEmail.trim() });
+      // In dev mode the server hands us the token directly so the UI
+      // can pre-fill it. In production we'd skip this and prompt the
+      // user to paste from email.
+      if (r.devToken) setPlatformForgotToken(r.devToken);
+      setPlatformForgotInfo(
+        r.devToken
+          ? 'Dev mode: token pre-filled below. In prod the user clicks the link in their email.'
+          : 'If that email is registered, a recovery link is on its way. Paste the token from the email below.',
+      );
+      setFlow('platform-forgot-token');
+    } catch (e) {
+      setPlatformError(e instanceof Error ? e.message : 'Network error.');
+      setFlow('platform-forgot-start');
+    } finally {
+      setPlatformBusy(false);
+    }
+  }
+
+  // Step 2 of forgot-password: verify the token, then run the full
+  // recover-complete flow (peek + commit). Server-side cooldown means
+  // this only succeeds 24h after recover/start in production. Tests
+  // can pass AE_PLATFORM_ALLOW_TEST_NOW=1 on the server.
+  async function handlePlatformForgotReset() {
+    setPlatformError(null);
+    if (!platformForgotToken.trim() || !platformForgotNewPassword) {
+      setPlatformError('Token and new password are required.');
+      return;
+    }
+    if (platformForgotNewPassword.length < 8) {
+      setPlatformError('New password must be at least 8 characters.');
+      return;
+    }
+    setPlatformBusy(true);
+    setFlow('platform-busy');
+    try {
+      await platformClient().recoverVerify({ token: platformForgotToken.trim() });
+      const session = await platformClient().recoverComplete({
+        email: platformEmail.trim(),
+        token: platformForgotToken.trim(),
+        newPassword: platformForgotNewPassword,
+      });
+      savePlatformSession(sessionFromSdk(platformEmail.trim(), session));
+      navigate('/');
+    } catch (e) {
+      if (e instanceof PlatformError && e.code === 'COOLDOWN_ACTIVE') {
+        setPlatformError('For your safety we wait 24 hours after a recovery request before allowing a password reset. Come back later.');
+      } else if (e instanceof PlatformError && e.code === 'TOKEN_INVALID') {
+        setPlatformError('That recovery token is invalid or expired.');
+      } else if (e instanceof PlatformError && e.code === 'NOT_VERIFIED') {
+        setPlatformError('Email click was not registered. Try recovery again.');
+      } else {
+        setPlatformError(e instanceof Error ? e.message : 'Network error.');
+      }
+      setFlow('platform-forgot-token');
+    } finally {
+      setPlatformBusy(false);
+    }
+  }
 
   async function runGenesisCeremony() {
     setLoading(true);
@@ -362,6 +526,10 @@ export function Onboarding() {
 
   // Login with an account ID and recovery phrase together.
   const [loginAccountId, setLoginAccountId] = useState('');
+  // Which track the user is signing in under. Defaults to 'platform'
+  // (the new, easier path) because that's what most people will use.
+  // Tabs at the top of the screen let them switch to self-custody.
+  const [loginTrack, setLoginTrack] = useState<'platform' | 'self-custody'>('platform');
   async function handleLoginWithId() {
     const phrase = loginMnemonic.trim();
     const id = loginAccountId.trim();
@@ -419,11 +587,11 @@ export function Onboarding() {
         </p>
 
         <button
-          onClick={() => { persistNetworkMode('solo'); createAccount(); }}
+          onClick={() => setFlow('track-picker')}
           disabled={loading}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
         >
-          {loading ? 'Creating...' : 'Create Account'}
+          Create Account
         </button>
 
         <button
@@ -969,6 +1137,238 @@ export function Onboarding() {
     );
   }
 
+  // Track picker. Shown after the user clicks "Create Account" on the
+  // welcome screen. Self-custody on the left (today's flow, you hold
+  // the 12 words), platform on the right (new: email + password, the
+  // platform holds an encrypted vault). Either tile can be picked; both
+  // explicitly mention you can switch later so the choice doesn't feel
+  // final.
+  if (flow === 'track-picker') {
+    return (
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Pick how you sign in</h2>
+        <p className="text-gray-400 text-sm mb-8 max-w-md text-center leading-relaxed">
+          Think carefully before you choose. Both let you use the Alignment Economy. You can switch sides anytime later.
+        </p>
+
+        <div className="w-full max-w-3xl grid md:grid-cols-2 gap-3 mb-6">
+          <button
+            onClick={() => { persistNetworkMode('solo'); createAccount(); }}
+            disabled={loading}
+            className="text-left bg-navy border border-teal/40 hover:border-teal rounded-xl p-5 transition-colors disabled:opacity-50"
+          >
+            <div className="flex items-start justify-between mb-2">
+              <span className="text-white font-medium text-base">I'll hold my own keys</span>
+              <span className="text-[10px] text-teal bg-teal/15 px-2 py-0.5 rounded-full">Self-custody</span>
+            </div>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              For people who have used a crypto wallet before. We give you 12 words to write on paper. Lose them, lose the account. No one can recover them for you.
+            </p>
+            <p className="text-[11px] text-gray-500 mt-2">
+              You can switch to the platform anytime.
+            </p>
+          </button>
+
+          <button
+            onClick={() => { setPlatformError(null); setFlow('platform-signup'); }}
+            disabled={loading}
+            className="text-left bg-navy border border-navy-light hover:border-gold/60 rounded-xl p-5 transition-colors disabled:opacity-50"
+          >
+            <div className="flex items-start justify-between mb-2">
+              <span className="text-white font-medium text-base">Use the platform</span>
+              <span className="text-[10px] text-gold bg-gold/15 px-2 py-0.5 rounded-full">Easier</span>
+            </div>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              First time? Sign in with email and password. We keep an encrypted copy of your account so you can reset your password the way you would on any normal site.
+            </p>
+            <p className="text-[11px] text-gray-500 mt-2">
+              You can switch to self-custody whenever you want.
+            </p>
+          </button>
+        </div>
+
+        <button
+          onClick={() => setFlow('welcome')}
+          className="text-xs text-gray-500 hover:text-gray-300"
+        >
+          Back
+        </button>
+
+        {error && <p className="text-sm text-red-400 mt-4 max-w-sm text-center">{error}</p>}
+      </div>
+    );
+  }
+
+  // Platform-track signup form. Email + password + confirm. On submit,
+  // handlePlatformSignup walks through the SDK signup flow (key gen,
+  // vault + recovery blob encryption, POST /signup), persists the
+  // session, and routes to /verify.
+  if (flow === 'platform-signup') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 bg-navy-dark py-8">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Use the platform</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center leading-relaxed">
+          We will keep an encrypted copy of your account. Forgot password? You can reset it like any normal site.
+        </p>
+
+        <div className="w-full max-w-sm space-y-3 mb-6">
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Email</label>
+            <input
+              type="email"
+              autoComplete="email"
+              value={platformEmail}
+              onChange={(e) => setPlatformEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+            />
+          </div>
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Password</label>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={platformPassword}
+              onChange={(e) => setPlatformPassword(e.target.value)}
+              placeholder="At least 8 characters"
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+            />
+          </div>
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Confirm password</label>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={platformConfirm}
+              onChange={(e) => setPlatformConfirm(e.target.value)}
+              placeholder="Type it again"
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {platformError && <p className="text-sm text-red-400 mb-4 max-w-sm text-center">{platformError}</p>}
+
+        <button
+          onClick={handlePlatformSignup}
+          disabled={platformBusy}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+        >
+          {platformBusy ? 'Creating account...' : 'Create platform account'}
+        </button>
+
+        <button onClick={() => setFlow('track-picker')} className="text-xs text-gray-500 hover:text-gray-300">
+          Back
+        </button>
+      </div>
+    );
+  }
+
+  // In-flight indicator while a network call resolves. Keeps users from
+  // double-clicking and hides whatever screen they came from.
+  if (flow === 'platform-busy') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
+        <div className="w-12 h-12 rounded-full bg-teal/20 flex items-center justify-center mb-4 animate-pulse">
+          <span className="text-xl text-teal">⋯</span>
+        </div>
+        <p className="text-sm text-gray-400">Working on it...</p>
+      </div>
+    );
+  }
+
+  // Forgot-password step 1: collect the email to start the recovery.
+  if (flow === 'platform-forgot-start') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 bg-navy-dark py-8">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Forgot password</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center leading-relaxed">
+          Enter the email you signed up with. We will send a recovery token. For your safety, you must wait 24 hours after requesting recovery before the password can be reset.
+        </p>
+
+        <div className="w-full max-w-sm space-y-3 mb-6">
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Email</label>
+            <input
+              type="email"
+              autoComplete="email"
+              value={platformEmail}
+              onChange={(e) => setPlatformEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {platformError && <p className="text-sm text-red-400 mb-4 max-w-sm text-center">{platformError}</p>}
+
+        <button
+          onClick={handlePlatformForgotStart}
+          disabled={platformBusy}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+        >
+          {platformBusy ? 'Sending...' : 'Send recovery email'}
+        </button>
+
+        <button onClick={() => setFlow('login')} className="text-xs text-gray-500 hover:text-gray-300">
+          Back to sign in
+        </button>
+      </div>
+    );
+  }
+
+  // Forgot-password step 2: paste the token and set the new password.
+  if (flow === 'platform-forgot-token') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 bg-navy-dark py-8">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Reset password</h2>
+        {platformForgotInfo && (
+          <p className="text-gray-400 text-xs mb-4 max-w-sm text-center leading-relaxed">
+            {platformForgotInfo}
+          </p>
+        )}
+
+        <div className="w-full max-w-sm space-y-3 mb-6">
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">Recovery token</label>
+            <textarea
+              value={platformForgotToken}
+              onChange={(e) => setPlatformForgotToken(e.target.value)}
+              placeholder="Paste the token from your email"
+              rows={3}
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-xs font-mono focus:border-teal focus:outline-none resize-none"
+            />
+          </div>
+          <div className="text-left">
+            <label className="text-xs text-gray-400 block mb-1.5">New password</label>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={platformForgotNewPassword}
+              onChange={(e) => setPlatformForgotNewPassword(e.target.value)}
+              placeholder="At least 8 characters"
+              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {platformError && <p className="text-sm text-red-400 mb-4 max-w-sm text-center">{platformError}</p>}
+
+        <button
+          onClick={handlePlatformForgotReset}
+          disabled={platformBusy}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+        >
+          {platformBusy ? 'Resetting...' : 'Reset password and sign in'}
+        </button>
+
+        <button onClick={() => setFlow('login')} className="text-xs text-gray-500 hover:text-gray-300">
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   // Recovery-phrase education. Shown immediately after the account is
   // created but BEFORE the 12 words are revealed. Most non-technical
   // users have never seen a BIP-39 phrase before; without this screen,
@@ -1190,51 +1590,120 @@ export function Onboarding() {
     );
   }
 
-  // Login flow — recover via mnemonic + account ID
+  // Sign-in screen. Tabs at the top let the user pick which track they
+  // signed up with (platform = email + password, self-custody = account
+  // id + 12-word recovery phrase). The track persists in this local
+  // state only; the wallet picks a track at signup and stores it
+  // separately.
   if (flow === 'login') {
     return (
-      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
-        <h2 className="text-2xl font-serif text-white mb-2">Welcome Back</h2>
-        <p className="text-gray-400 text-sm mb-6 max-w-sm">
-          Enter your Account ID and the 12-word recovery phrase you saved when you first created your wallet.
+      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-8 overflow-y-auto">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Welcome back</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
+          Pick how you originally signed up.
         </p>
 
-        <div className="w-full max-w-sm space-y-4 mb-6">
-          <div className="text-left">
-            <label className="text-xs text-gray-400 block mb-1.5">Account ID</label>
-            <input
-              value={loginAccountId}
-              onChange={(e) => setLoginAccountId(e.target.value)}
-              placeholder="Paste your account ID"
-              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:border-teal focus:outline-none"
-            />
-          </div>
-
-          <div className="text-left">
-            <label className="text-xs text-gray-400 block mb-1.5">Recovery Phrase (12 words)</label>
-            <textarea
-              value={loginMnemonic}
-              onChange={(e) => setLoginMnemonic(e.target.value)}
-              placeholder="word1 word2 word3 ..."
-              rows={3}
-              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:border-teal focus:outline-none resize-none"
-            />
-          </div>
+        <div className="flex gap-1 mb-6 p-1 bg-navy rounded-lg border border-navy-light w-full max-w-sm">
+          <button
+            onClick={() => { setLoginTrack('platform'); setError(null); setPlatformError(null); }}
+            className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${loginTrack === 'platform' ? 'bg-teal/20 text-teal' : 'text-gray-400 hover:text-white'}`}
+          >
+            Email + password
+          </button>
+          <button
+            onClick={() => { setLoginTrack('self-custody'); setError(null); setPlatformError(null); }}
+            className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${loginTrack === 'self-custody' ? 'bg-teal/20 text-teal' : 'text-gray-400 hover:text-white'}`}
+          >
+            Recovery phrase
+          </button>
         </div>
 
-        {error && <p className="text-sm text-red-400 mb-4 max-w-sm">{error}</p>}
+        {loginTrack === 'platform' && (
+          <>
+            <div className="w-full max-w-sm space-y-4 mb-4">
+              <div className="text-left">
+                <label className="text-xs text-gray-400 block mb-1.5">Email</label>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  value={platformEmail}
+                  onChange={(e) => setPlatformEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+                />
+              </div>
+              <div className="text-left">
+                <label className="text-xs text-gray-400 block mb-1.5">Password</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={platformPassword}
+                  onChange={(e) => setPlatformPassword(e.target.value)}
+                  placeholder="Your password"
+                  className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {platformError && <p className="text-sm text-red-400 mb-3 max-w-sm text-center">{platformError}</p>}
+
+            <button
+              onClick={handlePlatformSignin}
+              disabled={platformBusy}
+              className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-2"
+            >
+              {platformBusy ? 'Signing in...' : 'Sign In'}
+            </button>
+
+            <button
+              onClick={() => { setPlatformError(null); setFlow('platform-forgot-start'); }}
+              className="text-xs text-gray-500 hover:text-gray-300 mb-3"
+            >
+              Forgot password
+            </button>
+          </>
+        )}
+
+        {loginTrack === 'self-custody' && (
+          <>
+            <div className="w-full max-w-sm space-y-4 mb-4">
+              <div className="text-left">
+                <label className="text-xs text-gray-400 block mb-1.5">Account ID</label>
+                <input
+                  value={loginAccountId}
+                  onChange={(e) => setLoginAccountId(e.target.value)}
+                  placeholder="Paste your account ID"
+                  className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:border-teal focus:outline-none"
+                />
+              </div>
+
+              <div className="text-left">
+                <label className="text-xs text-gray-400 block mb-1.5">Recovery Phrase (12 words)</label>
+                <textarea
+                  value={loginMnemonic}
+                  onChange={(e) => setLoginMnemonic(e.target.value)}
+                  placeholder="word1 word2 word3 ..."
+                  rows={3}
+                  className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:border-teal focus:outline-none resize-none"
+                />
+              </div>
+            </div>
+
+            {error && <p className="text-sm text-red-400 mb-3 max-w-sm text-center">{error}</p>}
+
+            <button
+              onClick={handleLoginWithId}
+              disabled={loading || !loginAccountId.trim() || !loginMnemonic.trim()}
+              className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+            >
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </>
+        )}
 
         <button
-          onClick={handleLoginWithId}
-          disabled={loading || !loginAccountId.trim() || !loginMnemonic.trim()}
-          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
-        >
-          {loading ? 'Signing in...' : 'Sign In'}
-        </button>
-
-        <button
-          onClick={() => { setFlow('welcome'); setError(null); }}
-          className="text-sm text-gray-500 hover:text-gray-300"
+          onClick={() => { setFlow('welcome'); setError(null); setPlatformError(null); }}
+          className="text-sm text-gray-500 hover:text-gray-300 mt-2"
         >
           Back to Welcome
         </button>

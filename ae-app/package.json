@@ -93,6 +93,7 @@
     }
   },
   "dependencies": {
+    "@alignmenteconomy/sdk": "file:../sdk",
     "@noble/hashes": "^2.2.0",
     "@noble/post-quantum": "^0.6.0",
     "@scure/bip39": "^2.2.0",
