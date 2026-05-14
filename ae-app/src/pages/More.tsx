@@ -3,11 +3,19 @@ import { Link } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { PlatformError } from '@alignmenteconomy/sdk';
 import { loadWallet, clearWallet, saveWalletLegacy } from '../lib/keys';
-import { clearPlatformSession, loadPlatformSession, platformClient } from '../lib/platform';
+import {
+  clearPlatformSession,
+  loadPlatformSession,
+  platformClient,
+  savePlatformSession,
+  sessionFromSdk,
+  isSessionExpired,
+} from '../lib/platform';
 import { truncateId } from '../lib/formatting';
 import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
+import { SessionReauthModal } from '../components/SessionReauthModal';
 
 const links = [
   { to: '/contacts', label: 'Contacts', desc: 'Manage your saved contacts' },
@@ -65,6 +73,16 @@ export function More() {
   const [disableOpen, setDisableOpen] = useState(false);
   const [disableCode, setDisableCode] = useState('');
 
+  // Session re-auth modal. Opens when the platform server rejects our
+  // session token (401) or when we proactively notice the local
+  // expiresAt is in the past. The modal re-runs /signin with the user's
+  // password (and TOTP if needed) and writes the fresh session back.
+  // The pending callback gets re-invoked after a successful refresh so
+  // the user doesn't have to click the original button again.
+  const [reauthOpen, setReauthOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const platformEmail = wallet?.track === 'platform' ? loadPlatformSession()?.email ?? '' : '';
+
   useEffect(() => {
     if (wallet?.accountId) {
       api.getMinerStatus(wallet.accountId).then(res => {
@@ -75,28 +93,88 @@ export function More() {
     }
   }, [wallet?.accountId]);
 
+  /**
+   * Wrap a platform-server call with auto-reauth on 401. The wrapped
+   * function takes the fresh session token. If the call throws a 401
+   * (or the local session is already expired), we open the re-auth
+   * modal; once the user signs in again, we re-run `fn` with the new
+   * token. If the user cancels, we throw a synthetic abort.
+   */
+  function withSession<T>(fn: (sessionToken: string) => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const run = async (forceFresh = false) => {
+        const session = loadPlatformSession();
+        if (!session || (forceFresh ? true : isSessionExpired(session))) {
+          // Stash the retry as a pending action; the modal will fire
+          // it after a successful re-auth.
+          setPendingAction(() => () => {
+            const s2 = loadPlatformSession();
+            if (!s2) { reject(new Error('No session after re-auth')); return; }
+            fn(s2.sessionToken).then(resolve).catch(reject);
+          });
+          setReauthOpen(true);
+          return;
+        }
+        try {
+          const result = await fn(session.sessionToken);
+          resolve(result);
+        } catch (e) {
+          if (e instanceof PlatformError && (e.httpStatus === 401 || e.code === 'AUTH_INVALID' || e.code === 'SESSION_EXPIRED')) {
+            // Server says the token is no good. Same path as the
+            // proactive check above.
+            setPendingAction(() => () => {
+              const s2 = loadPlatformSession();
+              if (!s2) { reject(new Error('No session after re-auth')); return; }
+              fn(s2.sessionToken).then(resolve).catch(reject);
+            });
+            setReauthOpen(true);
+          } else {
+            reject(e);
+          }
+        }
+      };
+      run();
+    });
+  }
+
+  // Handlers wired to the SessionReauthModal.
+  function handleReauthSuccess(s: import('@alignmenteconomy/sdk').PlatformSession) {
+    if (!platformEmail) return;
+    savePlatformSession(sessionFromSdk(platformEmail, s));
+    setReauthOpen(false);
+    const action = pendingAction;
+    setPendingAction(null);
+    if (action) action();
+  }
+
+  function handleReauthCancel() {
+    setReauthOpen(false);
+    setPendingAction(null);
+  }
+
   // Read whether 2FA is on. /me carries the flag so we don't need a
   // separate endpoint. Only relevant for platform users; self-custody
   // wallets don't talk to the platform server.
+  //
+  // If the session is expired, withSession() opens the re-auth modal.
+  // After successful re-auth the call is retried automatically so the
+  // 2FA card lands with the right state without the user clicking
+  // anything twice.
   useEffect(() => {
     if (wallet?.track !== 'platform') return;
-    const session = loadPlatformSession();
-    if (!session) return;
-    platformClient().me(session.sessionToken)
+    withSession(token => platformClient().me(token))
       .then(r => setTwoFaEnabled(r.twoFactorEnabled))
-      .catch(() => { /* session may be expired; leave as null */ });
+      .catch(() => { /* user may have cancelled re-auth; leave as null */ });
+    // withSession reads loadPlatformSession() at call time; the effect
+    // only needs to re-run when the track changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet?.track]);
 
   async function handleStartEnroll() {
     setTwoFaError(null);
-    const session = loadPlatformSession();
-    if (!session) {
-      setTwoFaError('Session expired. Sign in again.');
-      return;
-    }
     setTwoFaBusy(true);
     try {
-      const r = await platformClient().enroll2FA(session.sessionToken);
+      const r = await withSession(token => platformClient().enroll2FA(token));
       setEnrollSecret(r.secret);
       // toDataURL returns a base64-encoded PNG suitable for <img src=>.
       const url = await QRCode.toDataURL(r.otpauthUri, { width: 220, margin: 1 });
@@ -122,14 +200,9 @@ export function More() {
       setTwoFaError('Enter the 6-digit code from your authenticator app.');
       return;
     }
-    const session = loadPlatformSession();
-    if (!session) {
-      setTwoFaError('Session expired. Sign in again.');
-      return;
-    }
     setTwoFaBusy(true);
     try {
-      await platformClient().confirm2FA(session.sessionToken, enrollSecret, enrollCode.trim());
+      await withSession(token => platformClient().confirm2FA(token, enrollSecret, enrollCode.trim()));
       setTwoFaEnabled(true);
       setEnrollOpen(false);
       setEnrollSecret(null);
@@ -168,14 +241,9 @@ export function More() {
       setTwoFaError('Enter your current 6-digit code to confirm.');
       return;
     }
-    const session = loadPlatformSession();
-    if (!session) {
-      setTwoFaError('Session expired. Sign in again.');
-      return;
-    }
     setTwoFaBusy(true);
     try {
-      await platformClient().disable2FA(session.sessionToken, disableCode.trim());
+      await withSession(token => platformClient().disable2FA(token, disableCode.trim()));
       setTwoFaEnabled(false);
       setDisableOpen(false);
       setDisableCode('');
@@ -646,6 +714,14 @@ export function More() {
       >
         Log Out
       </button>
+
+      {reauthOpen && platformEmail && (
+        <SessionReauthModal
+          email={platformEmail}
+          onSuccess={handleReauthSuccess}
+          onCancel={handleReauthCancel}
+        />
+      )}
     </div>
   );
 }

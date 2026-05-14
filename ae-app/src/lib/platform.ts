@@ -64,6 +64,18 @@ export function clearPlatformSession(): void {
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
 }
 
+/** True if the stored session is missing or its expiresAt is in the past.
+ *  Lets callers short-circuit before hitting the network when we already
+ *  know the token won't work. The server is still the source of truth on
+ *  expiry; this is purely a UX hint to skip the 401 round-trip. */
+export function isSessionExpired(s: StoredPlatformSession | null): boolean {
+  if (!s) return true;
+  const now = Math.floor(Date.now() / 1000);
+  // Treat a session about to expire (< 5s remaining) as expired so we
+  // don't race the clock and get a 401 mid-request.
+  return s.expiresAt <= now + 5;
+}
+
 /** Build a StoredPlatformSession from a fresh signup/signin result. */
 export function sessionFromSdk(email: string, s: PlatformSession): StoredPlatformSession {
   return {
