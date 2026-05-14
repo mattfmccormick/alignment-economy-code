@@ -45,7 +45,12 @@ function verifySubscribe(
   return { ok: true };
 }
 
-export function setupWebSocket(server: Server, db?: DatabaseSync): WebSocketServer {
+// `db` is required: without it we cannot verify the subscribe signature,
+// and accepting an unverified `accountId` from the client would let
+// anyone tap any account's event stream. Every real call site (api/server.ts
+// and the WS tests in phase7 / phase65) already passes it; this signature
+// just makes that contract explicit.
+export function setupWebSocket(server: Server, db: DatabaseSync): WebSocketServer {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws) => {
@@ -56,16 +61,10 @@ export function setupWebSocket(server: Server, db?: DatabaseSync): WebSocketServ
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'subscribe') {
-          // db is required to verify a subscription. If a server is started
-          // without it (some tests), treat the connection as unauthenticated:
-          // it can still receive PUBLIC broadcasts but never account-specific
-          // events, because client.accountId stays null.
-          if (db) {
-            const result = verifySubscribe(db, msg.accountId, msg.role || 'participant', msg.timestamp, msg.signature);
-            if (!result.ok) {
-              ws.send(JSON.stringify({ type: 'subscribe:error', reason: result.reason }));
-              return;
-            }
+          const result = verifySubscribe(db, msg.accountId, msg.role || 'participant', msg.timestamp, msg.signature);
+          if (!result.ok) {
+            ws.send(JSON.stringify({ type: 'subscribe:error', reason: result.reason }));
+            return;
           }
           client.accountId = msg.accountId || null;
           client.role = msg.role || 'participant';
