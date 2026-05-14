@@ -1183,7 +1183,7 @@ export function Onboarding() {
           Think carefully before you choose. Both let you use the Alignment Economy. You can switch sides anytime later.
         </p>
 
-        <div className="w-full max-w-3xl grid md:grid-cols-2 gap-3 mb-6">
+        <div className="w-full max-w-4xl grid grid-cols-2 gap-3 mb-6">
           <button
             onClick={() => { persistNetworkMode('solo'); createAccount(); }}
             disabled={loading}
