@@ -105,17 +105,23 @@ Phase 3 ships in the same commit cycle. 8/8 tests pass.
 - [x] Vault helpers (PBKDF2 vault key derivation, AES-GCM encrypt/decrypt, x25519 + chacha20-poly1305 ECIES envelope) inlined in `sdk/src/platform.ts`
 - [x] `sdk/tests/platform.test.ts` spawns a real platform-server and exercises the full happy paths plus wrong-password 401 plus signout-revokes-session plus full recovery flow plus signup-with-existing-keypair (import) (6/6 pass)
 
-### Phase 6: Wallet UI
+### Phase 6: Wallet UI (DONE)
 
-- [ ] New screen: two tiles before account creation
-  - Left tile: "I'll hold my keys" (self-custody, today's flow)
+Verified end to end in a real browser. Welcome → Create Account → track picker → Use the platform → email+password form → dashboard with daily mint, share-of-economy, verify CTA. Same flow works for the self-custody side. Sign In has tabs for both tracks plus a Forgot password link.
+
+- [x] New screen: two tiles before account creation
+  - Left tile: "I'll hold my own keys" (self-custody, today's flow)
   - Right tile: "Use the platform" (custodial, the new flow)
   - Both note that you can switch later
-- [ ] Platform signup form: email + password + confirm password, plus an optional 2FA setup screen after
-- [ ] Platform signin form: email + password, with a "forgot password" link
-- [ ] Forgot password flow: email entry, then a "check your email" confirmation, then the link in the email lands on a reset screen with the new password form
-- [ ] Session expiry prompt: when the wallet detects an expired session, prompt for password to re-decrypt the vault
-- [ ] Wallet "Switch to self-custody" action on the More page for platform users: exports the mnemonic, instructs the user to write it down, optionally deletes the platform vault
+- [x] Platform signup form: email + password + confirm password
+- [x] Platform signin form: email + password, with a "Forgot password" link. Lives under a tab on the existing sign-in screen alongside the self-custody recovery-phrase form.
+- [x] Forgot password flow: email entry → token entry + new password (dev mode pre-fills the token from the server response; prod will require pasting from email).
+- [x] Session persisted in localStorage via `lib/platform.ts`. `loadWallet()` in `lib/keys.ts` was unified across tracks so the rest of the wallet UI is track-agnostic.
+- [x] Platform signup also registers the AE account on chain via `api.createAccount(publicKey)` so the daily mint flows immediately.
+- [x] CORS opened on platform-server so the wallet at a different origin can talk to it.
+- [ ] Optional 2FA setup screen (recommended-not-required) — deferred to Phase 6.5; the protocol-level data lives in the users table already.
+- [ ] Session expiry prompt: when the wallet detects an expired session, prompt for password to re-decrypt the vault. Today the privateKey is persisted alongside the session; expiry would just send the user back to /signin where the same password decrypts the vault again. Wire the prompt-on-401 later.
+- [ ] Wallet "Switch to self-custody" action on the More page for platform users. Phase 6.6.
 
 ### Phase 7: Deploy
 
