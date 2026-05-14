@@ -19,6 +19,33 @@ export function createApp(db: DatabaseSync, config?: PlatformConfig, mailer?: Ma
   const app = express();
   app.use(express.json({ limit: '128kb' }));
 
+  // CORS. The wallet runs from a different origin than the platform-server
+  // (Electron file:// in production, http://localhost:5173 in Vite dev,
+  // eventually a packaged renderer). Allow any origin to call the API
+  // because every endpoint already requires either a bearer session token
+  // or a per-user secret in the body. The blast radius of an opened CORS
+  // policy here is whatever an unauthenticated caller could already do
+  // from curl, which is signup + recover/start. Both are rate-limited
+  // server-side (Phase 7+) and don't leak which emails are registered.
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   // Tests pass explicit config + mailer so they can use deterministic
   // parameters and inspect what would have been emailed. The runtime
   // entry below loads the real config + chooses the SMTP/console mailer

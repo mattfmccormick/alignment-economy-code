@@ -184,6 +184,20 @@ export function Onboarding() {
         email: platformEmail.trim(),
         password: platformPassword,
       });
+      // Also register the account on ae-node so balance / transactions
+      // / verification work. The platform-server only owns the custody
+      // story; the AE protocol layer needs its own row in the accounts
+      // table. Self-custody does this via createAccount() above; the
+      // platform path needs to do it explicitly with the publicKey the
+      // SDK just generated.
+      try {
+        await api.createAccount('individual', session.publicKey);
+      } catch {
+        // The account may already exist if a previous signup attempt
+        // partially completed. Falling through is safe: the platform
+        // session is what determines whether the user is signed in,
+        // and a stale ae-node row is harmless.
+      }
       savePlatformSession(sessionFromSdk(platformEmail.trim(), session));
       setFlow('how-balance');
     } catch (e) {
