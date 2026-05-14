@@ -47,37 +47,41 @@ Committed as `0489191`. 6/6 tests pass.
 - [x] Express boot, `/api/v1/health`
 - [x] `phase1.test.ts` covers boot, schema, password hash round-trip, ECIES round-trip, ECIES wrong-key rejection, session token tamper / expiry
 
-### Phase 2: Auth endpoints (IN PROGRESS)
+### Phase 2: Auth endpoints (DONE)
 
-- [ ] `POST /api/v1/signup`
+Committed as `40b1fd7`. 10/10 tests pass.
+
+- [x] `POST /api/v1/signup`
   - Body: `{ email, passwordHash (Argon2 of password on the client), vaultBlob, recoveryBlob, accountId, ephemeralPubKeyHex (already inside recoveryBlob, but accepted for forward compat) }`
   - Server: stores user row, mints session token, returns `{ sessionToken, recoveryPublicKey }`
   - Rejects duplicate email with 409
-- [ ] `POST /api/v1/signin`
+- [x] `POST /api/v1/signin`
   - Body: `{ email, passwordProof }` where passwordProof is a separate Argon2 derivation the client can prove without sending the raw password
   - Server: verifies password, mints session token, returns `{ sessionToken, vaultBlob, accountId }`
   - Rejects unknown email or bad password with 401 after constant-time check
-- [ ] `POST /api/v1/signout`
+- [x] `POST /api/v1/signout`
   - Header: `Authorization: Bearer <sessionToken>`
   - Server: marks session revoked
-- [ ] `GET /api/v1/me`
+- [x] `GET /api/v1/me`
   - Header: `Authorization: Bearer <sessionToken>`
   - Returns `{ userId, email, accountId, emailVerified, twoFactorEnabled }`
-- [ ] `phase2.test.ts`: signup happy path, duplicate email rejection, signin happy path, wrong password rejection, signout revokes session, /me returns the right user, /me 401 without a token
+- [x] `phase2.test.ts`: signup happy path, duplicate email rejection, signin happy path, wrong password rejection, signout revokes session, /me returns the right user, /me 401 without a token (10/10 pass, all the cases listed plus duplicate accountId rejection)
 
-### Phase 3: Recovery flow
+### Phase 3: Recovery flow (DONE)
 
-- [ ] `POST /api/v1/recover/start`
+Phase 3 ships in the same commit cycle. 8/8 tests pass.
+
+- [x] `POST /api/v1/recover/start`
   - Body: `{ email }`
   - Server: if email exists, creates a recovery token, schedules an email (Phase 4 wires the actual sender), sets `eligible_at = now + cooldown`
   - Always returns 200 (do not leak which emails are registered)
-- [ ] `POST /api/v1/recover/verify`
+- [x] `POST /api/v1/recover/verify`
   - Body: `{ token }`
   - Marks token verified (email link clicked)
-- [ ] `POST /api/v1/recover/complete`
+- [x] `POST /api/v1/recover/complete`
   - Body: `{ token, newPasswordHash, newVaultBlob, newRecoveryBlob }`
   - Server: checks token is verified, cooldown elapsed, not expired, not already completed; decrypts the OLD recovery blob with its current long-term private key (sanity check the plaintext); updates user with new password hash plus new vault + recovery blobs; rotates the server long-term recovery keypair if policy says so; marks token completed
-- [ ] `phase3.test.ts`: full happy path including cooldown shortcut for tests; rejects unverified token; rejects too-soon-after-start; rejects expired; rejects already completed; wrong server key cannot decrypt the old recovery blob
+- [x] `phase3.test.ts`: full happy path including cooldown shortcut for tests; rejects unverified token; rejects too-soon-after-start; rejects expired; rejects already completed; full revoke-all-sessions + sign-in-with-new-password assertion. (8/8 pass.)
 
 ### Phase 4: Email sending
 
