@@ -1,4 +1,5 @@
 import { mnemonicToKeypair } from './crypto';
+import { loadPlatformSession, clearPlatformSession } from './platform';
 
 const STORAGE_KEY = 'ae_wallet';
 const LEGACY_KEY = 'ae_wallet_legacy';
@@ -22,7 +23,15 @@ interface LoadedWallet {
   accountId: string;
   publicKey: string;
   privateKey: string;
+  /** BIP39 mnemonic. Only set on self-custody V2 wallets. */
   mnemonic?: string;
+  /** Which onboarding track this wallet came in through. Defaults to
+   *  'self-custody' for legacy wallets and founder/joiner keystores. */
+  track: 'self-custody' | 'platform';
+  /** Platform-track only: the email the user signed up with. */
+  email?: string;
+  /** Platform-track only: server session token for platform-server API calls. */
+  sessionToken?: string;
 }
 
 export function saveWalletFromMnemonic(accountId: string, publicKey: string, mnemonic: string): void {
@@ -37,39 +46,68 @@ export function saveWalletLegacy(wallet: StoredWalletV1): void {
 }
 
 export function loadWallet(): LoadedWallet | null {
+  // Self-custody track is checked first so an existing self-custody wallet
+  // wins over an accidentally-stale platform session. Platform-track users
+  // who installed before the SDK lookup landed don't have ae_wallet set
+  // and fall through to the platform branch.
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
-  try {
-    const data = JSON.parse(raw);
-    if (data.version === 2 && data.mnemonic) {
-      const kp = mnemonicToKeypair(data.mnemonic);
-      return {
-        accountId: data.accountId,
-        publicKey: data.publicKey || kp.publicKey,
-        privateKey: kp.privateKey,
-        mnemonic: data.mnemonic,
-      };
+  if (raw) {
+    try {
+      const data = JSON.parse(raw);
+      if (data.version === 2 && data.mnemonic) {
+        const kp = mnemonicToKeypair(data.mnemonic);
+        return {
+          accountId: data.accountId,
+          publicKey: data.publicKey || kp.publicKey,
+          privateKey: kp.privateKey,
+          mnemonic: data.mnemonic,
+          track: 'self-custody',
+        };
+      }
+      // V1 fallback: mnemonic-less wallets keep working until the user re-creates.
+      if (data.privateKey) {
+        return {
+          accountId: data.accountId,
+          publicKey: data.publicKey || '',
+          privateKey: data.privateKey,
+          track: 'self-custody',
+        };
+      }
+    } catch {
+      // fall through to platform check
     }
-    // V1 fallback: mnemonic-less wallets keep working until the user re-creates.
-    if (data.privateKey) {
-      return {
-        accountId: data.accountId,
-        publicKey: data.publicKey || '',
-        privateKey: data.privateKey,
-      };
-    }
-    return null;
-  } catch {
-    return null;
   }
+
+  // Platform track. The wallet is signed in if a session exists locally.
+  // (We don't re-validate the session against the platform-server on
+  // every load; if it's expired or revoked, the next /me or signed API
+  // call will get 401 and the AppShell's error banner will tell the
+  // user to re-sign-in. That's good enough for v1.)
+  const platform = loadPlatformSession();
+  if (platform) {
+    return {
+      accountId: platform.accountId,
+      publicKey: platform.publicKey,
+      privateKey: platform.privateKey,
+      track: 'platform',
+      email: platform.email,
+      sessionToken: platform.sessionToken,
+    };
+  }
+
+  return null;
 }
 
 export function clearWallet(): void {
   localStorage.removeItem(STORAGE_KEY);
+  clearPlatformSession();
 }
 
 export function hasWallet(): boolean {
-  return localStorage.getItem(STORAGE_KEY) !== null;
+  return (
+    localStorage.getItem(STORAGE_KEY) !== null ||
+    loadPlatformSession() !== null
+  );
 }
 
 // Back-compat alias: existing code calls saveWallet({...privateKey}) for legacy login.
