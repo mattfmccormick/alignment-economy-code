@@ -90,15 +90,20 @@ Phase 3 ships in the same commit cycle. 8/8 tests pass.
 - [x] Templates: signup verification (template exists, wiring optional), recovery start (wired into /recover/start)
 - [x] `phase4.test.ts` (6/6 pass): template renders the token + cooldown, /recover/start invokes the injected mailer with the right shape, unknown email skips the mailer entirely, mailer failure does not poison the user-facing response, SmtpMailer throws helpfully when its env vars are missing
 
-### Phase 5: SDK additions to `@alignmenteconomy/sdk`
+### Phase 5: SDK additions to `@alignmenteconomy/sdk` (DONE)
 
-- [ ] `client.signupPlatform({ email, password })`: client generates AE keypair, derives password key, encrypts vault, encrypts recovery, posts signup, stores session token
-- [ ] `client.signinPlatform({ email, password })`: posts signin, decrypts vault locally, returns the in-memory private key
-- [ ] `client.signoutPlatform()`
-- [ ] `client.recoverStart({ email })`
-- [ ] `client.recoverComplete({ token, newPassword })`: derives new password key, decrypts the OLD recovery blob locally if the server returned plaintext, re-encrypts to a new vault blob, posts complete
-- [ ] Vault helpers: `encryptVault(privateKey, password)`, `decryptVault(blob, password)`, `encryptRecovery(privateKey, serverPubKey)`
-- [ ] SDK tests against a spawned platform-server
+`PlatformClient` class shipped in `sdk/src/platform.ts`. 6/6 integration tests against a real spawned platform-server. Full SDK suite is now 20/20.
+
+- [x] `client.signup({ email, password, existingKeypair? })`: client generates (or reuses) an AE keypair, derives a per-user PBKDF2-SHA256 vault key (600k iterations, email-anchored salt), encrypts the AE private key with AES-256-GCM, also encrypts to the server's recovery x25519 public key via chacha20-poly1305 envelope, posts /signup, returns `{sessionToken, expiresAt, accountId, privateKey, publicKey}`
+- [x] `client.signin({ email, password })`: posts /signin, decrypts the vault locally, returns same session shape
+- [x] `client.signout(sessionToken)`
+- [x] `client.me(sessionToken)`
+- [x] `client.getRecoveryPublicKey()` (new GET /recovery-pubkey endpoint added to platform-server)
+- [x] `client.recoverStart({ email })`
+- [x] `client.recoverVerify({ token })`
+- [x] `client.recoverComplete({ email, token, newPassword })`: drives the full server-side decrypt → client re-encrypt → server commit dance through new `POST /recover/peek` endpoint (also added to platform-server). Returns a fresh signed-in session under the new password.
+- [x] Vault helpers (PBKDF2 vault key derivation, AES-GCM encrypt/decrypt, x25519 + chacha20-poly1305 ECIES envelope) inlined in `sdk/src/platform.ts`
+- [x] `sdk/tests/platform.test.ts` spawns a real platform-server and exercises the full happy paths plus wrong-password 401 plus signout-revokes-session plus full recovery flow plus signup-with-existing-keypair (import) (6/6 pass)
 
 ### Phase 6: Wallet UI
 

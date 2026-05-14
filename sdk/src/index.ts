@@ -30,6 +30,9 @@
 export { AlignmentEconomyClient, SDKError, signTransaction } from './client.js';
 export type { ClientOptions } from './client.js';
 
+export { PlatformClient, PlatformError } from './platform.js';
+export type { PlatformClientOptions, PlatformSession, SignupArgs } from './platform.js';
+
 export {
   generateKeyPair,
   deriveAccountId,

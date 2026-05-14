@@ -19,15 +19,25 @@ export function createApp(db: DatabaseSync, config?: PlatformConfig, mailer?: Ma
   const app = express();
   app.use(express.json({ limit: '128kb' }));
 
-  app.get('/api/v1/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: Math.floor(Date.now() / 1000) });
-  });
-
   // Tests pass explicit config + mailer so they can use deterministic
   // parameters and inspect what would have been emailed. The runtime
   // entry below loads the real config + chooses the SMTP/console mailer
   // based on env.
-  const cfg = config ?? loadConfig();
+  const cfgPre = config ?? loadConfig();
+
+  app.get('/api/v1/health', (_req, res) => {
+    res.json({ status: 'ok', timestamp: Math.floor(Date.now() / 1000) });
+  });
+
+  // Public endpoint: the SDK calls this before signup so it can encrypt
+  // the recovery blob with the server's long-term recovery public key.
+  // The key itself is not a secret; publishing it just lets clients
+  // know which key envelope to seal their plaintext under.
+  app.get('/api/v1/recovery-pubkey', (_req, res) => {
+    res.json({ success: true, data: { recoveryPublicKey: cfgPre.recoveryPublicKey } });
+  });
+
+  const cfg = cfgPre;
   const m = mailer ?? createMailer(cfg);
   app.use('/api/v1', authRoutes(db, cfg));
   app.use('/api/v1', recoveryRoutes(db, cfg, m));
@@ -44,10 +54,15 @@ export function openDb(path: string): DatabaseSync {
   return db;
 }
 
-// Bootstrap when the file is run directly (`tsx watch src/index.ts`).
-const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` ||
-               process.argv[1]?.endsWith('src/index.ts') ||
-               process.argv[1]?.endsWith('dist/index.js');
+// Bootstrap when the file is run directly (`tsx src/index.ts`, `tsx watch`,
+// or `node dist/index.js`). Normalize backslashes to forward slashes so the
+// suffix check works on Windows.
+const argv1 = (process.argv[1] ?? '').replace(/\\/g, '/');
+const isMain =
+  argv1.endsWith('platform-server/src/index.ts') ||
+  argv1.endsWith('platform-server/dist/index.js') ||
+  argv1.endsWith('/src/index.ts') ||
+  argv1.endsWith('/dist/index.js');
 
 if (isMain) {
   const config = loadConfig();

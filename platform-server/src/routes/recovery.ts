@@ -148,6 +148,81 @@ export function recoveryRoutes(
     } catch (e) { next(e); }
   });
 
+  // ── peek ────────────────────────────────────────────────────────────
+  //
+  // The client needs the OLD plaintext (the AE private key that was
+  // sealed in the recovery_blob at signup) before it can re-encrypt the
+  // vault with the new password. /recover/peek decrypts the recovery_blob
+  // server-side and returns the plaintext over TLS, but ONLY if the
+  // token has been verified AND the cooldown has elapsed. The token is
+  // not consumed by peek; the client still has to call /recover/complete
+  // to finalize. Peek is idempotent (callable repeatedly) so a flaky
+  // network doesn't burn a token.
+  router.post('/recover/peek', (req, res, next) => {
+    try {
+      const body = req.body as { token?: unknown; now?: unknown };
+      if (!isString(body.token, 1, 256)) {
+        res.status(400).json({ success: false, error: { code: 'INVALID_TOKEN', message: 'token required' } });
+        return;
+      }
+      const row = db
+        .prepare(
+          `SELECT token, user_id, eligible_at, expires_at, verified_at, completed_at
+           FROM recovery_tokens WHERE token = ?`,
+        )
+        .get(body.token) as
+        | { token: string; user_id: string; eligible_at: number; expires_at: number; verified_at: number | null; completed_at: number | null }
+        | undefined;
+
+      const allowTestNow = process.env.AE_PLATFORM_ALLOW_TEST_NOW === '1';
+      const now = allowTestNow && typeof body.now === 'number' ? Math.floor(body.now) : Math.floor(Date.now() / 1000);
+
+      if (!row || row.expires_at < now || row.completed_at !== null) {
+        res.status(404).json({ success: false, error: { code: 'TOKEN_INVALID', message: 'Recovery link not valid' } });
+        return;
+      }
+      if (row.verified_at === null) {
+        res.status(403).json({ success: false, error: { code: 'NOT_VERIFIED', message: 'Click the link in your email first' } });
+        return;
+      }
+      if (row.eligible_at > now) {
+        res.status(403).json({
+          success: false,
+          error: { code: 'COOLDOWN_ACTIVE', message: 'Recovery cooldown still active', details: { eligibleAt: row.eligible_at } },
+        });
+        return;
+      }
+
+      const user = db
+        .prepare('SELECT recovery_blob, account_id FROM users WHERE id = ?')
+        .get(row.user_id) as { recovery_blob: string; account_id: string } | undefined;
+      if (!user) {
+        res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+        return;
+      }
+
+      let plaintext: Uint8Array;
+      try {
+        plaintext = decryptRecoveryBlob(user.recovery_blob, config.recoveryPrivateKey);
+      } catch {
+        res.status(500).json({
+          success: false,
+          error: { code: 'RECOVERY_KEY_LOST', message: 'Server-side recovery key cannot decrypt the user vault. Contact support.' },
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          plaintextHex: Buffer.from(plaintext).toString('hex'),
+          accountId: user.account_id,
+          recoveryPublicKey: config.recoveryPublicKey,
+        },
+      });
+    } catch (e) { next(e); }
+  });
+
   // ── complete ────────────────────────────────────────────────────────
   router.post('/recover/complete', async (req, res, next) => {
     try {
