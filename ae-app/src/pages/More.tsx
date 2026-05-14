@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { loadWallet, clearWallet } from '../lib/keys';
+import { loadWallet, clearWallet, saveWalletLegacy } from '../lib/keys';
+import { clearPlatformSession } from '../lib/platform';
 import { truncateId } from '../lib/formatting';
 import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
@@ -25,6 +26,18 @@ export function More() {
   const [showPhraseConfirm, setShowPhraseConfirm] = useState(false);
   const [phraseRevealed, setPhraseRevealed] = useState(false);
   const [phraseCopied, setPhraseCopied] = useState(false);
+
+  // Platform-track only: "Switch to self-custody" export flow.
+  //   - confirm: warning step before showing the private key
+  //   - revealed: private key visible, awaiting the "I've saved it" check
+  //   - savedAck: the user has acknowledged saving; flip the wallet to
+  //     self-custody on the next click. We then refresh the page so
+  //     loadWallet() returns the self-custody copy first.
+  const [showSwitchConfirm, setShowSwitchConfirm] = useState(false);
+  const [switchRevealed, setSwitchRevealed] = useState(false);
+  const [switchAck, setSwitchAck] = useState(false);
+  const [keyCopied, setKeyCopied] = useState(false);
+  const [keepPlatformBackup, setKeepPlatformBackup] = useState(true);
 
   useEffect(() => {
     if (wallet?.accountId) {
@@ -86,6 +99,48 @@ export function More() {
     setPhraseCopied(false);
   }
 
+  function copyPrivateKey() {
+    if (wallet?.privateKey) {
+      navigator.clipboard.writeText(wallet.privateKey);
+      setKeyCopied(true);
+      setTimeout(() => setKeyCopied(false), 2000);
+    }
+  }
+
+  function hideSwitch() {
+    setShowSwitchConfirm(false);
+    setSwitchRevealed(false);
+    setSwitchAck(false);
+    setKeyCopied(false);
+  }
+
+  /**
+   * Flip the wallet from platform-track to self-custody. Writes a V1
+   * self-custody wallet using the same AE keypair, then optionally
+   * clears the platform session. Either way the next call to
+   * loadWallet() will return self-custody first (because keys.ts checks
+   * STORAGE_KEY before the platform session).
+   *
+   * Important property: this is reversible. The AE account on chain
+   * doesn't change. Even if the user later clears their self-custody
+   * wallet, they can sign back into the platform with their email and
+   * password (as long as the server-side vault is still there).
+   */
+  function completeSwitchToSelfCustody() {
+    if (!wallet) return;
+    saveWalletLegacy({
+      accountId: wallet.accountId,
+      publicKey: wallet.publicKey,
+      privateKey: wallet.privateKey,
+    });
+    if (!keepPlatformBackup) {
+      clearPlatformSession();
+    }
+    // Force a fresh render so the rest of the wallet picks up the new
+    // track. Simpler than threading state through every component.
+    window.location.href = '/';
+  }
+
   return (
     <div className="p-4 space-y-4">
       <h2 className="text-xl font-serif text-white">More</h2>
@@ -101,8 +156,106 @@ export function More() {
         </div>
       </div>
 
-      {/* Recovery phrase export. Mnemonic-derived V2 wallets only. V1 wallets
-          predate mnemonics and would need re-creation to back up. */}
+      {/* Track-specific recovery card.
+          - Self-custody V2 (mnemonic-derived): existing "Export Recovery
+            Phrase" flow, shows 12 words.
+          - Self-custody V1 (legacy or post-platform-switch): shows the
+            raw private key as the recovery artifact.
+          - Platform: shows the "Switch to self-custody" CTA. The export
+            writes the same AE keypair as a self-custody wallet so the
+            user owns their keys directly from then on. */}
+      {wallet?.track === 'platform' ? (
+        <div className="bg-navy rounded-xl p-4 border border-navy-light">
+          <h3 className="text-sm font-medium text-white mb-1">Switch to self-custody</h3>
+          {switchRevealed ? (
+            <div className="space-y-3">
+              <p className="text-xs text-red-400">
+                This is your AE private key. Anyone with these characters controls your account. Do not screenshot, email, or paste it anywhere online.
+              </p>
+              <p className="text-xs text-gray-400">
+                AE uses a post-quantum signature scheme (ML-DSA), so the private key is much longer than a typical crypto key. Don't try to write it on paper. The realistic workflow is: copy it to a trusted password manager (1Password, Bitwarden, Apple Keychain), store it offline on an encrypted drive, or print it on paper and lock it up.
+              </p>
+              <div className="bg-navy-dark rounded-md p-3 max-h-32 overflow-y-auto break-all font-mono text-[10px] text-white">
+                {wallet.privateKey}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={copyPrivateKey}
+                  className="flex-1 py-2 bg-gold/20 text-gold rounded-lg text-sm hover:bg-gold/30 transition-colors"
+                >
+                  {keyCopied ? 'Copied!' : 'Copy private key'}
+                </button>
+                <button
+                  onClick={hideSwitch}
+                  className="flex-1 py-2 bg-navy-light text-gray-300 rounded-lg text-sm hover:bg-navy-dark transition-colors"
+                >
+                  Hide
+                </button>
+              </div>
+              <label className="flex items-start gap-2 text-xs text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={switchAck}
+                  onChange={(e) => setSwitchAck(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>I have saved my private key somewhere safe. I understand the platform can no longer help me recover this account if I lose it.</span>
+              </label>
+              <label className="flex items-start gap-2 text-xs text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={keepPlatformBackup}
+                  onChange={(e) => setKeepPlatformBackup(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>Keep my platform account as a backup. (Uncheck to fully leave the platform; you will lose the email-based recovery option.)</span>
+              </label>
+              <button
+                onClick={completeSwitchToSelfCustody}
+                disabled={!switchAck}
+                className="w-full py-2.5 bg-teal text-white rounded-lg text-sm font-medium hover:bg-teal-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Switch to self-custody
+              </button>
+            </div>
+          ) : showSwitchConfirm ? (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-400">
+                Right now your account is on the platform: we hold an encrypted copy and you can reset your password by email. If you switch to self-custody, you will hold the only copy of the key. Lose it, lose the account.
+              </p>
+              <p className="text-xs text-red-400">
+                Make sure no one is looking at your screen before you continue.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSwitchConfirm(false)}
+                  className="flex-1 py-2 bg-navy-light text-gray-300 rounded-lg text-sm hover:bg-navy-dark transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => setSwitchRevealed(true)}
+                  className="flex-1 py-2 bg-gold/20 text-gold rounded-lg text-sm hover:bg-gold/30 transition-colors"
+                >
+                  Show private key
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <p className="text-xs text-gray-400 mb-3">
+                You signed up with email and password. The platform holds an encrypted copy of your account, and you can reset your password from the sign-in screen. Switching to self-custody means you hold the only copy of the key: more control, more responsibility.
+              </p>
+              <button
+                onClick={() => setShowSwitchConfirm(true)}
+                className="w-full py-2.5 bg-gold/20 text-gold rounded-lg text-sm font-medium hover:bg-gold/30 transition-colors"
+              >
+                Switch to self-custody
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="bg-navy rounded-xl p-4 border border-navy-light">
         <h3 className="text-sm font-medium text-white mb-1">Recovery Phrase</h3>
         {wallet?.mnemonic ? (
@@ -146,12 +299,25 @@ export function More() {
               </button>
             </div>
           )
+        ) : wallet?.privateKey ? (
+          // V1 wallet (legacy or post-platform-switch). No mnemonic, so
+          // the raw private key is the recovery artifact. Same export
+          // pattern as the platform switch flow.
+          <div>
+            <p className="text-xs text-gray-400 mb-3">
+              This wallet doesn't have a 12-word phrase. Your AE private key is the recovery artifact. Keep it safe.
+            </p>
+            <p className="text-[10px] text-gray-500 break-all font-mono bg-navy-dark rounded p-2">
+              {wallet.privateKey.slice(0, 24)}…
+            </p>
+          </div>
         ) : (
           <p className="text-xs text-gray-500">
-            This wallet predates the recovery-phrase format. Recovery export isn't available. To enable it, log out and create a new account.
+            No recovery artifact available for this wallet. To enable it, log out and create a new account.
           </p>
         )}
       </div>
+      )}
 
       {/* Theme toggle */}
       <div className="bg-navy rounded-xl p-4 border border-navy-light flex items-center justify-between">
