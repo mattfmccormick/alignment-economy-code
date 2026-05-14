@@ -13,6 +13,7 @@ import { loadConfig, type PlatformConfig } from './config.js';
 import { initializeSchema } from './schema.js';
 import { authRoutes } from './routes/auth.js';
 import { recoveryRoutes } from './routes/recovery.js';
+import { twofaRoutes } from './routes/twofa.js';
 import { createMailer, type Mailer } from './mailer.js';
 
 export function createApp(db: DatabaseSync, config?: PlatformConfig, mailer?: Mailer): Application {
@@ -68,6 +69,7 @@ export function createApp(db: DatabaseSync, config?: PlatformConfig, mailer?: Ma
   const m = mailer ?? createMailer(cfg);
   app.use('/api/v1', authRoutes(db, cfg));
   app.use('/api/v1', recoveryRoutes(db, cfg, m));
+  app.use('/api/v1', twofaRoutes(db, cfg));
 
   return app;
 }

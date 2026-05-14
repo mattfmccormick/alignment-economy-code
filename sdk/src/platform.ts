@@ -196,8 +196,13 @@ export class PlatformClient {
     };
   }
 
-  /** Sign in with email + password. Decrypts the vault locally. */
-  async signin(args: { email: string; password: string }): Promise<PlatformSession> {
+  /**
+   * Sign in with email + password. Decrypts the vault locally. If the
+   * user has 2FA enabled, callers either pass `code` up front or catch
+   * a `PlatformError` with `code: 'TOTP_REQUIRED'` and re-call with
+   * the user's TOTP. `TOTP_INVALID` means the code was wrong.
+   */
+  async signin(args: { email: string; password: string; code?: string }): Promise<PlatformSession> {
     const data = await this.request<{ sessionToken: string; expiresAt: number; accountId: string; vaultBlob: string; userId: string }>(
       'POST',
       '/signin',
@@ -224,6 +229,25 @@ export class PlatformClient {
 
   async signout(sessionToken: string): Promise<void> {
     await this.request<{ revoked: boolean }>('POST', '/signout', undefined, sessionToken);
+  }
+
+  // ── 2FA / TOTP ────────────────────────────────────────────────────────
+
+  /** Start 2FA enrollment. Returns a fresh secret + otpauth URI for QR
+   *  rendering. Not yet committed server-side; finalize with confirm2FA. */
+  async enroll2FA(sessionToken: string): Promise<{ secret: string; otpauthUri: string }> {
+    return this.request('POST', '/2fa/enroll', {}, sessionToken);
+  }
+
+  /** Finalize 2FA enrollment. Server verifies the code matches the secret
+   *  before persisting; if not, throws PlatformError(code='TOTP_INVALID'). */
+  async confirm2FA(sessionToken: string, secret: string, code: string): Promise<{ enabled: true }> {
+    return this.request('POST', '/2fa/confirm', { secret, code }, sessionToken);
+  }
+
+  /** Turn 2FA off. Requires both a valid session AND a current TOTP. */
+  async disable2FA(sessionToken: string, code: string): Promise<{ disabled: true }> {
+    return this.request('POST', '/2fa/disable', { code }, sessionToken);
   }
 
   async me(sessionToken: string): Promise<{ userId: string; email: string; accountId: string; emailVerified: boolean; twoFactorEnabled: boolean }> {

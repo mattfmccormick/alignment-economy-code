@@ -14,6 +14,7 @@ type Flow =
   | 'track-picker'           // After Create Account: choose self-custody or platform
   | 'platform-signup'        // Platform track: email + password form
   | 'platform-busy'          // Platform track: in-flight network call
+  | 'platform-totp'          // Platform track: 2FA prompt after email + password OK
   | 'platform-forgot-start'  // Platform track: enter email to begin recovery
   | 'platform-forgot-token'  // Platform track: paste token + new password
   | 'network-mode'
@@ -143,6 +144,8 @@ export function Onboarding() {
   const [platformForgotToken, setPlatformForgotToken] = useState('');
   const [platformForgotNewPassword, setPlatformForgotNewPassword] = useState('');
   const [platformForgotInfo, setPlatformForgotInfo] = useState<string | null>(null);
+  // 6-digit TOTP code when the user has 2FA on.
+  const [platformTotpCode, setPlatformTotpCode] = useState('');
 
   const navigate = useNavigate();
 
@@ -215,8 +218,10 @@ export function Onboarding() {
   }
 
   // Platform track: sign in. Same screen handles "I forgot my password"
-  // by routing to the forgot-start state.
-  async function handlePlatformSignin() {
+  // by routing to the forgot-start state. If the user has 2FA on, the
+  // first call fails with TOTP_REQUIRED; we route to platform-totp and
+  // the second call passes the code along with email + password.
+  async function handlePlatformSignin(opts: { code?: string } = {}) {
     setPlatformError(null);
     if (!platformEmail.trim() || !platformPassword) {
       setPlatformError('Enter your email and password.');
@@ -228,16 +233,29 @@ export function Onboarding() {
       const session = await platformClient().signin({
         email: platformEmail.trim(),
         password: platformPassword,
+        code: opts.code,
       });
       savePlatformSession(sessionFromSdk(platformEmail.trim(), session));
+      setPlatformTotpCode('');
       navigate('/');
     } catch (e) {
-      if (e instanceof PlatformError && e.httpStatus === 401) {
+      if (e instanceof PlatformError && e.code === 'TOTP_REQUIRED') {
+        // First-stage success: password was right, just need the code.
+        setPlatformError(null);
+        setPlatformTotpCode('');
+        setFlow('platform-totp');
+      } else if (e instanceof PlatformError && e.code === 'TOTP_INVALID') {
+        // Wrong code. Stay on the TOTP screen so the user can retry
+        // without retyping the password.
+        setPlatformError('That 6-digit code did not match. Try again.');
+        setFlow('platform-totp');
+      } else if (e instanceof PlatformError && e.httpStatus === 401) {
         setPlatformError('Wrong email or password.');
+        setFlow('login');
       } else {
         setPlatformError(e instanceof Error ? e.message : 'Network error. Is the platform server running?');
+        setFlow('login');
       }
-      setFlow('login');
     } finally {
       setPlatformBusy(false);
     }
@@ -1604,6 +1622,51 @@ export function Onboarding() {
     );
   }
 
+  // Platform-track 2FA prompt. The user already got past email +
+  // password; the server replied TOTP_REQUIRED. We hold the password
+  // in state for the retry so the user only types it once.
+  if (flow === 'platform-totp') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 bg-navy-dark py-8">
+        <h2 className="text-2xl font-serif text-white mb-2 text-center">Two-factor code</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
+          Open your authenticator app and type the 6-digit code for Alignment Economy.
+        </p>
+
+        <div className="w-full max-w-sm mb-4">
+          <input
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            autoComplete="one-time-code"
+            autoFocus
+            value={platformTotpCode}
+            onChange={(e) => setPlatformTotpCode(e.target.value.replace(/[^0-9]/g, ''))}
+            placeholder="123456"
+            className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-lg font-mono tracking-[0.5em] text-center focus:border-teal focus:outline-none"
+          />
+        </div>
+
+        {platformError && <p className="text-sm text-red-400 mb-3 max-w-sm text-center">{platformError}</p>}
+
+        <button
+          onClick={() => handlePlatformSignin({ code: platformTotpCode })}
+          disabled={platformBusy || platformTotpCode.length < 6}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
+        >
+          {platformBusy ? 'Signing in...' : 'Sign In'}
+        </button>
+
+        <button
+          onClick={() => { setPlatformError(null); setPlatformTotpCode(''); setFlow('login'); }}
+          className="text-xs text-gray-500 hover:text-gray-300"
+        >
+          Back
+        </button>
+      </div>
+    );
+  }
+
   // Sign-in screen. Tabs at the top let the user pick which track they
   // signed up with (platform = email + password, self-custody = account
   // id + 12-word recovery phrase). The track persists in this local
@@ -1662,7 +1725,7 @@ export function Onboarding() {
             {platformError && <p className="text-sm text-red-400 mb-3 max-w-sm text-center">{platformError}</p>}
 
             <button
-              onClick={handlePlatformSignin}
+              onClick={() => handlePlatformSignin()}
               disabled={platformBusy}
               className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-2"
             >

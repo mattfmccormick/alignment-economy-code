@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import QRCode from 'qrcode';
+import { PlatformError } from '@alignmenteconomy/sdk';
 import { loadWallet, clearWallet, saveWalletLegacy } from '../lib/keys';
-import { clearPlatformSession } from '../lib/platform';
+import { clearPlatformSession, loadPlatformSession, platformClient } from '../lib/platform';
 import { truncateId } from '../lib/formatting';
 import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
@@ -39,6 +41,30 @@ export function More() {
   const [keyCopied, setKeyCopied] = useState(false);
   const [keepPlatformBackup, setKeepPlatformBackup] = useState(true);
 
+  // ── 2FA / TOTP state ────────────────────────────────────────────────
+  // The card has three modes:
+  //   - hidden (not a platform user, nothing to show)
+  //   - off    (platform user without 2FA, shows "Turn on" button)
+  //   - on     (platform user with 2FA, shows "Disable" button)
+  //
+  // Enroll opens a modal flow:
+  //   1. call SDK.enroll2FA -> {secret, otpauthUri}
+  //   2. render the URI as a QR (with the manual base32 secret below)
+  //   3. user types the 6-digit code from their authenticator
+  //   4. call SDK.confirm2FA -> persisted server-side
+  //
+  // Disable opens a smaller flow: type a current 6-digit code, call disable.
+  const [twoFaEnabled, setTwoFaEnabled] = useState<boolean | null>(null);
+  const [twoFaError, setTwoFaError] = useState<string | null>(null);
+  const [twoFaBusy, setTwoFaBusy] = useState(false);
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollSecret, setEnrollSecret] = useState<string | null>(null);
+  const [enrollQrUrl, setEnrollQrUrl] = useState<string | null>(null);
+  const [enrollCode, setEnrollCode] = useState('');
+  const [enrollSecretCopied, setEnrollSecretCopied] = useState(false);
+  const [disableOpen, setDisableOpen] = useState(false);
+  const [disableCode, setDisableCode] = useState('');
+
   useEffect(() => {
     if (wallet?.accountId) {
       api.getMinerStatus(wallet.accountId).then(res => {
@@ -48,6 +74,121 @@ export function More() {
       }).catch(() => {});
     }
   }, [wallet?.accountId]);
+
+  // Read whether 2FA is on. /me carries the flag so we don't need a
+  // separate endpoint. Only relevant for platform users; self-custody
+  // wallets don't talk to the platform server.
+  useEffect(() => {
+    if (wallet?.track !== 'platform') return;
+    const session = loadPlatformSession();
+    if (!session) return;
+    platformClient().me(session.sessionToken)
+      .then(r => setTwoFaEnabled(r.twoFactorEnabled))
+      .catch(() => { /* session may be expired; leave as null */ });
+  }, [wallet?.track]);
+
+  async function handleStartEnroll() {
+    setTwoFaError(null);
+    const session = loadPlatformSession();
+    if (!session) {
+      setTwoFaError('Session expired. Sign in again.');
+      return;
+    }
+    setTwoFaBusy(true);
+    try {
+      const r = await platformClient().enroll2FA(session.sessionToken);
+      setEnrollSecret(r.secret);
+      // toDataURL returns a base64-encoded PNG suitable for <img src=>.
+      const url = await QRCode.toDataURL(r.otpauthUri, { width: 220, margin: 1 });
+      setEnrollQrUrl(url);
+      setEnrollCode('');
+      setEnrollOpen(true);
+    } catch (e) {
+      if (e instanceof PlatformError && e.code === 'TOTP_ALREADY_ENABLED') {
+        setTwoFaEnabled(true);
+        setTwoFaError('Two-factor auth is already on.');
+      } else {
+        setTwoFaError(e instanceof Error ? e.message : 'Could not start 2FA enrollment.');
+      }
+    } finally {
+      setTwoFaBusy(false);
+    }
+  }
+
+  async function handleConfirmEnroll() {
+    setTwoFaError(null);
+    if (!enrollSecret) return;
+    if (enrollCode.trim().length < 6) {
+      setTwoFaError('Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    const session = loadPlatformSession();
+    if (!session) {
+      setTwoFaError('Session expired. Sign in again.');
+      return;
+    }
+    setTwoFaBusy(true);
+    try {
+      await platformClient().confirm2FA(session.sessionToken, enrollSecret, enrollCode.trim());
+      setTwoFaEnabled(true);
+      setEnrollOpen(false);
+      setEnrollSecret(null);
+      setEnrollQrUrl(null);
+      setEnrollCode('');
+    } catch (e) {
+      if (e instanceof PlatformError && e.code === 'TOTP_INVALID') {
+        setTwoFaError('That code did not match. Try again.');
+      } else {
+        setTwoFaError(e instanceof Error ? e.message : 'Could not confirm 2FA.');
+      }
+    } finally {
+      setTwoFaBusy(false);
+    }
+  }
+
+  function cancelEnroll() {
+    setEnrollOpen(false);
+    setEnrollSecret(null);
+    setEnrollQrUrl(null);
+    setEnrollCode('');
+    setTwoFaError(null);
+  }
+
+  function copyEnrollSecret() {
+    if (enrollSecret) {
+      navigator.clipboard.writeText(enrollSecret);
+      setEnrollSecretCopied(true);
+      setTimeout(() => setEnrollSecretCopied(false), 2000);
+    }
+  }
+
+  async function handleDisable2FA() {
+    setTwoFaError(null);
+    if (disableCode.trim().length < 6) {
+      setTwoFaError('Enter your current 6-digit code to confirm.');
+      return;
+    }
+    const session = loadPlatformSession();
+    if (!session) {
+      setTwoFaError('Session expired. Sign in again.');
+      return;
+    }
+    setTwoFaBusy(true);
+    try {
+      await platformClient().disable2FA(session.sessionToken, disableCode.trim());
+      setTwoFaEnabled(false);
+      setDisableOpen(false);
+      setDisableCode('');
+    } catch (e) {
+      if (e instanceof PlatformError && e.code === 'TOTP_INVALID') {
+        setTwoFaError('That code did not match. Try again.');
+      } else {
+        setTwoFaError(e instanceof Error ? e.message : 'Could not disable 2FA.');
+      }
+    } finally {
+      setTwoFaBusy(false);
+    }
+  }
 
   function toggleTheme() {
     const next = currentTheme === 'dark' ? 'light' : 'dark';
@@ -317,6 +458,127 @@ export function More() {
           </p>
         )}
       </div>
+      )}
+
+      {/* Two-factor auth. Platform-track only: self-custody users
+          already have an unrecoverable 12-word phrase that is its own
+          second factor. */}
+      {wallet?.track === 'platform' && (
+        <div className="bg-navy rounded-xl p-4 border border-navy-light">
+          <h3 className="text-sm font-medium text-white mb-1">Two-factor auth</h3>
+          {enrollOpen ? (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-400">
+                Scan this QR code with Google Authenticator, 1Password, Authy, or any TOTP app. Then type the 6-digit code it shows to confirm.
+              </p>
+              {enrollQrUrl && (
+                <div className="bg-white rounded-md p-3 flex items-center justify-center">
+                  <img src={enrollQrUrl} alt="2FA QR code" className="w-44 h-44" />
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] text-gray-500 mb-1">Can't scan? Type this into your app:</p>
+                <div className="flex items-center gap-2">
+                  <p className="flex-1 text-[10px] font-mono text-white bg-navy-dark rounded p-2 break-all">{enrollSecret}</p>
+                  <button onClick={copyEnrollSecret} className="text-xs text-teal hover:text-teal-dark shrink-0">
+                    {enrollSecretCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1.5">6-digit code from your app</label>
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  autoComplete="one-time-code"
+                  value={enrollCode}
+                  onChange={(e) => setEnrollCode(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="123456"
+                  className="w-full bg-navy-dark border border-navy-light rounded-lg px-3 py-2 text-white text-sm font-mono tracking-widest text-center focus:border-teal focus:outline-none"
+                />
+              </div>
+              {twoFaError && <p className="text-xs text-red-400">{twoFaError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={cancelEnroll}
+                  disabled={twoFaBusy}
+                  className="flex-1 py-2 bg-navy-light text-gray-300 rounded-lg text-sm hover:bg-navy-dark transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmEnroll}
+                  disabled={twoFaBusy || enrollCode.length < 6}
+                  className="flex-1 py-2 bg-teal text-white rounded-lg text-sm font-medium hover:bg-teal-dark transition-colors disabled:opacity-50"
+                >
+                  {twoFaBusy ? 'Confirming...' : 'Confirm'}
+                </button>
+              </div>
+            </div>
+          ) : disableOpen ? (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-400">
+                Type your current 6-digit code to turn 2FA off. After this, sign-in only needs your email and password.
+              </p>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                autoComplete="one-time-code"
+                value={disableCode}
+                onChange={(e) => setDisableCode(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder="123456"
+                className="w-full bg-navy-dark border border-navy-light rounded-lg px-3 py-2 text-white text-sm font-mono tracking-widest text-center focus:border-teal focus:outline-none"
+              />
+              {twoFaError && <p className="text-xs text-red-400">{twoFaError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setDisableOpen(false); setDisableCode(''); setTwoFaError(null); }}
+                  disabled={twoFaBusy}
+                  className="flex-1 py-2 bg-navy-light text-gray-300 rounded-lg text-sm hover:bg-navy-dark transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDisable2FA}
+                  disabled={twoFaBusy || disableCode.length < 6}
+                  className="flex-1 py-2 bg-red-900/40 text-red-300 rounded-lg text-sm hover:bg-red-900/60 transition-colors disabled:opacity-50"
+                >
+                  {twoFaBusy ? 'Disabling...' : 'Turn off 2FA'}
+                </button>
+              </div>
+            </div>
+          ) : twoFaEnabled === true ? (
+            <div>
+              <p className="text-xs text-teal mb-1">Two-factor auth is on</p>
+              <p className="text-xs text-gray-400 mb-3">
+                Sign-in requires a 6-digit code from your authenticator app in addition to your password.
+              </p>
+              {twoFaError && <p className="text-xs text-red-400 mb-2">{twoFaError}</p>}
+              <button
+                onClick={() => { setDisableOpen(true); setTwoFaError(null); }}
+                className="w-full py-2.5 bg-red-900/30 text-red-300 rounded-lg text-sm font-medium hover:bg-red-900/50 transition-colors"
+              >
+                Turn off 2FA
+              </button>
+            </div>
+          ) : (
+            <div>
+              <p className="text-xs text-gray-400 mb-3">
+                Add a second step at sign-in: a 6-digit code from an authenticator app (Google Authenticator, 1Password, Authy). Recommended but not required.
+              </p>
+              {twoFaError && <p className="text-xs text-red-400 mb-2">{twoFaError}</p>}
+              <button
+                onClick={handleStartEnroll}
+                disabled={twoFaBusy || twoFaEnabled === null}
+                className="w-full py-2.5 bg-teal/20 text-teal rounded-lg text-sm font-medium hover:bg-teal/30 transition-colors disabled:opacity-50"
+              >
+                {twoFaBusy ? 'Loading...' : 'Turn on 2FA'}
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Theme toggle */}

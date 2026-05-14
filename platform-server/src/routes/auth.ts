@@ -35,6 +35,7 @@ import { v4 as uuid } from 'uuid';
 import { hashPassword, verifyPassword, mintSessionToken, randomToken } from '../crypto.js';
 import { type PlatformConfig } from '../config.js';
 import { bearerAuth } from '../middleware/auth.js';
+import { checkSigninTotp } from './twofa.js';
 
 interface SignupBody {
   email?: unknown;
@@ -155,9 +156,9 @@ export function authRoutes(db: DatabaseSync, config: PlatformConfig): Router {
 
       const row = db
         .prepare(
-          'SELECT id, password_hash, account_id, vault_blob FROM users WHERE email = ?',
+          'SELECT id, password_hash, account_id, vault_blob, totp_secret FROM users WHERE email = ?',
         )
-        .get(email) as { id: string; password_hash: string; account_id: string; vault_blob: string } | undefined;
+        .get(email) as { id: string; password_hash: string; account_id: string; vault_blob: string; totp_secret: string | null } | undefined;
 
       // Argon2.verify is the expensive bit. If the email doesn't exist we
       // still spend the time so signin response time doesn't leak existence.
@@ -165,6 +166,22 @@ export function authRoutes(db: DatabaseSync, config: PlatformConfig): Router {
       const valid = await verifyPassword(row?.password_hash ?? fakeHash, body.password as string);
       if (!row || !valid) {
         res.status(401).json({ success: false, error: { code: 'AUTH_INVALID', message: 'Invalid email or password' } });
+        return;
+      }
+
+      // If 2FA is on, the request also needs a valid TOTP code. The wallet
+      // submits without a code first and watches for the TOTP_REQUIRED
+      // response, then re-submits with the code. The two codes are
+      // distinct so the wallet can show the right prompt: TOTP_REQUIRED
+      // means "ask for code", TOTP_INVALID means "the code you typed is
+      // wrong, try again."
+      const codeFromBody = (req.body as { code?: unknown }).code;
+      const totpCheck = checkSigninTotp(row.totp_secret, codeFromBody);
+      if (!totpCheck.ok) {
+        res.status(401).json({
+          success: false,
+          error: { code: totpCheck.code, message: totpCheck.code === 'TOTP_REQUIRED' ? 'Two-factor code required' : 'Two-factor code invalid' },
+        });
         return;
       }
 
