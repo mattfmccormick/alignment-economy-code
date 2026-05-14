@@ -9,19 +9,24 @@ import express, { type Application } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { loadConfig } from './config.js';
+import { loadConfig, type PlatformConfig } from './config.js';
 import { initializeSchema } from './schema.js';
+import { authRoutes } from './routes/auth.js';
 
-export function createApp(db: DatabaseSync): Application {
+export function createApp(db: DatabaseSync, config?: PlatformConfig): Application {
   const app = express();
   app.use(express.json({ limit: '128kb' }));
 
-  // /health is the only route this scaffolding ships. Real auth + recovery
-  // routes land in Phase 2 + 3 alongside their tests. Keeping the scaffold
-  // testable from day one is what lets us iterate confidently.
   app.get('/api/v1/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: Math.floor(Date.now() / 1000) });
   });
+
+  // Auth routes need the config (recovery public key, session TTL,
+  // session secret). Tests pass an explicit config so they can use
+  // deterministic / cheap parameters. The runtime entry below loads
+  // the real config once.
+  const cfg = config ?? loadConfig();
+  app.use('/api/v1', authRoutes(db, cfg));
 
   return app;
 }
