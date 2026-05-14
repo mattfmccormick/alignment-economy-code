@@ -1,0 +1,30 @@
+{
+  "name": "ae-platform-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Custody + recovery service for the Alignment Economy platform track. Holds an encrypted vault per user. Server cannot decrypt the vault in normal operation. Can decrypt the user's recovery blob through a controlled recovery flow (email verification plus cooldown plus optional 2FA). Separate from ae-node (which is the protocol). Talks to wallets over HTTPS.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.0.0",
+    "@noble/curves": "^2.0.0",
+    "@noble/hashes": "^2.2.0",
+    "argon2": "^0.41.1",
+    "express": "^5.2.1",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.4",
+    "@types/node": "^24.12.2",
+    "@types/uuid": "^11.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "~6.0.2"
+  }
+}
