@@ -123,16 +123,19 @@ Verified end to end in a real browser. Welcome → Create Account → track pick
 - [ ] Session expiry prompt: when the wallet detects an expired session, prompt for password to re-decrypt the vault. Today the privateKey is persisted alongside the session; expiry would just send the user back to /signin where the same password decrypts the vault again. Wire the prompt-on-401 later.
 - [ ] Wallet "Switch to self-custody" action on the More page for platform users. Phase 6.6.
 
-### Phase 7: Deploy
+### Phase 7: Deploy (artifacts done, waiting on host choice)
 
-- [ ] Cheapest VPS (Hetzner CX11 around $5/mo, or DigitalOcean droplet)
-- [ ] Domain or subdomain (e.g. `platform.alignmenteconomy.org`)
-- [ ] HTTPS via Let's Encrypt
-- [ ] Reverse proxy (Caddy or nginx)
-- [ ] `systemd` unit or PM2 for process management
-- [ ] GitHub Actions CI workflow for deploy on push to main
-- [ ] Smoke test from the installed wallet hitting the production platform
-- [ ] Production env vars for `AE_PLATFORM_RECOVERY_PRIVATE_KEY` and `AE_PLATFORM_SESSION_SECRET` (generate fresh, never commit)
+Code-side everything is ready. Pick a host and run the commands in `docs/deploy-platform-server.md`. Three paths shipped:
+
+- [x] **Dockerfile**: multi-stage build, ~200MB runtime image, non-root, /data volume
+- [x] **Fly.io config** (`platform-server/fly.toml`): smallest VM, free tier, auto-TLS
+- [x] **Render.com blueprint** (`platform-server/render.yaml`): single-blueprint deploy, free tier
+- [x] **Self-hosted stack** (`platform-server/docker-compose.yml` + `Caddyfile` + `.env.example`): Hetzner / DigitalOcean / any Docker host
+- [x] **GitHub Actions CI** (`.github/workflows/platform-server.yml`): runs the 30-test suite on every push to `platform-server/`, builds and pushes a Docker image to `ghcr.io/mattfmccormick/ae-platform-server` on push to main
+- [x] **Deploy guide**: `docs/deploy-platform-server.md`
+- [ ] **Pick a host + run the steps.** Manual one-time setup; deploy guide has the exact commands per option.
+- [ ] **Smoke test from installed wallet**: build the wallet installer with `VITE_PLATFORM_URL=https://...` baked in, install on a fresh machine, walk through email + password signup, verify daily mint shows up. Same flow that worked in dev.
+- [ ] **Wire CI auto-deploy** once a host is picked: append a `flyctl deploy` / Render webhook / SSH step to the workflow. Stub callout in the deploy doc.
 
 ## Open questions to answer before each phase
 
