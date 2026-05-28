@@ -280,7 +280,13 @@ export function replayTransaction(
     isInPerson: input.isInPerson,
     memo: input.memo,
     signature: input.signature,
-    receiverSignature: input.receiverSignature,
+    // Coerce a missing countersignature to null. Wire data may omit the
+    // field (it only exists for in-person txs); undefined cannot bind to
+    // SQLite and would throw inside the block-apply handler, which swallows
+    // the error and silently drops the block — a follower would stall
+    // mid-sync with no log. The isInPerson branch above already enforces a
+    // valid countersignature when one is actually required.
+    receiverSignature: input.receiverSignature ?? null,
     timestamp: input.timestamp,
     blockNumber,
     senderBalance,

@@ -97,6 +97,22 @@ export class PeerManager extends EventEmitter {
     return this.blockHeight;
   }
 
+  /**
+   * Update a connected peer's advertised block height from a height-bearing
+   * message (e.g. a gossiped block). The handshake captures a peer's height
+   * exactly once; without this, a peer that advances after we connect looks
+   * frozen at its connect-time height, and catch-up sync can never tell it
+   * has moved ahead. publicKey-gated and monotonic so a peer can't spoof
+   * another's height or roll one backward.
+   */
+  recordPeerHeight(senderId: string, publicKey: string, height: number): void {
+    const peer = this.peers.get(senderId);
+    if (peer && peer.info.publicKey === publicKey && height > peer.info.blockHeight) {
+      peer.info.blockHeight = height;
+      peer.info.lastSeen = Math.floor(Date.now() / 1000);
+    }
+  }
+
   /** Ban a peer by their long-lived public key. The friendly nodeId is spoofable; the public key is not. */
   banPeer(publicKey: string, reason?: string): void {
     this.bannedKeys.add(publicKey);

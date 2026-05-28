@@ -1,6 +1,26 @@
 # Alignment Economy (AE) Platform
 
-> Last updated: May 5, 2026. 70 build phases. The chain runs end-to-end (multi-validator BFT, real txs, on-chain validator changes, sync replay) on a real WebSocket P2P layer. **Milestone 2 (Whitepaper completeness) is 6/6 done.** Recent additions: Phase 67 in-person co-sign (receiverSignature on Transaction; +2.5% decay-offset credit for both parties); Phase 68 protocol treasury (10% slice off the top of every block's fee distribution into a sentinel-key account); Phase 69 inheritance + dead-man-switch (M-of-N beneficiaries claim a deceased account after `deadManSwitchDays` of inactivity); Phase 70 smart contract DSL (`earned_recurring` type + validation guards on `createSmartContract`). Plus: TypeScript SDK (`@alignmenteconomy/sdk`) at v0.3 with full read-only court/miner/tag surface and the first signed write helper (`submitVouch`). Block explorer app at `explorer/`. End-to-end LAN multi-validator test passes 3/3 (`scripts/test-lan-multi-validator.mjs`). Wallet onboarding now has plain-language education before the 12-word reveal in both `ae-app` (`what-is-ae` + `learn-recovery`) and `ae-miner` (`learn_recovery`). **Auth-hardening sweep (May 5):** six previously-unauthenticated POST/PUT routes now require ML-DSA signatures: `/miners/vouches`, `/tags/supportive`, `/tags/ambient`, `/miners/register`, `/miners/evidence`, `/miners/vouch-requests` (POST + PUT). Each closed a real impersonation vector (theft of earned balance, redirected daily point flows, sybil-bypass via fake evidence, spam vouch requests).
+## The goal (read this first)
+
+The objective is the most complete, correct, well-documented full-network codebase we can produce, ready to hand to a professional engineer or team who will harden it and deploy it to real miners and users. This is NOT a friends-at-home test or a quick demo.
+
+Optimize for, in order:
+1. **Correctness** (tests green, no known economic or consensus bugs)
+2. **Completeness** (no half-built flows, no stub screens, every button does something real)
+3. **Clean seams** (a pro can swap the database, the network transport, or the host without rewriting the economics)
+4. **Handoff docs** (someone new can clone it, run it, read it, and find the edges in an afternoon)
+
+Deployment-stage and operations work (NAT traversal, public bootstrap nodes, picking a host, code-signing certs, running infrastructure, external audits) is explicitly the professional team's job. We make the code ready for that work and document the seams. We do not have to operate it ourselves.
+
+## Current honest status (May 28, 2026)
+
+- **Backend (`ae-node`): all tests green** (was 575/580). The five reds in the follower sync / catch-up path were fixed May 28, closing six real bugs (see "Done (Fixed)"), the most serious being that a restarted validator could never rejoin its own network. The Phase 17 catch-up test's fixed `wait(500)` (the documented timing flake) was replaced with a poll-to-deadline so it no longer fails under full-suite load. A node that falls behind (restart, partition) now reconnects and catches up to the head reliably. (Note: run tests with the canonical `npm test`; the `--test-force-exit` flag falsely flags suites that leave a listening handle open, e.g. phase11's API-server test.)
+- **SDK: 20/20 green. platform-server: 36/36 green.** All three React apps (`ae-app`, `ae-miner`, `explorer`) build clean with zero TypeScript errors.
+- **Frontend:** the wallet (`ae-app`) is roughly 90% wired and polished. Known gaps: `ae-miner` `Income` and `Audit` pages are empty stubs; verification evidence is hash-only (no real file upload) on both apps; `ae-miner` is desktop-first, not mobile-responsive; the start-network / join-network onboarding flows only fully work inside the packaged desktop app (they need Electron to write keys to disk) and dead-end in a plain browser.
+
+See "Build plan to handoff" below for the ownership-tagged to-do list.
+
+> Last updated: May 28, 2026. 70 build phases. The chain runs end-to-end (multi-validator BFT, real txs, on-chain validator changes, sync replay) on a real WebSocket P2P layer. **Milestone 2 (Whitepaper completeness) is 6/6 done.** Recent additions: Phase 67 in-person co-sign (receiverSignature on Transaction; +2.5% decay-offset credit for both parties); Phase 68 protocol treasury (10% slice off the top of every block's fee distribution into a sentinel-key account); Phase 69 inheritance + dead-man-switch (M-of-N beneficiaries claim a deceased account after `deadManSwitchDays` of inactivity); Phase 70 smart contract DSL (`earned_recurring` type + validation guards on `createSmartContract`). Plus: TypeScript SDK (`@alignmenteconomy/sdk`) at v0.3 with full read-only court/miner/tag surface and the first signed write helper (`submitVouch`). Block explorer app at `explorer/`. End-to-end LAN multi-validator test passes 3/3 (`scripts/test-lan-multi-validator.mjs`). Wallet onboarding now has plain-language education before the 12-word reveal in both `ae-app` (`what-is-ae` + `learn-recovery`) and `ae-miner` (`learn_recovery`). **Auth-hardening sweep (May 5):** six previously-unauthenticated POST/PUT routes now require ML-DSA signatures: `/miners/vouches`, `/tags/supportive`, `/tags/ambient`, `/miners/register`, `/miners/evidence`, `/miners/vouch-requests` (POST + PUT). Each closed a real impersonation vector (theft of earned balance, redirected daily point flows, sybil-bypass via fake evidence, spam vouch requests).
 >
 > **Repo layout:** This is `alignment-economy-code` (apps + protocol). The marketing website lives in a separate sibling repo at `alignment-economy-website` (was `ae-platform/`). Don't mix them.
 
@@ -186,6 +206,14 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 
 ### Done (Fixed)
 
+- ~~**Five red tests in the follower sync / catch-up path.**~~ Fixed May 28. All five green; the work surfaced and closed six real bugs:
+  1. **Stale `receiverSignature` replay bind** (Phase 17 x3, Phase 38). `ReplayInput` gained a required `receiverSignature` in Phase 67, but these tests still built replay inputs without it, so `undefined` hit a SQLite bind and threw "parameter 9." Inside the block-apply handler that throw was swallowed (`catch → return false`), so a follower silently dropped the block and stalled mid-sync with no log. `replayTransaction` now coerces a missing countersignature to `null` (the in-person branch still enforces a real one when required); the stale tests pass the field.
+  2. **Genesis hash advertised as the chain head** (`runner.ts`). The P2P handshake used `getLatestBlock().hash` as the network's "genesis hash." That only equals the real genesis at height 0, so any node that had advanced (especially one restarting from disk with blocks already on it) advertised its head hash and every peer rejected it with "genesis hash mismatch." A killed validator could never rejoin its own network. Pinned to block 0.
+  3. **BFT nodes never advertised their committed height.** The gossip-layer height was only updated in the authority/sync apply paths, never when `BftBlockProducer` commits. So a BFT validator looked frozen at height 0 to its peers and catch-up sync could never trigger. The node now refreshes its advertised height every 2s from the DB head.
+  4. **Banning peers for being ahead** (`sync.ts`). A behind node receiving a live gossip block ahead of its head treated the height gap as a bannable offense and banned all its peers, isolating itself. Being-ahead now means "I'm behind, let sync catch up," not "you misbehaved"; only a genuinely invalid next-height block bans.
+  5. **Peer height frozen at handshake** (`peer.ts`). A peer's height was recorded once at handshake and never refreshed, so a node couldn't tell a peer had advanced after connect. Heights now update from gossiped blocks via a new `recordPeerHeight`.
+  6. **BigInt crash serializing sync replies** (`sync.ts`). The `get_blocks` response shipped the validator snapshot with `stake` as a bigint, which `JSON.stringify` can't encode, so every sync reply containing a block N>=2 threw and the catch-up died. Now string-encoded on the wire, mirroring the live-gossip path (the receiver already parses it back). Bonus: catch-up sync was one-shot (`setTimeout`), so a reconnect that finished after the single attempt never retried; it is now a recurring interval, cleared on stop.
+  Net effect: a validator can be killed mid-chain, restart from disk, reconnect, and catch up to the head with matching hashes. `phase60.test.ts` (both tests) green; verified no regressions across the gossip / validation / transaction-replay / multi-runner suites.
 - ~~**No manual day-advance endpoint.**~~ `POST /admin/advance-day` exists behind the admin auth gate.
 - ~~**Mempool has no deduplication.**~~ Mempool class checks txId before inserting, evicts oldest when full.
 - ~~**Minting is not idempotent.**~~ Mint step gates on a per-day reference id; resumeCycle is safe across crashes.
@@ -212,13 +240,47 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 
 ## Roadmap to Full Build
 
-**End state:** Anyone can download an installer and join a real Alignment Economy network with friends. Multi-validator BFT, real txs, real verification, real court. Not a demo, not a "two-person test." A working network.
+**End state:** A complete, correct, well-documented full-network codebase, handed to a professional engineer or team who deploys it to real miners and users. Multi-validator BFT, real txs, real verification, real court, all green, all wired, with clean seams and handoff docs. We finish and harden the code; the pro operates and deploys it. (This is not a friends-at-home test, and not a thing we run ourselves.)
 
 **Why this section exists:** Without a goal-driven roadmap we keep picking small fixes (which are easy to identify) and never make decisive progress on the big build (which is where the value is). Pick the top open milestone below and march to it. Don't drift back into small fixes unless a critical bug forces it.
 
-**Working in this codebase:** When you finish a milestone task, check it off here AND add the matching one-liner to "Done (Fixed / Shipped)." When a milestone fully completes, mark it ✅ and start on the next.
+**Working in this codebase:** When you finish a task, check it off here AND add the matching one-liner to "Done (Fixed / Shipped)."
 
-### Milestone 1: Downloadable public testnet (NEXT)
+### Build plan to handoff (who owns what)
+
+Live to-do list to reach a handoff-ready codebase, split by who can do each piece. Tags: **[CODE]** Claude can do it solo, no outside input. **[MATT]** needs your decision, money, an account, or a real-world action. **[PRO]** belongs to the professional team at deployment, we only make the code ready.
+
+#### Backend (`ae-node`): finish and harden
+- [x] **~~Get the 5 red tests green.~~** DONE (May 28). All five green. Surfaced and fixed six real bugs in the follower sync / catch-up path (stale receiverSignature bind, genesis-hash-as-head, BFT height never advertised, ban-on-behind, peer height frozen at handshake, BigInt in sync replies). A killed validator can now restart from disk, reconnect, and catch up. See "Done (Fixed)" for the full writeup.
+- **[CODE] Make follower sync robust**, not just one-test-passing. A node offline for N blocks must catch up cleanly every time. Replace the `wait(500)` timing hacks with event-based waits to kill the documented flakes.
+- **[CODE] Extract account + transaction storage behind repository interfaces** (`IAccountStore`, `ITransactionStore`), the way `IBlockStore` already is. The docs flag this as needed before Phase 2. It is the seam a pro needs to swap SQLite for Postgres without touching the economics.
+- **[CODE] Cleanly abstract and document the P2P transport** so NAT traversal or a relay drops in behind an interface without touching consensus. We do not build NAT traversal, we make its insertion point obvious.
+- **[CODE] Pure-bigint fee and rebase math** to remove the documented precision loss, plus a dust-distribution pass on the rebase. With tests.
+- **[CODE] Tidy:** remove dead code, tighten types, confirm every POST/PUT/DELETE auth gate has a regression test.
+
+#### Frontend (`ae-app` wallet + `ae-miner`): finish so you can review
+- [x] **~~Build the two miner stub pages for real.~~** DONE. New `GET /accounts/:id/ledger` endpoint serves the `transaction_log` audit trail (newest first, paginated). `Income` now shows real income history (payments, court bounties, fee-pool / mining distributions) plus a by-source breakdown; `Audit`'s Activity Log shows the full ledger with per-change-type labels and colors. Shared classifier in `ae-miner/src/lib/ledger.ts`. Endpoint covered by `ledger-endpoint.test.ts` (3/3); both apps build clean. Live browser check still pending (fold into the frontend review).
+- **[CODE] Real evidence handling** on verification in both apps: proper file selection, local hashing, a clear "your document never leaves your device" flow, instead of pasting a raw hash.
+- **[CODE] Make `ae-miner` mobile-responsive** to match the wallet (the project rule is mobile-first, the miner currently is not).
+- **[CODE] Finish the join-as-new-friend flow** (inline keystore generation for joiners not pre-allocated in genesis), the documented TODO.
+- **[CODE] Tighten error / empty / loading states** across both apps so no screen goes blank on an API failure.
+- **[MATT] Review the finished frontend** and tell me what copy, layout, or flow to change. This is the step you want; everything above gets it ready for you.
+
+#### Deployment and operations: professional team
+- **[PRO] NAT traversal** (Tailscale embed, relay, or WebRTC). The real internet-peering blocker, genuine networking engineering.
+- **[PRO] Public bootstrap node** on a VPS, its address baked into the installer.
+- **[PRO] Mac / Linux installer builds + code signing** (needs the 501(c)(3), a D-U-N-S number, an Apple Developer account).
+- **[PRO] Pick a host and deploy `platform-server`** (code and Docker/Fly/Render configs are done, see `docs/platform-track-plan.md`).
+- **[PRO] External crypto + protocol audits, regulatory posture, bug bounty** (Milestone 3 below).
+
+#### What I need from you (`[MATT]`) to unblock the rest
+- Whether the platform (custodial) track ships in v1 or waits, since it needs an email-provider key and a host.
+- Sign-off on any user-facing copy I draft (I keep your voice, you approve).
+- Anything that costs money or needs an external account: hosts, domains, certs, email provider.
+
+The milestones below stay as detailed reference for what shipped and what is left.
+
+### Milestone 1: Downloadable network code (was "public testnet")
 
 Goal: Anyone can download an installer, run it, and join a real Alignment Economy network with friends over the public internet. Multi-validator BFT, real txs, real verification, real court. The protocol already works (Phases 12-65). The missing layer is the install/join UX, public infra, NAT traversal, and the polish that makes the whole thing usable.
 
@@ -233,7 +295,7 @@ LAN testing happens *as we build* — don't ship a LAN-only release as a separat
 - [x] **"Restart to apply" notice + "Apply now" button.** The running ae-node child still has the old (solo) spawn env after `saveConfig` writes; the user has to relaunch for BFT mode to take effect. New `aeNetwork:relaunch` IPC + `window.aeNetwork.relaunch()` preload bridge handles a clean tear-down + relaunch via `app.relaunch(); app.exit(0)`. Onboarding flows now navigate to a `restart-to-apply` screen after Start-new or Join-existing instead of `/` directly: shows network ID + accountId, "Apply now (restart app)" button, "Continue without restarting" fallback. In plain browser dev (no `window.aeNetwork`) the screen is skipped entirely. Verified all four paths (browser-dev → /, mock-Electron → restart screen, Apply now → relaunch IPC fires, Continue → / without relaunch).
 - [x] **Invite link / QR code.** ~~A founder generates a shareable URL/QR encoding genesis hash + bootstrap address. Joiner scans or pastes, app fills the join form automatically.~~ Done for the link half (QR is a follow-up that needs a small library). New `ae-app/src/lib/invite.ts` encodes a spec into `https://invite.alignmenteconomy.org/v1#<base64url(spec-json)>` (everything in the URL fragment so the spec never goes to a server even on accidental clicks). Founder result screen now shows the link with a "Copy invite link" button alongside the genesis.json download. Joiner form has a textarea at the top: pasting any valid AE invite link parses the spec and pre-fills the genesis side, so the joiner only needs to upload their personal keystore. Invalid links show "That doesn't look like a valid AE invite link." Browser-verified all three paths (founder generates → joiner pastes valid link → spec recognized; joiner pastes invalid link → error). Bootstrap address isn't in the link yet because there's no public bootstrap; that's the next milestone task.
 
-**Internet reach:**
+**Internet reach (professional team / deployment, see "Build plan to handoff" above):**
 - [ ] **Public bootstrap node.** Cheapest VPS (~$5/mo Hetzner / DigitalOcean). Permanent address, runs `ae-node` in validator mode, holds the canonical AE testnet genesis spec.
 - [ ] **Bake testnet address into installer.** "Join the AE testnet" button on first launch hits the bootstrap node, downloads genesis spec, runs validator setup automatically.
 - [ ] **NAT traversal.** Two laptops on home WiFi can't peer directly. Pick one approach (tunnel service like tailscale embedded, WebRTC peer connections, or a hosted relay) and ship it.

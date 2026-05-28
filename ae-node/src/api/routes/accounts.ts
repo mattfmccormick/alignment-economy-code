@@ -116,6 +116,30 @@ export function accountRoutes(db: DatabaseSync): Router {
     } catch (e) { next(e); }
   });
 
+  // GET /accounts/:id/ledger — the transaction_log audit trail: every balance
+  // change for this account (receives, fees, daily mint, fee-pool / mining
+  // distributions, court bounties, burns, vouch locks/unlocks). Newest first.
+  // Powers the miner Income and Audit pages. Route-level pagination is fine at
+  // Phase 1 scale; a paginated store query is the Phase 2 optimization.
+  router.get('/:id/ledger', (req, res, next) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+      const offset = (page - 1) * limit;
+      const accountId = req.params.id as string;
+
+      const txStore = transactionStore(db);
+      const all = txStore.findLogsByAccount(accountId).reverse(); // newest first
+      const entries = all.slice(offset, offset + limit);
+
+      res.json({
+        success: true,
+        data: { entries, total: all.length, page, limit },
+        meta: { timestamp: Math.floor(Date.now() / 1000) },
+      });
+    } catch (e) { next(e); }
+  });
+
   return router;
 }
 

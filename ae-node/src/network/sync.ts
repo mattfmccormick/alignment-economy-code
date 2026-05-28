@@ -257,8 +257,21 @@ export class ChainSync {
         // The validator-set snapshot from block N-1 — what signed the
         // cert. Without this, slashed validators' old signatures fail
         // to verify because their entries are inactive in the current set.
-        const parentValidatorSnapshot =
+        // bigint stake → string for JSON serialization, mirroring
+        // BftBlockProducer's live-gossip path. The receiver's
+        // validateIncomingBlock parses stake back to bigint via
+        // SnapshotValidatorSet. Without this, JSON.stringify throws
+        // "Do not know how to serialize a BigInt" the moment a sync reply
+        // includes any block N >= 2 (every one of which carries a snapshot),
+        // which silently broke catch-up sync for a restarted validator.
+        const parentValidatorSnapshotRaw =
           i >= 2 ? (bStore.findValidatorSnapshot(i - 1) ?? undefined) : undefined;
+        const parentValidatorSnapshot = parentValidatorSnapshotRaw
+          ? parentValidatorSnapshotRaw.map((v) => ({
+              ...v,
+              stake: v.stake.toString() as unknown as bigint,
+            }))
+          : undefined;
         blocks.push({
           ...serialized,
           txIds,
@@ -281,6 +294,25 @@ export class ChainSync {
         if (this.state.isSyncing) return; // ignore gossip during sync
 
         const blockData = data as IncomingBlockPayload;
+
+        // Learn the sender's height from the block it just gossiped, so
+        // catch-up sync can detect a peer that advanced after our one-time
+        // handshake height went stale. Do this even when we ignore the block
+        // below for being ahead — that's exactly the case that needs it.
+        this.peerManager.recordPeerHeight(senderId, senderPublicKey, blockData.number);
+
+        // Height triage BEFORE validation. A gossip block ahead of our head
+        // does NOT mean the sender misbehaved — it means WE are behind
+        // (missed blocks during a restart or partition). Banning here would
+        // isolate a recovering node from the very peers it needs to catch up
+        // from, which is exactly the bug that made restart-resync impossible.
+        // Let the periodic catch-up sync pull the gap instead. Only a block
+        // at exactly our next height is a live-apply candidate; older or
+        // duplicate blocks are ignored.
+        const localHeight = getLatestBlock(this.db)?.number ?? 0;
+        if (blockData.number > localHeight + 1) return; // behind — sync will catch up
+        if (blockData.number <= localHeight) return; // old or duplicate
+
         const result = validateIncomingBlock(
           this.db,
           this.consensus,
@@ -290,7 +322,8 @@ export class ChainSync {
           { bftValidatorSet: this.validatorSet },
         );
         if (!result.valid) {
-          // Live gossip from a non-authority or with mangled bytes. Ban.
+          // A next-height block that still fails validation is genuinely bad
+          // (bad signature, wrong hash, bad cert). That IS a ban.
           this.peerManager.banPeer(
             senderPublicKey,
             `bad gossip block: ${result.error ?? 'unknown'}`,

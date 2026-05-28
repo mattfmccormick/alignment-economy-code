@@ -1,5 +1,7 @@
 # Platform Track build plan (custodial signup)
 
+> **Status (May 28, 2026): code complete.** Phases 1-6 shipped and tested (platform-server 36/36, SDK 20/20, wallet UI verified). The only thing left is Phase 7 "pick a host and deploy," which is a [PRO] / [MATT] handoff item (it needs a host, a domain, and an email-provider key), not more code. See the canonical CLAUDE.md "Build plan to handoff" section for the ownership split.
+
 The AE wallet currently only supports self-custody (write down 12 words, lose them and your account is gone). This plan adds a second on-ramp where users sign up with email and password, the platform holds an encrypted vault for them, and password reset works the way Gmail's does. Most people will pick this path. Power users keep the self-custody flow.
 
 This document is the source of truth for the work. Update it as phases land.

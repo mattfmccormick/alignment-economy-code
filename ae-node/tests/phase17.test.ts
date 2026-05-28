@@ -202,6 +202,7 @@ describe('Phase 17: Transaction replay during sync', () => {
         isInPerson: tx.isInPerson,
         memo: tx.memo,
         signature: tx.signature,
+        receiverSignature: tx.receiverSignature,
         timestamp: tx.timestamp,
       },
       1,
@@ -255,6 +256,7 @@ describe('Phase 17: Transaction replay during sync', () => {
       isInPerson: tx.isInPerson,
       memo: tx.memo,
       signature: tx.signature,
+      receiverSignature: tx.receiverSignature,
       timestamp: tx.timestamp,
     };
 
@@ -471,6 +473,7 @@ describe('Phase 17: Transaction replay during sync', () => {
               isInPerson: wireTx.isInPerson,
               memo: wireTx.memo,
               signature: wireTx.signature,
+              receiverSignature: wireTx.receiverSignature ?? null,
               timestamp: wireTx.timestamp,
             },
             block.number,
@@ -491,7 +494,16 @@ describe('Phase 17: Transaction replay during sync', () => {
     await wait(50);
 
     newSync.startSync();
-    await wait(500);
+
+    // Poll for completion instead of a fixed wait. The old `await wait(500)`
+    // was the documented Phase 17 flake: under full-suite load the sync
+    // hadn't finished in 500ms and the assert fired early. Polling to a
+    // generous deadline is robust and still fast on the happy path.
+    const syncDeadline = Date.now() + 5_000;
+    while (Date.now() < syncDeadline) {
+      if ((getLatestBlock(dbFol)?.number ?? 0) >= 3) break;
+      await wait(50);
+    }
 
     assert.equal(getLatestBlock(dbFol)!.number, 3, 'follower must reach block 3');
     assert.equal(

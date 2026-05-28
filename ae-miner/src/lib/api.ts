@@ -140,6 +140,19 @@ export interface HealthCheck {
   timestamp: number;
 }
 
+// One row of the transaction_log audit trail (every balance change).
+export interface LedgerEntry {
+  id: string;
+  account_id: string;
+  change_type: string;   // tx_receive, fee_distribution, bounty, mint, burn_*, vouch_*, etc.
+  point_type: string;
+  amount: string;        // bigint serialized as string (base units)
+  balance_before: string;
+  balance_after: string;
+  reference_id: string;
+  timestamp: number;     // unix seconds
+}
+
 // --- API functions ---
 
 export const api = {
@@ -154,6 +167,13 @@ export const api = {
   // Accounts
   getAccount: (id: string) =>
     request<ApiResponse<Account>>('GET', `/accounts/${id}`),
+
+  // The account's transaction_log (every balance change, newest first).
+  // Powers the Income and Audit pages. Paginated.
+  getLedger: (accountId: string, page = 1, limit = 50) =>
+    request<ApiResponse<{ entries: LedgerEntry[]; total: number; page: number; limit: number }>>(
+      'GET', `/accounts/${accountId}/ledger?page=${page}&limit=${limit}`,
+    ),
 
   // Pass `publicKey` for client-custody mode (mnemonic-derived keys never
   // touch the server). Omit it for the legacy server-generated path.

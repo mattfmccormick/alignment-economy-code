@@ -57,6 +57,7 @@ export class AENode {
   private wss: WebSocketServer | null = null;
   private server: Server | null = null;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private syncInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(db: DatabaseSync, config: NodeConfig) {
     this.db = db;
@@ -170,8 +171,23 @@ export class AENode {
     // Start peer discovery
     this.discovery.start();
 
-    // Start chain sync after a brief delay to allow connections
-    setTimeout(() => {
+    // Start chain sync after a brief delay to allow connections, then keep
+    // retrying on an interval. A single one-shot attempt was a race: a node
+    // that reconnects (an operator restart, a heal after a partition)
+    // slightly after the first tick would no-op and never catch up,
+    // stranding it behind the chain head forever. startSync() returns early
+    // when it's already syncing or already caught up, so polling is cheap.
+    // The first fire is still at +2s (matching the old behavior); the
+    // interval is what makes a fallen-behind validator reliably pull the
+    // blocks it missed until it reaches the head.
+    this.syncInterval = setInterval(() => {
+      // Keep the height we advertise to peers in step with our committed
+      // chain head. In BFT mode blocks commit through BftBlockProducer,
+      // which (unlike the authority/sync apply paths) never updated the
+      // gossip-layer height — so without this a validator would advertise
+      // height 0 forever, no peer could tell it had advanced, and catch-up
+      // sync could never trigger. Refresh first, then attempt a sync.
+      this.peerManager.setBlockHeight(getLatestBlock(this.db)?.number ?? 0);
       this.chainSync.startSync();
     }, 2000);
 
@@ -238,6 +254,11 @@ export class AENode {
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
+    }
+
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+      this.syncInterval = null;
     }
 
     this.peerManager.disconnectAll();

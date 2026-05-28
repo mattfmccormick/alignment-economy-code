@@ -3,7 +3,7 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { initializeSchema } from '../db/schema.js';
 import { seedParams } from '../config/params.js';
-import { createGenesisBlock, getLatestBlock, createBlock } from '../core/block.js';
+import { createGenesisBlock, getLatestBlock, getBlock, createBlock } from '../core/block.js';
 import { loadGenesisSpec, applyGenesisSpec, genesisSpecHash } from './genesis-config.js';
 import {
   runExpireAndRebase,
@@ -207,7 +207,15 @@ export class AENodeRunner {
   }
 
   private startP2P(): void {
-    const genesisBlock = getLatestBlock(this.db);
+    // The handshake genesisHash must be block 0's hash, NOT the chain head.
+    // getLatestBlock() returns the head, which only equals genesis at height
+    // 0 — so a node that had advanced (or, worse, restarted from disk with
+    // blocks already on it) would advertise its head hash as the "genesis"
+    // hash, and every peer would reject it with "genesis hash mismatch."
+    // That made restart-rejoin impossible: a killed validator could never
+    // get back onto its own network. Pin to block 0 so the network identity
+    // is stable for the life of the chain.
+    const genesisBlock = getBlock(this.db, 0);
     const genesisHash = genesisBlock?.hash ?? 'genesis';
 
     // Construct the BFT validator-set view once if we're in BFT mode.

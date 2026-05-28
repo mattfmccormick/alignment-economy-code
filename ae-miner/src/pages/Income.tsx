@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { api, type Account } from '../lib/api';
+import { api, type Account, type LedgerEntry } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
-import { displayPoints } from '../lib/formatting';
+import { displayPoints, timeAgo } from '../lib/formatting';
+import { filterIncome, incomeBySource, changeMeta, amountSign } from '../lib/ledger';
 
 export default function Income() {
   const [account, setAccount] = useState<Account | null>(null);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -14,10 +16,12 @@ export default function Income() {
 
     async function fetchData() {
       try {
-        const res = await api.getAccount(wallet!.accountId);
-        if (res.success) {
-          setAccount(res.data);
-        }
+        const [acctRes, ledgerRes] = await Promise.all([
+          api.getAccount(wallet!.accountId),
+          api.getLedger(wallet!.accountId, 1, 100),
+        ]);
+        if (acctRes.success) setAccount(acctRes.data);
+        if (ledgerRes.success) setLedger(ledgerRes.data.entries);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load income data');
       } finally {
@@ -52,6 +56,9 @@ export default function Income() {
       </div>
     );
   }
+
+  const income = filterIncome(ledger);
+  const sources = incomeBySource(ledger);
 
   return (
     <div className="space-y-6">
@@ -88,27 +95,70 @@ export default function Income() {
       {/* Income breakdown - empty state */}
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-2 bg-panel border border-border rounded-lg p-5">
-          <h3 className="text-sm font-medium text-muted mb-4">Income History</h3>
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <svg className="w-12 h-12 text-muted/15 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
-            </svg>
-            <p className="text-sm text-muted mb-1">No income data yet</p>
-            <p className="text-xs text-muted/60 max-w-sm">
-              Income from verifications, court service, and fee pool distributions will appear here as you participate in the network.
-            </p>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium text-muted">Income History</h3>
+            {income.length > 0 && (
+              <span className="text-xs text-muted/60">{income.length} entries</span>
+            )}
           </div>
+          {income.length > 0 ? (
+            <div className="divide-y divide-border/50">
+              {income.map((e) => {
+                const meta = changeMeta(e.change_type);
+                return (
+                  <div key={e.id} className="flex items-center justify-between py-2.5">
+                    <div className="min-w-0">
+                      <div className="text-sm truncate">{meta.label}</div>
+                      <div className="text-xs text-muted/60">{timeAgo(e.timestamp)}</div>
+                    </div>
+                    <div className={`text-sm font-medium tabular-nums flex-shrink-0 ${meta.color}`}>
+                      {amountSign(meta.direction)}{displayPoints(e.amount)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <svg className="w-12 h-12 text-muted/15 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+              </svg>
+              <p className="text-sm text-muted mb-1">No income yet</p>
+              <p className="text-xs text-muted/60 max-w-sm">
+                Income from verifications, court service, and fee pool distributions will appear here as you participate in the network.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="bg-panel border border-border rounded-lg p-5">
           <h3 className="text-sm font-medium text-muted mb-4">Income Sources</h3>
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <svg className="w-10 h-10 text-muted/15 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z" />
-            </svg>
-            <p className="text-xs text-muted">No sources yet</p>
-          </div>
+          {sources.length > 0 ? (
+            <div className="space-y-3">
+              {sources.map((s) => {
+                const meta = changeMeta(s.changeType);
+                return (
+                  <div key={s.changeType} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        s.changeType === 'fee_distribution' ? 'bg-gold' : s.changeType === 'bounty' ? 'bg-gold/70' : 'bg-teal'
+                      }`} />
+                      <span className="text-xs text-muted truncate">{meta.label}</span>
+                    </div>
+                    <span className="text-xs font-medium tabular-nums flex-shrink-0">{displayPoints(s.total)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <svg className="w-10 h-10 text-muted/15 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z" />
+              </svg>
+              <p className="text-xs text-muted">No sources yet</p>
+            </div>
+          )}
         </div>
       </div>
 

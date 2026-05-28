@@ -227,6 +227,7 @@ describe('Phase 38: BFT catch-up sync', () => {
               isInPerson: wireTx.isInPerson,
               memo: wireTx.memo,
               signature: wireTx.signature,
+              receiverSignature: wireTx.receiverSignature ?? null,
               timestamp: wireTx.timestamp,
             },
             block.number,

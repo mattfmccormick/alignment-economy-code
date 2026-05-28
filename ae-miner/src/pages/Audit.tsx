@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
-import { api, type MinerStatus, type VouchData, type EvidenceScore } from '../lib/api';
+import { api, type MinerStatus, type VouchData, type EvidenceScore, type LedgerEntry } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
+import { displayPoints, timeAgo } from '../lib/formatting';
+import { changeMeta, amountSign } from '../lib/ledger';
 
 export default function Audit() {
   const [minerStatus, setMinerStatus] = useState<MinerStatus | null>(null);
   const [vouches, setVouches] = useState<VouchData | null>(null);
   const [evidenceScore, setEvidenceScore] = useState<EvidenceScore | null>(null);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -15,10 +18,11 @@ export default function Audit() {
 
     async function fetchData() {
       try {
-        const [minerRes, vouchRes, evidenceRes] = await Promise.allSettled([
+        const [minerRes, vouchRes, evidenceRes, ledgerRes] = await Promise.allSettled([
           api.getMinerStatus(wallet!.accountId),
           api.getVouches(wallet!.accountId),
           api.getEvidenceScore(wallet!.accountId),
+          api.getLedger(wallet!.accountId, 1, 50),
         ]);
 
         if (minerRes.status === 'fulfilled' && minerRes.value.success) {
@@ -29,6 +33,9 @@ export default function Audit() {
         }
         if (evidenceRes.status === 'fulfilled' && evidenceRes.value.success) {
           setEvidenceScore(evidenceRes.value.data);
+        }
+        if (ledgerRes.status === 'fulfilled' && ledgerRes.value.success) {
+          setLedger(ledgerRes.value.data.entries);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load audit data');
@@ -176,18 +183,49 @@ export default function Audit() {
         </div>
       ) : null}
 
-      {/* Activity Log - empty state */}
+      {/* Activity Log - the account's transaction_log audit trail */}
       <div className="bg-panel border border-border rounded-lg p-5">
-        <h3 className="text-sm font-medium text-muted mb-4">Activity Log</h3>
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <svg className="w-12 h-12 text-muted/15 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-          </svg>
-          <p className="text-sm text-muted mb-1">No activity recorded yet</p>
-          <p className="text-xs text-muted/60 max-w-sm">
-            Your verification decisions, court participation, tier changes, and other miner activity will be logged here as you use the network.
-          </p>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-muted">Activity Log</h3>
+          {ledger.length > 0 && (
+            <span className="text-xs text-muted/60">{ledger.length} most recent</span>
+          )}
         </div>
+        {ledger.length > 0 ? (
+          <div className="divide-y divide-border/50">
+            {ledger.map((e) => {
+              const meta = changeMeta(e.change_type);
+              return (
+                <div key={e.id} className="flex items-center justify-between py-2.5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      meta.direction === 'in' ? 'bg-teal' : meta.direction === 'out' ? 'bg-red/60' : 'bg-muted/40'
+                    }`} />
+                    <div className="min-w-0">
+                      <div className="text-sm truncate">{meta.label}</div>
+                      <div className="text-xs text-muted/60">
+                        {e.point_type !== 'n/a' ? `${e.point_type} · ` : ''}{timeAgo(e.timestamp)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`text-sm font-medium tabular-nums flex-shrink-0 ${meta.color}`}>
+                    {amountSign(meta.direction)}{displayPoints(e.amount)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <svg className="w-12 h-12 text-muted/15 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+            <p className="text-sm text-muted mb-1">No activity recorded yet</p>
+            <p className="text-xs text-muted/60 max-w-sm">
+              Your transactions, verification decisions, court participation, and fee-pool income will appear here as you use the network.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
