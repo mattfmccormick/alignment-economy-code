@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAccount } from '../hooks/useAccount';
-import { loadWallet } from '../lib/keys';
+import { loadWallet, clearWallet } from '../lib/keys';
 import { api } from '../lib/api';
 import { ShareDisplay } from '../components/wallet/ShareDisplay';
 import { BalanceCard } from '../components/wallet/BalanceCard';
@@ -34,9 +34,34 @@ export function Wallet() {
   }
 
   if (error || !account) {
+    const notOnNode = /not found/i.test(error || '');
     return (
-      <div className="p-4 text-center text-red-400">
-        <p>{error || 'Failed to load account'}</p>
+      <div className="p-6 max-w-md mx-auto text-center space-y-4">
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4">
+          <p className="text-sm text-red-400 mb-1">{notOnNode ? "This wallet isn't on the connected network" : (error || 'Failed to load account')}</p>
+          <p className="text-xs text-gray-400">
+            {notOnNode
+              ? 'This account was created on a different network or database, so the node running now does not have it. Reconnect to its original network, or start over with a new wallet.'
+              : 'Could not load your account. The node may be unreachable.'}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full py-3 bg-navy border border-navy-light text-white rounded-xl text-sm hover:border-teal transition-colors"
+          >
+            Retry
+          </button>
+          <button
+            onClick={() => { clearWallet(); window.location.reload(); }}
+            className="w-full py-3 bg-teal text-white rounded-xl text-sm font-medium hover:bg-teal-dark transition-colors"
+          >
+            Start over with a new wallet
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-600">
+          "Start over" clears this saved wallet and returns to setup. Your 12-word recovery phrase still restores the old account on its original network.
+        </p>
       </div>
     );
   }

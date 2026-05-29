@@ -1462,6 +1462,13 @@ export function Onboarding() {
         <p className="text-[11px] text-gray-500 max-w-sm text-center leading-relaxed">
           Find a pen and paper before you continue.
         </p>
+
+        <button
+          onClick={() => setFlow('track-picker')}
+          className="text-sm text-gray-500 hover:text-gray-300 mt-4"
+        >
+          Back
+        </button>
       </div>
     );
   }
@@ -1508,6 +1515,13 @@ export function Onboarding() {
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors"
         >
           I&apos;ve Written Them Down
+        </button>
+
+        <button
+          onClick={() => setFlow('learn-recovery')}
+          className="text-sm text-gray-500 hover:text-gray-300 mt-4"
+        >
+          Back
         </button>
       </div>
     );
@@ -1594,6 +1608,13 @@ export function Onboarding() {
         >
           Got It
         </button>
+
+        <button
+          onClick={() => setFlow('confirm-key')}
+          className="text-sm text-gray-500 hover:text-gray-300 mt-4"
+        >
+          Back
+        </button>
       </div>
     );
   }
@@ -1615,9 +1636,14 @@ export function Onboarding() {
         >
           Add Proof of Human
         </button>
-        <button onClick={() => navigate('/')} className="text-sm text-gray-500 hover:text-gray-300">
-          Skip for now
-        </button>
+        <div className="flex items-center gap-5">
+          <button onClick={() => setFlow('how-balance')} className="text-sm text-gray-500 hover:text-gray-300">
+            Back
+          </button>
+          <button onClick={() => navigate('/')} className="text-sm text-gray-500 hover:text-gray-300">
+            Skip for now
+          </button>
+        </div>
       </div>
     );
   }

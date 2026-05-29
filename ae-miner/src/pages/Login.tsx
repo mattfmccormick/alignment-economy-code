@@ -362,6 +362,13 @@ export default function Login() {
               <p className="text-[11px] text-muted/70 mt-3 text-center">
                 Find a pen and paper before you continue.
               </p>
+
+              <button
+                onClick={() => setStep('enter_id')}
+                className="w-full text-center text-sm text-muted hover:text-white mt-3"
+              >
+                Back
+              </button>
             </>
           )}
 
@@ -429,6 +436,13 @@ export default function Login() {
                 className="w-full py-2.5 bg-teal text-white rounded-lg text-sm font-medium hover:bg-teal-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Register as Miner
+              </button>
+
+              <button
+                onClick={() => setStep('learn_recovery')}
+                className="w-full text-center text-sm text-muted hover:text-white mt-3"
+              >
+                Back
               </button>
             </>
           )}
