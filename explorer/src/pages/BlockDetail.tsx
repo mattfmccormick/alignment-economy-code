@@ -8,26 +8,26 @@ import { formatTimestamp, truncateId } from '../lib/format';
 export function BlockDetail() {
   const { number } = useParams<{ number: string }>();
   const [block, setBlock] = useState<Block | null>(null);
-  const [siblings, setSiblings] = useState<Block[]>([]);
+  const [head, setHead] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
+    setBlock(null);
+    setError(null);
     async function load() {
       try {
-        // No GET /blocks/:n endpoint exists yet on ae-node. Fall back to
-        // fetching the page that contains the requested block, then
-        // pluck it out. limit=100 covers any block within the most
-        // recent 100; older blocks will need a paginated walk.
-        const r = await client.getBlocks({ limit: 100 });
+        // Direct lookup by height via the SDK (GET /network/blocks/:number),
+        // so any block resolves, not just the latest page.
+        const b = await client.getBlock(Number(number));
         if (!active) return;
-        const target = (r.blocks ?? []).find((b) => String(b.number) === number);
-        if (!target) {
-          setError(`Block ${number} not in the latest 100. Older blocks need a different lookup (TODO: ae-node /blocks/:n endpoint).`);
-          return;
-        }
-        setBlock(target);
-        setSiblings(r.blocks ?? []);
+        setBlock(b);
+        // Head height is a best-effort hint for the "next block" link only;
+        // a failure here must not block rendering the block itself.
+        try {
+          const status = await client.getNetworkStatus();
+          if (active) setHead(status.blockHeight);
+        } catch { /* nav hint only */ }
       } catch (e) {
         if (!active) return;
         setError(e instanceof Error ? e.message : String(e));
@@ -40,25 +40,27 @@ export function BlockDetail() {
   if (error) return <ErrorBox message={error} />;
   if (!block) return <Loading what={`loading block ${number}`} />;
 
-  const prev = siblings.find((b) => b.number === block.number - 1);
-  const next = siblings.find((b) => b.number === block.number + 1);
+  const prevNum = block.number - 1;
+  const nextNum = block.number + 1;
+  const showPrev = prevNum >= 0;
+  const showNext = head !== null && nextNum <= head;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-serif">Block {block.number}</h1>
-        <div className="text-sm text-slate-400 mt-1">{formatTimestamp(block.timestamp)} — Day {block.day}</div>
+        <div className="text-sm text-slate-400 mt-1">{formatTimestamp(block.timestamp)} · Day {block.day}</div>
       </div>
 
       <Field label="Hash" value={block.hash} mono />
-      <Field label="Parent hash" value={block.parentHash} mono link={prev ? `/block/${prev.number}` : undefined} />
+      <Field label="Parent hash" value={block.parentHash} mono link={showPrev ? `/block/${prevNum}` : undefined} />
       <Field label="Authority" value={block.authorityNodeId} mono />
       <Field label="Authority signature" value={truncateId(block.authoritySignature ?? '', 12, 12)} mono />
 
       <div className="flex gap-3 pt-4 border-t border-slate-800 text-sm">
-        {prev && <Link to={`/block/${prev.number}`} className="text-teal-400 hover:text-teal-300">← Block {prev.number}</Link>}
+        {showPrev && <Link to={`/block/${prevNum}`} className="text-teal-400 hover:text-teal-300">← Block {prevNum}</Link>}
         <span className="flex-1" />
-        {next && <Link to={`/block/${next.number}`} className="text-teal-400 hover:text-teal-300">Block {next.number} →</Link>}
+        {showNext && <Link to={`/block/${nextNum}`} className="text-teal-400 hover:text-teal-300">Block {nextNum} →</Link>}
       </div>
     </div>
   );

@@ -141,6 +141,14 @@ export class AlignmentEconomyClient {
     return this.request('GET', `/network/blocks?page=${page}&limit=${limit}`);
   }
 
+  /**
+   * Look up a single block by height. Throws SDKError with code='NOT_FOUND'
+   * (httpStatus=404) for a height that doesn't exist yet.
+   */
+  async getBlock(number: number): Promise<Block> {
+    return this.request('GET', `/network/blocks/${number}`);
+  }
+
   // ─── Founder ────────────────────────────────────────────────────────
 
   /**

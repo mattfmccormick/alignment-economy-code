@@ -4,6 +4,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Participant wallet for the Alignment Economy network.",
+  "author": "The Alignment Economy Foundation",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -22,6 +23,7 @@
   "build": {
     "appId": "org.alignmenteconomy.wallet",
     "productName": "Alignment Economy Wallet",
+    "copyright": "Copyright © 2026 The Alignment Economy Foundation",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -123,7 +125,6 @@
     "recharts": "^3.8.1",
     "sharp": "^0.33.5",
     "tailwindcss": "^4.2.2",
-    "tweetnacl": "^1.0.3",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.0",
     "vite": "^8.0.4",

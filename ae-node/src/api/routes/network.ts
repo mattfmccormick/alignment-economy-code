@@ -58,6 +58,32 @@ export function networkRoutes(db: DatabaseSync): Router {
     } catch (e) { next(e); }
   });
 
+  // GET /network/blocks/:number — a single block by height. Lets the explorer
+  // (and any client) look up an arbitrary block, not just the latest page.
+  router.get('/blocks/:number', (req, res, next) => {
+    try {
+      const number = parseInt(req.params.number as string, 10);
+      if (!Number.isInteger(number) || number < 0) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'BAD_REQUEST', message: 'block number must be a non-negative integer' },
+        });
+      }
+      const row = db.prepare('SELECT * FROM blocks WHERE number = ?').get(number);
+      if (!row) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: `No block #${number}` },
+        });
+      }
+      res.json({
+        success: true,
+        data: row,
+        meta: { timestamp: Math.floor(Date.now() / 1000) },
+      });
+    } catch (e) { next(e); }
+  });
+
   // GET /network/fee-pool
   router.get('/fee-pool', (_req, res, next) => {
     try {

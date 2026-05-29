@@ -4,6 +4,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Verifier dashboard for the Alignment Economy. Review evidence, vote on cases, earn fees.",
+  "author": "The Alignment Economy Foundation",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -21,6 +22,7 @@
   "build": {
     "appId": "org.alignmenteconomy.miner",
     "productName": "Alignment Economy Miner",
+    "copyright": "Copyright © 2026 The Alignment Economy Foundation",
     "directories": {
       "output": "release",
       "buildResources": "build"
