@@ -107,7 +107,7 @@ export default function Vouch() {
       </div>
 
       {/* Stake budget summary */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
           label="Your Earned"
           value={displayPoints(earnedRaw.toString()) + ' pts'}

@@ -143,21 +143,26 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
     // the signer's daily supportive flow.
     const w = loadWallet();
     if (!w) { setSaving(false); setError('No wallet loaded'); return; }
-    const ts = Math.floor(Date.now() / 1000);
-    const payload = { day, tags: submit.map((t) => ({ productId: t.productId, minutesUsed: t.minutesUsed })) };
-    const signature = signPayload(payload, ts, w.privateKey);
-    const r = await api.submitSupportiveTags({
-      accountId,
-      timestamp: ts,
-      signature,
-      payload,
-    });
-    setSaving(false);
-    if (r.success) {
-      setSavedAt(Date.now());
-      refresh();
-    } else {
-      setError(r.error?.message || 'Failed to save');
+    try {
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { day, tags: submit.map((t) => ({ productId: t.productId, minutesUsed: t.minutesUsed })) };
+      const signature = signPayload(payload, ts, w.privateKey);
+      const r = await api.submitSupportiveTags({
+        accountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
+      if (r.success) {
+        setSavedAt(Date.now());
+        refresh();
+      } else {
+        setError(r.error?.message || 'Failed to save');
+      }
+    } catch {
+      setError("Couldn't reach the node. Your tags weren't saved, try again.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -394,21 +399,26 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
     // backend reads accountId from the signature.
     const w = loadWallet();
     if (!w) { setSaving(false); setError('No wallet loaded'); return; }
-    const ts = Math.floor(Date.now() / 1000);
-    const payload = { day, tags: submit.map((t) => ({ spaceId: t.spaceId, minutesOccupied: t.minutesOccupied })) };
-    const signature = signPayload(payload, ts, w.privateKey);
-    const r = await api.submitAmbientTags({
-      accountId,
-      timestamp: ts,
-      signature,
-      payload,
-    });
-    setSaving(false);
-    if (r.success) {
-      setSavedAt(Date.now());
-      refresh();
-    } else {
-      setError(r.error?.message || 'Failed to save');
+    try {
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { day, tags: submit.map((t) => ({ spaceId: t.spaceId, minutesOccupied: t.minutesOccupied })) };
+      const signature = signPayload(payload, ts, w.privateKey);
+      const r = await api.submitAmbientTags({
+        accountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
+      if (r.success) {
+        setSavedAt(Date.now());
+        refresh();
+      } else {
+        setError(r.error?.message || 'Failed to save');
+      }
+    } catch {
+      setError("Couldn't reach the node. Your tags weren't saved, try again.");
+    } finally {
+      setSaving(false);
     }
   };
 

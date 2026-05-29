@@ -71,7 +71,7 @@ const navItems = [
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () => void }) {
   const navigate = useNavigate();
   const wallet = loadMinerWallet();
   const [currentTheme, setCurrentTheme] = useState(getTheme());
@@ -100,7 +100,11 @@ export default function Sidebar() {
   const tier = minerStatus?.miner?.tier;
 
   return (
-    <aside className="w-60 min-h-screen bg-sidebar border-r border-border flex flex-col">
+    <aside
+      className={`fixed inset-y-0 left-0 z-50 w-60 min-h-screen bg-sidebar border-r border-border flex flex-col transform transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
+        isOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}
+    >
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-2.5">
@@ -140,6 +144,7 @@ export default function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.to === '/'}
+            onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 text-sm font-medium transition-colors ${
                 isActive

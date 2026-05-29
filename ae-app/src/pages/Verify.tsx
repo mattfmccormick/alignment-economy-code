@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ChangeEvent } from 'react';
 import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { truncateId, displayPoints } from '../lib/formatting';
+import { hashFileSHA256 } from '../lib/hash';
 
 type Modal = null | 'request-vouch' | 'submit-evidence';
 
@@ -38,6 +39,8 @@ export function Verify() {
   // Evidence form
   const [evidenceType, setEvidenceType] = useState('gov_id');
   const [evidenceHash, setEvidenceHash] = useState('');
+  const [evidenceFileName, setEvidenceFileName] = useState('');
+  const [evidenceHashing, setEvidenceHashing] = useState(false);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [evidenceSuccess, setEvidenceSuccess] = useState(false);
@@ -143,6 +146,25 @@ export function Verify() {
     setVouchLoading(false);
   }
 
+  async function handleFilePick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setEvidenceError(null);
+    setEvidenceSuccess(false);
+    setEvidenceFileName(file.name);
+    setEvidenceHashing(true);
+    try {
+      // Hash on-device. Only the digest is ever sent; the file stays here.
+      const hash = await hashFileSHA256(file);
+      setEvidenceHash(hash);
+    } catch {
+      setEvidenceError('Could not read that file. Try another.');
+      setEvidenceHash('');
+      setEvidenceFileName('');
+    }
+    setEvidenceHashing(false);
+  }
+
   async function handleSubmitEvidence() {
     if (!wallet?.accountId || !evidenceHash.trim()) return;
     setEvidenceLoading(true);
@@ -161,6 +183,7 @@ export function Verify() {
       if (res.success) {
         setEvidenceSuccess(true);
         setEvidenceHash('');
+        setEvidenceFileName('');
         setTimeout(() => setModal(null), 1500);
       } else {
         setEvidenceError(res.error?.message || 'Failed to submit evidence');
@@ -507,15 +530,25 @@ export function Verify() {
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 block mb-1">Evidence Hash</label>
-                <input
-                  value={evidenceHash}
-                  onChange={(e) => setEvidenceHash(e.target.value)}
-                  placeholder="SHA-256 hash of your evidence file"
-                  className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:border-teal focus:outline-none"
-                />
-                <p className="text-[10px] text-gray-600 mt-1">
-                  Hash your evidence file locally, then paste the hash here. Your actual document never leaves your device.
+                <label className="text-xs text-gray-400 block mb-1">Evidence File</label>
+                <label className="flex items-center justify-center gap-2 w-full bg-navy border border-dashed border-navy-light rounded-xl px-4 py-4 text-sm text-gray-400 cursor-pointer hover:border-teal transition-colors">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                  </svg>
+                  {evidenceFileName ? 'Choose a different file' : 'Choose a file (ID, selfie, document)'}
+                  <input type="file" className="hidden" onChange={handleFilePick} />
+                </label>
+                {evidenceHashing && (
+                  <p className="text-[11px] text-gray-400 mt-2">Hashing on your device...</p>
+                )}
+                {evidenceFileName && !evidenceHashing && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-white truncate">{evidenceFileName}</p>
+                    <p className="text-[10px] text-gray-500 font-mono break-all">SHA-256: {evidenceHash.slice(0, 32)}…</p>
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-600 mt-2">
+                  Your file is hashed on your device. Only the hash is sent as proof, the document itself never leaves this device.
                 </p>
               </div>
 
@@ -524,7 +557,7 @@ export function Verify() {
 
               <button
                 onClick={handleSubmitEvidence}
-                disabled={evidenceLoading || !evidenceHash.trim()}
+                disabled={evidenceLoading || evidenceHashing || !evidenceHash.trim()}
                 className="w-full py-3 bg-teal text-white rounded-xl text-sm font-medium hover:bg-teal-dark transition-colors disabled:opacity-50"
               >
                 {evidenceLoading ? 'Submitting...' : 'Submit Evidence'}

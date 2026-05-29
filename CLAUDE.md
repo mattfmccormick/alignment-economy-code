@@ -256,14 +256,14 @@ Live to-do list to reach a handoff-ready codebase, split by who can do each piec
 - **[CODE] Finish the storage-interface extraction.** Largely done already: `IAccountStore`, `ITransactionStore`, `IVerificationStore`, `IMiningStore`, `ICourtStore`, and `IBlockStore` all exist with Sqlite implementations under `ae-node/src/core/stores/`. Remaining: route the residual inline SQL in `transaction.ts` (the cycle-phase guard) and `day-cycle.ts` through a small `ICycleStateStore`. This is the seam a pro needs to swap SQLite for Postgres without touching the economics, so it is close, not from-scratch.
 - **[CODE] Cleanly abstract and document the P2P transport** so NAT traversal or a relay drops in behind an interface without touching consensus. We do not build NAT traversal, we make its insertion point obvious.
 - **[CODE] Pure-bigint fee and rebase math** to remove the documented precision loss, plus a dust-distribution pass on the rebase. With tests.
-- **[CODE] Tidy:** remove dead code, tighten types, confirm every POST/PUT/DELETE auth gate has a regression test.
+- **[CODE] Tidy:** remove dead code, tighten types. (Auth-gate coverage DONE: `phase72.test.ts` adds per-route auth tests for `/miners/register`, `/miners/evidence`, `/tags/ambient`, and `/recurring` (12/12) on top of phase71's shared-middleware tests, so a refactor that drops `authMiddleware` on any of them fails loudly. Dead-code / type sweep still open.)
 
 #### Frontend (`ae-app` wallet + `ae-miner`): finish so you can review
 - [x] **~~Build the two miner stub pages for real.~~** DONE. New `GET /accounts/:id/ledger` endpoint serves the `transaction_log` audit trail (newest first, paginated). `Income` now shows real income history (payments, court bounties, fee-pool / mining distributions) plus a by-source breakdown; `Audit`'s Activity Log shows the full ledger with per-change-type labels and colors. Shared classifier in `ae-miner/src/lib/ledger.ts`. Endpoint covered by `ledger-endpoint.test.ts` (3/3); both apps build clean. Live browser check still pending (fold into the frontend review).
 - **[CODE] Real evidence handling** on verification in both apps: proper file selection, local hashing, a clear "your document never leaves your device" flow, instead of pasting a raw hash.
 - **[CODE] Make `ae-miner` mobile-responsive** to match the wallet (the project rule is mobile-first, the miner currently is not).
 - **[CODE] Finish the join-as-new-friend flow** (inline keystore generation for joiners not pre-allocated in genesis), the documented TODO.
-- **[CODE] Tighten error / empty / loading states** across both apps so no screen goes blank on an API failure.
+- [x] **~~Tighten error / empty / loading states.~~** Done where it mattered: the wallet History page (previously blank on failure) now has loading / error / empty states; both Tag save paths (products + spaces) now catch network failures instead of hanging on "Saving…". Send already handled its failures; the miner pages already had loading/error states.
 - **[MATT] Review the finished frontend** and tell me what copy, layout, or flow to change. This is the step you want; everything above gets it ready for you.
 
 #### Deployment and operations: professional team

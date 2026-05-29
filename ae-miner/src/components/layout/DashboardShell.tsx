@@ -7,6 +7,7 @@ export default function DashboardShell() {
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
   const [nodeStatus, setNodeStatus] = useState<NodeStatus | null>(null);
   const [nodeHealthy, setNodeHealthy] = useState<boolean | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     async function fetchHeader() {
@@ -38,13 +39,30 @@ export default function DashboardShell() {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
+      {/* Mobile drawer backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header bar */}
-        <header className="h-14 border-b border-border bg-panel/50 flex items-center justify-between px-6 flex-shrink-0">
-          <div className="flex items-center gap-4">
-            <h1 className="text-sm font-semibold text-white">Miner Dashboard</h1>
-            <span className="text-xs text-muted">Alignment Economy Protocol v0.9</span>
+        <header className="h-14 border-b border-border bg-panel/50 flex items-center justify-between px-4 sm:px-6 flex-shrink-0">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden text-muted hover:text-white -ml-1 p-1 flex-shrink-0"
+              aria-label="Open menu"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            </button>
+            <h1 className="text-sm font-semibold text-white whitespace-nowrap">Miner Dashboard</h1>
+            <span className="text-xs text-muted hidden sm:inline">Alignment Economy Protocol v0.9</span>
           </div>
           <div className="flex items-center gap-4">
             {/* Heartbeat indicator */}
@@ -72,14 +90,14 @@ export default function DashboardShell() {
 
             {/* Block height */}
             {blockHeight !== undefined && (
-              <div className="text-xs text-muted">
+              <div className="text-xs text-muted hidden sm:block">
                 Block <span className="text-white font-mono">#{blockHeight.toLocaleString()}</span>
               </div>
             )}
 
             {/* Current Day */}
             {currentDay !== undefined && (
-              <div className="text-xs text-muted">
+              <div className="text-xs text-muted hidden sm:block">
                 Day <span className="text-gold font-mono">{currentDay}</span>
               </div>
             )}

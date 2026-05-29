@@ -81,7 +81,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Stat Cards Row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Tier Card */}
         <TierBadge tier={tier} />
 
@@ -128,7 +128,7 @@ export default function Dashboard() {
       </div>
 
       {/* Network Stats Row */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-panel border border-border rounded-lg p-5">
           <h3 className="text-sm font-medium text-muted mb-3">Network Status</h3>
           <div className="space-y-3">

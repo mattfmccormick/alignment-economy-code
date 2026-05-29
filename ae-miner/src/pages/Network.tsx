@@ -88,7 +88,7 @@ export default function Network() {
   return (
     <div className="space-y-6">
       {/* Stats grid */}
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {stats.map((s) => (
           <div key={s.label} className="bg-panel border border-border rounded-lg p-4">
             <div className="text-[10px] text-muted uppercase tracking-wider mb-1">{s.label}</div>
@@ -99,7 +99,7 @@ export default function Network() {
 
       {/* Node status */}
       {nodeStatus && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-panel border border-border rounded-lg p-5">
             <h3 className="text-sm font-medium text-muted mb-4">Node Health</h3>
             <div className="space-y-3">

@@ -63,7 +63,7 @@ export default function Income() {
   return (
     <div className="space-y-6">
       {/* Balance summary cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-panel border border-border rounded-lg p-5">
           <div className="text-xs text-muted mb-1">Earned Balance</div>
           <div className="text-2xl font-bold text-gold">
@@ -93,7 +93,7 @@ export default function Income() {
       </div>
 
       {/* Income breakdown - empty state */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="col-span-2 bg-panel border border-border rounded-lg p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-medium text-muted">Income History</h3>
@@ -165,7 +165,7 @@ export default function Income() {
       {/* How miners earn */}
       <div className="bg-panel border border-border rounded-lg p-5">
         <h3 className="text-sm font-medium text-muted mb-4">How Miners Earn Points</h3>
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
             <div className="flex items-center gap-2 mb-2">
               <div className="w-8 h-8 rounded-lg bg-teal/10 flex items-center justify-center">

@@ -84,7 +84,7 @@ export default function Audit() {
       </div>
 
       {/* Miner profile */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-panel border border-border rounded-lg p-5">
           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Miner Status</h3>
           <div className="space-y-3">
@@ -149,7 +149,7 @@ export default function Audit() {
 
       {/* Vouch details */}
       {vouches && (vouches.received.length > 0 || vouches.given.length > 0) ? (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="bg-panel border border-border rounded-lg p-5">
             <h3 className="text-sm font-medium text-muted mb-3">Vouches Received</h3>
             {vouches.received.length > 0 ? (
