@@ -19,10 +19,18 @@ ae-app/       Participant wallet (React + Vite + Tailwind, Electron desktop
 ae-miner/     Verifier / juror dashboard (React + Vite + Tailwind, Electron
               desktop build). Connects to ae-node. Listens on :5174 in dev.
 
-scripts/      Workspace-level scripts (SSL setup, etc.)
+platform-server/  Optional custodial backend (email/password signup,
+              encrypted vault, recovery, 2FA). Separate service from ae-node.
+sdk/          @alignmenteconomy/sdk: typed client for third-party integration.
+explorer/     Read-only block explorer (React + Vite). Listens on :5175 in dev.
+
+scripts/      Workspace-level scripts (SSL setup, LAN multi-validator test).
+docs/         Operator + handoff docs. Start with docs/ARCHITECTURE.md.
 docker-compose.yml  Multi-service local orchestration.
-CLAUDE.md     Authoritative project notes - architecture, known issues,
+CLAUDE.md     Authoritative project notes - status, build plan, known issues,
               development principles. Read this first.
+docs/ARCHITECTURE.md  Architecture + handoff map: how the pieces fit, the
+              seams (DB / transport / host), where to start reading.
 AE_PROJECT_BRIEF.md  Original project brief.
 ```
 
