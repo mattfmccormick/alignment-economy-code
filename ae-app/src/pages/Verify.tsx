@@ -184,6 +184,12 @@ export function Verify() {
         setEvidenceSuccess(true);
         setEvidenceHash('');
         setEvidenceFileName('');
+        // "Just upload, then submit": kick off the miner review automatically
+        // so there's no separate "request a panel" step. Only when one isn't
+        // already open (extra evidence rides the existing panel).
+        if (!panels.some((p) => p.status !== 'complete')) {
+          handleRequestPanel();
+        }
         setTimeout(() => setModal(null), 1500);
       } else {
         setEvidenceError(res.error?.message || 'Failed to submit evidence');
@@ -288,11 +294,33 @@ export function Verify() {
         </div>
       )}
 
-      {/* Tier breakdown */}
-      <div className="space-y-3">
-        <TierRow label="Tier A" subtitle="Gov ID, Photo, Voice" score={vouchScore?.breakdown?.tierA ?? 0} max={30} />
-        <TierRow label="Tier B" subtitle="Biometrics" score={vouchScore?.breakdown?.tierB ?? 0} max={80} />
-        <TierRow label="Tier C" subtitle="Vouches" score={vouchScore?.breakdown?.tierC ?? score} max={100} />
+      {/* What counts as proof */}
+      <div className="bg-navy rounded-xl p-4 border border-navy-light space-y-3">
+        <div>
+          <h3 className="text-sm font-medium text-white">Ways to prove you&apos;re human</h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            You don&apos;t have to hand over ID or biometrics. Vouches from people who are already verified can take you all the way, or mix a few of these. A miner reviews whatever you add and judges how convincingly human it is.
+          </p>
+        </div>
+        <ul className="space-y-2">
+          {[
+            { label: 'Vouches from verified friends', note: 'Strongest. Real people stake their own points on you, which is hard to fake.' },
+            { label: 'A short live video call', note: 'Strong. A real-time face and voice are hard to fake.' },
+            { label: 'Government ID photo', note: 'Helps, though a miner weighs it since photos can be edited.' },
+            { label: 'Selfie or voice sample', note: 'Adds a little. AI can fake these, so they count less on their own.' },
+          ].map((it) => (
+            <li key={it.label} className="flex gap-2.5">
+              <span className="text-teal text-sm mt-0.5">✓</span>
+              <div>
+                <p className="text-sm text-white">{it.label}</p>
+                <p className="text-xs text-gray-500">{it.note}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p className="text-[11px] text-gray-500">
+          You can get fully verified with vouches alone, no documents required.
+        </p>
       </div>
 
       {/* Actions */}
@@ -309,54 +337,11 @@ export function Verify() {
         >
           Submit Evidence
         </button>
+        {panelLoading && <p className="text-xs text-gray-400 text-center pt-1">Requesting a miner review…</p>}
+        {panelError && !panelLoading && <p className="text-xs text-gold text-center pt-1">{panelError}</p>}
+        {openPanel && !panelError && !panelLoading && <p className="text-xs text-teal text-center pt-1">A miner is reviewing your proof.</p>}
       </div>
 
-      {/* Verification panel — the real proof-of-human flow */}
-      <div className="bg-navy rounded-xl p-4 border border-navy-light space-y-3">
-        <div>
-          <h3 className="text-sm font-medium text-white">Get Verified by a Miner</h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Add your proof above, then submit. A verified miner reviews what you provided and sets your %Human.
-          </p>
-        </div>
-
-        {openPanel ? (
-          <div className="bg-navy-dark rounded-lg p-3 border border-teal/30">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs uppercase tracking-wider text-teal">Panel {openPanel.status === 'pending' ? 'pending' : 'in progress'}</span>
-              <span className="text-xs text-gray-500 font-mono">{truncateId(openPanel.id)}</span>
-            </div>
-            <p className="text-xs text-gray-400">
-              Created {new Date(openPanel.createdAt * 1000).toLocaleString()}.
-              {openPanel.status === 'pending' ? ' Waiting for assigned miners to review.' : ' Reviews coming in.'}
-            </p>
-          </div>
-        ) : (
-          <button
-            onClick={handleRequestPanel}
-            disabled={panelLoading}
-            className="w-full py-3 bg-gold text-navy-dark rounded-xl text-sm font-semibold hover:bg-gold-light transition-colors disabled:opacity-50"
-          >
-            {panelLoading ? 'Requesting…' : 'Request Verification Panel'}
-          </button>
-        )}
-
-        {panelError && <p className="text-xs text-red-400">{panelError}</p>}
-
-        {panels.length > 0 && (
-          <div>
-            <p className="text-xs text-gray-500 mb-1.5">Past Panels</p>
-            <div className="space-y-1">
-              {panels.filter((p) => p.status === 'complete').map((p) => (
-                <div key={p.id} className="flex items-center justify-between text-xs bg-navy-dark rounded-lg px-3 py-2">
-                  <span className="text-gray-400 font-mono">{truncateId(p.id)}</span>
-                  <span className="text-green-400">Median {p.medianScore}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* Incoming vouch requests */}
       {incomingRequests.length > 0 && (
@@ -570,20 +555,3 @@ export function Verify() {
   );
 }
 
-function TierRow({ label, subtitle, score, max }: { label: string; subtitle: string; score: number; max: number }) {
-  const percent = max > 0 ? Math.min((score / max) * 100, 100) : 0;
-  return (
-    <div className="bg-navy rounded-xl p-3 border border-navy-light">
-      <div className="flex justify-between items-baseline mb-1">
-        <div>
-          <span className="text-sm text-white">{label}</span>
-          <span className="text-xs text-gray-500 ml-2">{subtitle}</span>
-        </div>
-        <span className="text-xs text-gray-300 tabular-nums">{score} / {max}</span>
-      </div>
-      <div className="h-1.5 bg-navy-light rounded-full overflow-hidden">
-        <div className="h-full bg-teal rounded-full transition-all duration-500" style={{ width: `${percent}%` }} />
-      </div>
-    </div>
-  );
-}
