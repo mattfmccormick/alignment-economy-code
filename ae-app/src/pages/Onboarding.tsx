@@ -15,6 +15,7 @@ type Flow =
   | 'platform-signup'        // Platform track: email + password form
   | 'platform-busy'          // Platform track: in-flight network call
   | 'platform-totp'          // Platform track: 2FA prompt after email + password OK
+  | 'encourage-2fa'          // Platform track: recommend enabling 2FA after signup
   | 'platform-forgot-start'  // Platform track: enter email to begin recovery
   | 'platform-forgot-token'  // Platform track: paste token + new password
   | 'network-mode'
@@ -166,14 +167,25 @@ export function Onboarding() {
   // restarts skip the password prompt while the token is fresh, and we
   // route to /verify so the user can opt into proof-of-human just like
   // self-custody users do.
+  // Platform password policy: 15+ chars, at least one uppercase, at least one
+  // special character. Enforced client-side because the platform server only
+  // ever receives a derived hash, never the raw password.
+  function passwordPolicyError(pw: string): string | null {
+    if (pw.length < 15) return 'Password must be at least 15 characters.';
+    if (!/[A-Z]/.test(pw)) return 'Password must include at least one uppercase letter.';
+    if (!/[^A-Za-z0-9]/.test(pw)) return 'Password must include at least one special character (e.g. !?#$).';
+    return null;
+  }
+
   async function handlePlatformSignup() {
     setPlatformError(null);
     if (!platformEmail.trim() || !platformPassword) {
       setPlatformError('Email and password are required.');
       return;
     }
-    if (platformPassword.length < 8) {
-      setPlatformError('Password must be at least 8 characters.');
+    const pwErr = passwordPolicyError(platformPassword);
+    if (pwErr) {
+      setPlatformError(pwErr);
       return;
     }
     if (platformPassword !== platformConfirm) {
@@ -202,12 +214,12 @@ export function Onboarding() {
         // and a stale ae-node row is harmless.
       }
       savePlatformSession(sessionFromSdk(platformEmail.trim(), session));
-      setFlow('how-balance');
+      setFlow('encourage-2fa');
     } catch (e) {
       if (e instanceof PlatformError && e.code === 'EMAIL_TAKEN') {
         setPlatformError("That email is already registered. Try signing in instead.");
       } else if (e instanceof PlatformError && e.code === 'WEAK_PASSWORD') {
-        setPlatformError('Password must be 8 to 1024 characters.');
+        setPlatformError('That password was rejected. Use 15+ characters with an uppercase letter and a special character.');
       } else {
         setPlatformError(e instanceof Error ? e.message : 'Network error. Is the platform server running?');
       }
@@ -303,8 +315,9 @@ export function Onboarding() {
       setPlatformError('Token and new password are required.');
       return;
     }
-    if (platformForgotNewPassword.length < 8) {
-      setPlatformError('New password must be at least 8 characters.');
+    const pwErr = passwordPolicyError(platformForgotNewPassword);
+    if (pwErr) {
+      setPlatformError(pwErr);
       return;
     }
     setPlatformBusy(true);
@@ -614,8 +627,9 @@ export function Onboarding() {
         </div>
         <h1 className="text-3xl font-serif text-white mb-3">Alignment Economy</h1>
         <p className="text-gray-400 mb-10 max-w-sm leading-relaxed text-sm">
-          A new economic system where every person gets 1,440 points per day,
-          one for every minute of attention you have.
+          A digital currency that works: Money that holds its value, that you
+          spend instead of hoard, and that finally counts the work no paycheck
+          ever did.
         </p>
 
         <button
@@ -1262,9 +1276,12 @@ export function Onboarding() {
               autoComplete="new-password"
               value={platformPassword}
               onChange={(e) => setPlatformPassword(e.target.value)}
-              placeholder="At least 8 characters"
+              placeholder="At least 15 characters"
               className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
             />
+            <p className="text-[11px] text-gray-500 mt-1.5">
+              15+ characters, with at least one uppercase letter and one special character.
+            </p>
           </div>
           <div className="text-left">
             <label className="text-xs text-gray-400 block mb-1.5">Confirm password</label>
@@ -1575,6 +1592,39 @@ export function Onboarding() {
         {/* Hint to a developer reading source: words is referenced in the
             confirm logic via state, this just keeps the UI minimal. */}
         <span className="hidden">{words.length}</span>
+      </div>
+    );
+  }
+
+  // Platform track: after signup, strongly encourage enabling 2FA before the
+  // user gets into the app. They can also set it up later from the More menu.
+  if (flow === 'encourage-2fa') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
+        <div className="w-12 h-12 rounded-full bg-teal/15 flex items-center justify-center mb-4">
+          <svg className="w-6 h-6 text-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+          </svg>
+        </div>
+        <h2 className="text-2xl font-serif text-white mb-2">Add an extra lock</h2>
+        <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
+          Your account is created. Turn on two-factor authentication (2FA) so a stolen password isn&apos;t enough to get in: you&apos;ll also enter a 6-digit code from an app on your phone. We strongly recommend it.
+        </p>
+        <button
+          onClick={() => navigate('/more')}
+          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
+        >
+          Turn on two-factor (recommended)
+        </button>
+        <button
+          onClick={() => setFlow('how-balance')}
+          className="text-sm text-gray-500 hover:text-gray-300"
+        >
+          I&apos;ll do it later
+        </button>
+        <p className="text-[11px] text-gray-600 max-w-sm mt-4 leading-relaxed">
+          You can set this up anytime from the More menu under "Two-factor auth."
+        </p>
       </div>
     );
   }
