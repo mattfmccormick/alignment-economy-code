@@ -22,7 +22,7 @@ interface Recipient {
 export function Send() {
   const wallet = loadWallet();
   const { account } = useAccount(wallet?.accountId ?? null);
-  const [tab, setTab] = useState<Tab>('contacts');
+  const [tab, setTab] = useState<Tab>('recent');
   const [pointType, setPointType] = useState<'active' | 'earned'>('active');
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [amount, setAmount] = useState('');
@@ -282,9 +282,9 @@ export function Send() {
       {/* Tab bar */}
       <div className="flex bg-navy rounded-lg p-1 border border-navy-light">
         {([
+          { key: 'recent' as Tab, label: 'Recent' },
           { key: 'contacts' as Tab, label: 'Contacts' },
           { key: 'search' as Tab, label: 'Search' },
-          { key: 'recent' as Tab, label: 'Recent' },
         ]).map((t) => (
           <button
             key={t.key}

@@ -316,7 +316,7 @@ export function Verify() {
         <div>
           <h3 className="text-sm font-medium text-white">Get Verified by a Miner</h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            Submit your evidence above, then request a verification panel. Miners will be FIFO-assigned, review your evidence, and the median of their scores becomes your %Human.
+            Add your proof above, then submit. A verified miner reviews what you provided and sets your %Human.
           </p>
         </div>
 

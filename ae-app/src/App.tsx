@@ -20,6 +20,7 @@ import { Court } from './pages/Court';
 import { CaseDetail } from './pages/CaseDetail';
 import { Contacts } from './pages/Contacts';
 import { Recurring } from './pages/Recurring';
+import { Receive } from './pages/Receive';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!hasWallet()) return <Navigate to="/onboarding" replace />;
@@ -40,6 +41,7 @@ export default function App() {
         >
           <Route path="/" element={<Wallet />} />
           <Route path="/send" element={<Send />} />
+          <Route path="/receive" element={<Receive />} />
           <Route path="/tag" element={<Tag />} />
           <Route path="/verify" element={<Verify />} />
           <Route path="/more" element={<More />} />

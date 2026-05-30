@@ -27,7 +27,6 @@ type Flow =
   | 'learn-recovery'
   | 'show-key'
   | 'confirm-key'
-  | 'how-balance'
   | 'get-verified'
   | 'login';
 
@@ -140,6 +139,8 @@ export function Onboarding() {
   const [platformPassword, setPlatformPassword] = useState('');
   const [ssoNote, setSsoNote] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [twoFaPhone, setTwoFaPhone] = useState('');
+  const [twoFaNote, setTwoFaNote] = useState<string | null>(null);
   const [platformConfirm, setPlatformConfirm] = useState('');
   const [platformError, setPlatformError] = useState<string | null>(null);
   const [platformBusy, setPlatformBusy] = useState(false);
@@ -531,7 +532,7 @@ export function Onboarding() {
     const allCorrect = confirmIndices.every((i) => (confirmInputs[i] || '').trim().toLowerCase() === words[i]);
     if (allCorrect) {
       saveWalletFromMnemonic(wallet.accountId, wallet.publicKey, wallet.mnemonic);
-      setFlow('how-balance');
+      setFlow('get-verified');
     } else {
       setConfirmError(true);
       setTimeout(() => setConfirmError(false), 2000);
@@ -1603,64 +1604,36 @@ export function Onboarding() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
           </svg>
         </div>
-        <h2 className="text-2xl font-serif text-white mb-2">Add an extra lock</h2>
-        <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
-          Your account is created. Turn on two-factor authentication (2FA) so a stolen password isn&apos;t enough to get in: you&apos;ll also enter a 6-digit code from an app on your phone. We strongly recommend it.
-        </p>
+        <h2 className="text-2xl font-serif text-white mb-6">Set up two-factor authentication (2FA)</h2>
+
+        <div className="w-full max-w-xs text-left mb-3">
+          <label className="text-xs text-gray-400 block mb-1.5">Phone number</label>
+          <input
+            type="tel"
+            autoComplete="tel"
+            value={twoFaPhone}
+            onChange={(e) => setTwoFaPhone(e.target.value)}
+            placeholder="+1 (555) 123-4567"
+            className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
+          />
+        </div>
+
+        {twoFaNote && <p className="text-[11px] text-gold/90 max-w-xs mb-3 leading-relaxed">{twoFaNote}</p>}
+
         <button
-          onClick={() => navigate('/more')}
+          onClick={() => {
+            if (!twoFaPhone.trim()) { setTwoFaNote('Enter a phone number, or choose "I will do it later".'); return; }
+            setTwoFaNote('Text-message codes are coming soon. Your number is saved. You can also set up app-based 2FA now from the More menu.');
+          }}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
         >
-          Turn on two-factor (recommended)
+          Submit
         </button>
-        <button
-          onClick={() => setFlow('how-balance')}
-          className="text-sm text-gray-500 hover:text-gray-300"
-        >
-          I&apos;ll do it later
-        </button>
-        <p className="text-[11px] text-gray-600 max-w-sm mt-4 leading-relaxed">
-          You can set this up anytime from the More menu under "Two-factor auth."
-        </p>
-      </div>
-    );
-  }
-
-  // How balance works
-  if (flow === 'how-balance') {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
-        <h2 className="text-2xl font-serif text-white mb-6">How Your Balance Works</h2>
-        <div className="text-gray-400 text-sm leading-relaxed max-w-sm space-y-4 mb-8">
-          <p>
-            Your point balance goes down a little each day as new people
-            join the network. This is normal and not a loss.
-          </p>
-          <p>
-            What matters is your <span className="text-gold font-medium">share</span> of the whole economy.
-            If you hold 0.042% today, you will hold 0.042% tomorrow,
-            even if the absolute number goes down.
-          </p>
-          <p>
-            Picture a pie. As more people join, the pie grows. Your slice
-            of the pie keeps the same proportion, even as the total gets
-            bigger. The point count next to your name is just the size of
-            your slice in raw numbers, which the system adjusts so the
-            proportion stays right.
-          </p>
-        </div>
         <button
           onClick={() => setFlow('get-verified')}
-          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors"
+          className="text-sm text-gray-500 hover:text-gray-300"
         >
-          Got It
-        </button>
-
-        <button
-          onClick={() => setFlow('confirm-key')}
-          className="text-sm text-gray-500 hover:text-gray-300 mt-4"
-        >
-          Back
+          I will do it later
         </button>
       </div>
     );
@@ -1683,14 +1656,9 @@ export function Onboarding() {
         >
           Add Proof of Human
         </button>
-        <div className="flex items-center gap-5">
-          <button onClick={() => setFlow('how-balance')} className="text-sm text-gray-500 hover:text-gray-300">
-            Back
-          </button>
-          <button onClick={() => navigate('/')} className="text-sm text-gray-500 hover:text-gray-300">
-            Skip for now
-          </button>
-        </div>
+        <button onClick={() => navigate('/')} className="text-sm text-gray-500 hover:text-gray-300">
+          Skip for now
+        </button>
       </div>
     );
   }
