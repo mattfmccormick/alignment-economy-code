@@ -139,6 +139,7 @@ export function Onboarding() {
   const [platformEmail, setPlatformEmail] = useState('');
   const [platformPassword, setPlatformPassword] = useState('');
   const [ssoNote, setSsoNote] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [platformConfirm, setPlatformConfirm] = useState('');
   const [platformError, setPlatformError] = useState<string | null>(null);
   const [platformBusy, setPlatformBusy] = useState(false);
@@ -1190,10 +1191,7 @@ export function Onboarding() {
   if (flow === 'platform-signup') {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 bg-navy-dark py-8">
-        <h2 className="text-2xl font-serif text-white mb-2 text-center">Use the platform</h2>
-        <p className="text-gray-400 text-sm mb-5 max-w-sm text-center leading-relaxed">
-          We will keep an encrypted copy of your account. Forgot password? You can reset it like any normal site.
-        </p>
+        <h2 className="text-2xl font-serif text-white mb-6 text-center">Sign Up</h2>
 
         <button
           onClick={() => { persistNetworkMode('solo'); createAccount(); }}
@@ -1217,28 +1215,48 @@ export function Onboarding() {
           </div>
           <div className="text-left">
             <label className="text-xs text-gray-400 block mb-1.5">Password</label>
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={platformPassword}
-              onChange={(e) => setPlatformPassword(e.target.value)}
-              placeholder="At least 15 characters"
-              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={platformPassword}
+                onChange={(e) => setPlatformPassword(e.target.value)}
+                placeholder="At least 15 characters"
+                className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 pr-14 text-white text-sm focus:border-teal focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="absolute inset-y-0 right-0 px-3 flex items-center text-xs text-gray-400 hover:text-white"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
             <p className="text-[11px] text-gray-500 mt-1.5">
               15+ characters, with at least one uppercase letter and one special character.
             </p>
           </div>
           <div className="text-left">
             <label className="text-xs text-gray-400 block mb-1.5">Confirm password</label>
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={platformConfirm}
-              onChange={(e) => setPlatformConfirm(e.target.value)}
-              placeholder="Type it again"
-              className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm focus:border-teal focus:outline-none"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={platformConfirm}
+                onChange={(e) => setPlatformConfirm(e.target.value)}
+                placeholder="Type it again"
+                className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 pr-14 text-white text-sm focus:border-teal focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="absolute inset-y-0 right-0 px-3 flex items-center text-xs text-gray-400 hover:text-white"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </div>
         </div>
 
