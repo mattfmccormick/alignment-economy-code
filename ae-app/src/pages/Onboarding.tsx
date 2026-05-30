@@ -11,7 +11,6 @@ import { PlatformError } from '@alignmenteconomy/sdk';
 type Flow =
   | 'welcome'
   | 'what-is-ae'
-  | 'track-picker'           // After Create Account: choose self-custody or platform
   | 'platform-signup'        // Platform track: email + password form
   | 'platform-busy'          // Platform track: in-flight network call
   | 'platform-totp'          // Platform track: 2FA prompt after email + password OK
@@ -633,7 +632,7 @@ export function Onboarding() {
         </p>
 
         <button
-          onClick={() => setFlow('track-picker')}
+          onClick={() => { setPlatformError(null); setFlow('platform-signup'); }}
           disabled={loading}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
         >
@@ -1183,68 +1182,6 @@ export function Onboarding() {
     );
   }
 
-  // Track picker. Shown after the user clicks "Create Account" on the
-  // welcome screen. Self-custody on the left (today's flow, you hold
-  // the 12 words), platform on the right (new: email + password, the
-  // platform holds an encrypted vault). Either tile can be picked; both
-  // explicitly mention you can switch later so the choice doesn't feel
-  // final.
-  if (flow === 'track-picker') {
-    return (
-      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
-        <h2 className="text-2xl font-serif text-white mb-2 text-center">Pick how you sign in</h2>
-        <p className="text-gray-400 text-sm mb-8 max-w-md text-center leading-relaxed">
-          Think carefully before you choose. Both let you use the Alignment Economy. You can switch sides anytime later.
-        </p>
-
-        <div className="w-full max-w-4xl grid grid-cols-2 gap-3 mb-6">
-          <button
-            onClick={() => { persistNetworkMode('solo'); createAccount(); }}
-            disabled={loading}
-            className="text-left bg-navy border border-teal/40 hover:border-teal rounded-xl p-5 transition-colors disabled:opacity-50"
-          >
-            <div className="flex items-start justify-between mb-2">
-              <span className="text-white font-medium text-base">I'll hold my own keys</span>
-              <span className="text-[10px] text-teal bg-teal/15 px-2 py-0.5 rounded-full">Self-custody</span>
-            </div>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              For people who have used a crypto wallet before. We give you 12 words to write on paper. Lose them, lose the account. No one can recover them for you.
-            </p>
-            <p className="text-[11px] text-gray-500 mt-2">
-              You can switch to the platform anytime.
-            </p>
-          </button>
-
-          <button
-            onClick={() => { setPlatformError(null); setFlow('platform-signup'); }}
-            disabled={loading}
-            className="text-left bg-navy border border-navy-light hover:border-gold/60 rounded-xl p-5 transition-colors disabled:opacity-50"
-          >
-            <div className="flex items-start justify-between mb-2">
-              <span className="text-white font-medium text-base">Use the platform</span>
-              <span className="text-[10px] text-gold bg-gold/15 px-2 py-0.5 rounded-full">Easier</span>
-            </div>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              First time? Sign in with email and password. We keep an encrypted copy of your account so you can reset your password the way you would on any normal site.
-            </p>
-            <p className="text-[11px] text-gray-500 mt-2">
-              You can switch to self-custody whenever you want.
-            </p>
-          </button>
-        </div>
-
-        <button
-          onClick={() => setFlow('welcome')}
-          className="text-xs text-gray-500 hover:text-gray-300"
-        >
-          Back
-        </button>
-
-        {error && <p className="text-sm text-red-400 mt-4 max-w-sm text-center">{error}</p>}
-      </div>
-    );
-  }
-
   // Platform-track signup form. Email + password + confirm. On submit,
   // handlePlatformSignup walks through the SDK signup flow (key gen,
   // vault + recovery blob encryption, POST /signup), persists the
@@ -1253,9 +1190,17 @@ export function Onboarding() {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 bg-navy-dark py-8">
         <h2 className="text-2xl font-serif text-white mb-2 text-center">Use the platform</h2>
-        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center leading-relaxed">
+        <p className="text-gray-400 text-sm mb-5 max-w-sm text-center leading-relaxed">
           We will keep an encrypted copy of your account. Forgot password? You can reset it like any normal site.
         </p>
+
+        <button
+          onClick={() => { persistNetworkMode('solo'); createAccount(); }}
+          disabled={loading}
+          className="text-xs text-gray-400 hover:text-white border border-navy-light hover:border-teal rounded-full px-4 py-1.5 mb-6 transition-colors disabled:opacity-50"
+        >
+          Expert: I&apos;ll hold my own keys instead &rarr;
+        </button>
 
         <div className="w-full max-w-sm space-y-3 mb-6">
           <div className="text-left">
@@ -1306,7 +1251,7 @@ export function Onboarding() {
           {platformBusy ? 'Creating account...' : 'Create platform account'}
         </button>
 
-        <button onClick={() => setFlow('track-picker')} className="text-xs text-gray-500 hover:text-gray-300">
+        <button onClick={() => setFlow('welcome')} className="text-xs text-gray-500 hover:text-gray-300">
           Back
         </button>
       </div>
@@ -1481,7 +1426,7 @@ export function Onboarding() {
         </p>
 
         <button
-          onClick={() => setFlow('track-picker')}
+          onClick={() => setFlow('platform-signup')}
           className="text-sm text-gray-500 hover:text-gray-300 mt-4"
         >
           Back
