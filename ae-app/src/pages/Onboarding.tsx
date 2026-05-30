@@ -1203,43 +1203,6 @@ export function Onboarding() {
           Expert: I&apos;ll hold my own keys instead &rarr;
         </button>
 
-        {/* Social sign-in (fast path). Visual placeholders for now: the
-            platform-server OAuth flow + provider apps (Google, Apple) are a
-            follow-up build, so these say "coming soon" on click rather than
-            dead-ending. See docs/ARCHITECTURE.md + CLAUDE.md. */}
-        <div className="w-full max-w-sm space-y-2 mb-4">
-          <button
-            onClick={() => setSsoNote('Google sign-in is coming soon. For now, use email and password below.')}
-            className="w-full flex items-center justify-center gap-3 py-3 bg-white text-gray-800 rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 48 48" aria-hidden="true">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-            </svg>
-            Continue with Google
-          </button>
-          <button
-            onClick={() => setSsoNote('Apple sign-in is coming soon. For now, use email and password below.')}
-            className="w-full flex items-center justify-center gap-2.5 py-3 bg-black text-white rounded-xl text-sm font-medium hover:bg-gray-900 transition-colors border border-navy-light"
-          >
-            <svg className="w-4 h-4 mb-0.5" viewBox="0 0 384 512" fill="currentColor" aria-hidden="true">
-              <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/>
-            </svg>
-            Continue with Apple
-          </button>
-          {ssoNote
-            ? <p className="text-[11px] text-gold/90 text-center pt-1">{ssoNote}</p>
-            : <p className="text-[11px] text-gray-600 text-center pt-1">One-tap sign-in (coming soon)</p>}
-        </div>
-
-        <div className="w-full max-w-sm flex items-center gap-3 mb-4">
-          <div className="flex-1 h-px bg-navy-light" />
-          <span className="text-[11px] text-gray-500">or use email</span>
-          <div className="flex-1 h-px bg-navy-light" />
-        </div>
-
         <div className="w-full max-w-sm space-y-3 mb-6">
           <div className="text-left">
             <label className="text-xs text-gray-400 block mb-1.5">Email</label>
@@ -1288,6 +1251,39 @@ export function Onboarding() {
         >
           {platformBusy ? 'Creating account...' : 'Create platform account'}
         </button>
+
+        {/* Social sign-in: compact placeholders at the bottom. Real OAuth
+            (Google, Apple) is a platform-server follow-up; clicking shows a
+            "coming soon" note for now. */}
+        <div className="w-full max-w-sm flex items-center gap-3 mt-1 mb-3">
+          <div className="flex-1 h-px bg-navy-light" />
+          <span className="text-[11px] text-gray-500">or continue with</span>
+          <div className="flex-1 h-px bg-navy-light" />
+        </div>
+        <div className="w-full max-w-sm flex gap-2 mb-2">
+          <button
+            onClick={() => setSsoNote('Google sign-in is coming soon. Use email and password for now.')}
+            className="flex-1 flex items-center justify-center gap-2 py-2 bg-white text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 48 48" aria-hidden="true">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            Google
+          </button>
+          <button
+            onClick={() => setSsoNote('Apple sign-in is coming soon. Use email and password for now.')}
+            className="flex-1 flex items-center justify-center gap-2 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors border border-navy-light"
+          >
+            <svg className="w-3.5 h-3.5 mb-0.5" viewBox="0 0 384 512" fill="currentColor" aria-hidden="true">
+              <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/>
+            </svg>
+            Apple
+          </button>
+        </div>
+        {ssoNote && <p className="text-[11px] text-gold/90 text-center max-w-sm mb-3">{ssoNote}</p>}
 
         <button onClick={() => setFlow('welcome')} className="text-xs text-gray-500 hover:text-gray-300">
           Back
