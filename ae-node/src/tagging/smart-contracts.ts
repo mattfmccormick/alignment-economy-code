@@ -156,7 +156,7 @@ export function executeContracts(
       // recurring transfers don't accumulate IOUs.
       const acct = getAccount(db, accountId)!;
       const PRECISION = 100_000_000n;
-      const amount = BigInt(Math.round(contract.allocationPercent)) * PRECISION;
+      const amount = BigInt(Math.round(contract.allocationPercent * Number(PRECISION)));
       if (amount <= 0n) {
         results.push({ contractId: contract.id, type: contract.type, executed: false, reason: 'zero amount' });
       } else if (acct.earnedBalance < amount) {

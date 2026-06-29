@@ -376,10 +376,39 @@ The May 5 sweep added `authMiddleware(db)` to every previously-unauthenticated P
 
 **Audit complete.** Every previously-unauthenticated POST/PUT/DELETE route that takes an accountId-like field now runs through `authMiddleware(db)`.
 
+### Foundation Hardening (Phase 73) — [CODE]
+
+A code-level audit (June 29, 2026) identified five categories of foundation weakness. These are the kinds of things that don't show up as bugs today but would bite at scale or under adversarial conditions. Fixing them now means the codebase a professional team receives is structurally sound, not just feature-complete.
+
+**F1. Pure bigint fee distribution math** (`rewards.ts`)
+- **Problem:** 5 sites convert `totalFees` (bigint) to `Number`, multiply by a float share, floor, convert back. Silently loses precision when totalFees > 2^53 (~90M earned points at 10^8 precision). Will corrupt fee distribution in a mature network.
+- **Fix:** Replace `BigInt(Math.floor(Number(bigint) * share))` with rational arithmetic: `(bigint * BigInt(Math.round(share * 10000))) / 10000n`. The only Number involved is the small param share (0.18, 0.10, etc.), never the balance. Add dust recovery: remainder from per-miner equal splits goes to the first miner (same pattern as `inheritance.ts`).
+- [x] Done.
+
+**F2. Pure bigint court/tagging stake math** (`court.ts`, `ambient.ts`, `smart-contracts.ts`)
+- **Problem:** `Math.round(percent * 100)` introduces ~0.5% rounding error on judicial stakes and tag allocations. Lower risk than F1 (the bigint itself isn't converted to Number), but still imprecise.
+- **Fix:** Standardize on a `pctToBigint(balance, percentNumber)` helper that uses rational arithmetic with appropriate scale factors (10000n for 2-decimal percentages, 100n for integer percentages). Apply consistently in court stakes, juror stakes, tagging hierarchy collection.
+- [x] Done.
+
+**F3. Supply conservation integration test**
+- **Problem:** Individual operations (rebase, fees, court) are tested in isolation. No test verifies the invariant across a combined sequence: rebase → transactions → court verdict → inheritance claim.
+- **Fix:** Write `phase73-foundation.test.ts` that runs the full sequence with 100+ accounts and asserts total supply + fee pool is conserved at every step.
+- [x] Done.
+
+**F4. Rebase stress test at scale**
+- **Problem:** Largest rebase test uses ~12 accounts. No evidence the rebase is correct or performant at 500+.
+- **Fix:** Stress test with 500 accounts, verifying: (a) total earned supply is conserved to the unit, (b) every account's share of the economy is unchanged, (c) wall-clock time is reasonable.
+- [x] Done.
+
+**F5. Fee distribution dust recovery**
+- **Problem:** Per-miner equal splits (`tier1Pool / BigInt(tier1Count)`) lose up to (N-1) base units per distribution. The remainder is never credited to anyone, a slow supply leak.
+- **Fix:** First miner in each tier gets `perMiner + remainder`. Same pattern the rebase dust-distribution pass and inheritance already use.
+- [x] Done (part of F1).
+
 ### Future (Phase 2+ scaling — not on the immediate roadmap)
 
-- **Rebase precision loss.** Integer division in the rebase loop truncates fractional dust each cycle. Over many rebases, small accounts slowly lose value. Add a remainder-distribution pass or a dust accumulator.
-- **Fee math loses precision at scale.** Mixed bigint/Number arithmetic caps precision at ~2^53. Use pure bigint arithmetic throughout.
+- ~~**Rebase precision loss.** Integer division in the rebase loop truncates fractional dust each cycle.~~ Already has a dust-distribution pass (day-cycle.ts lines 241-251). Verified in Phase 73 stress test.
+- ~~**Fee math loses precision at scale.** Mixed bigint/Number arithmetic caps precision at ~2^53.~~ Fixed in Phase 73 F1. All fee splits now use rational bigint arithmetic.
 - **VRF could be stricter.** `Ed25519VrfProvider` is the production VRF. For Phase 3+ adversarial settings, swap in ECVRF (RFC 9381) behind the same `IVrfProvider` interface.
 - **Rate limiting is in-memory only.** Rate limit maps reset on every node restart. Move to Redis or DB for Phase 2+.
 - **No privacy layer.** Every transaction, balance, vouch, and ambient tag (physical location and duration) is stored in plain text. Plan for encrypted state or zero-knowledge proofs in Phase 3+.

@@ -9,6 +9,12 @@ import { selectLotteryWinner } from './vrf.js';
 import { ensureTreasuryAccount } from '../core/treasury.js';
 import type { FeeDistribution } from './types.js';
 
+const SHARE_SCALE = 10000n;
+
+function scaledShare(total: bigint, share: number): bigint {
+  return (total * BigInt(Math.round(share * Number(SHARE_SCALE)))) / SHARE_SCALE;
+}
+
 export function distributeFees(
   db: DatabaseSync,
   blockNumber: number,
@@ -44,7 +50,7 @@ export function distributeFees(
     tier1Pool = 0n;
     tier2Pool = totalFees;
   } else {
-    tier1Pool = BigInt(Math.floor(Number(totalFees) * tier1FeeShare));
+    tier1Pool = scaledShare(totalFees, tier1FeeShare);
     tier2Pool = totalFees - tier1Pool;
   }
 
@@ -57,22 +63,26 @@ export function distributeFees(
   const now = Math.floor(Date.now() / 1000);
 
   runTransaction(db, () => {
-    // Tier 1 distribution (equal split)
+    // Tier 1 distribution (equal split, remainder to first miner)
     if (tier1Count > 0 && tier1Pool > 0n) {
       perTier1 = tier1Pool / BigInt(tier1Count);
-      for (const miner of tier1Miners) {
+      const tier1Remainder = tier1Pool - perTier1 * BigInt(tier1Count);
+      for (let i = 0; i < tier1Miners.length; i++) {
+        const miner = tier1Miners[i];
+        const payout = perTier1 + (i === 0 ? tier1Remainder : 0n);
         const acct = getAccount(db, miner.accountId)!;
-        const newEarned = acct.earnedBalance + perTier1;
+        const newEarned = acct.earnedBalance + payout;
         updateBalance(db, miner.accountId, 'earned_balance', newEarned);
-        recordLog(db, miner.accountId, 'fee_distribution', 'earned', perTier1, acct.earnedBalance, newEarned, `block-${blockNumber}`, now);
+        recordLog(db, miner.accountId, 'fee_distribution', 'earned', payout, acct.earnedBalance, newEarned, `block-${blockNumber}`, now);
       }
     }
 
     // Tier 2 distribution (lottery + baseline)
     if (tier2Count > 0 && tier2Pool > 0n) {
-      tier2Lottery = BigInt(Math.floor(Number(tier2Pool) * tier2LotteryShare));
+      tier2Lottery = scaledShare(tier2Pool, tier2LotteryShare);
       tier2Baseline = tier2Pool - tier2Lottery;
       perTier2Baseline = tier2Baseline / BigInt(tier2Count);
+      const tier2Remainder = tier2Baseline - perTier2Baseline * BigInt(tier2Count);
 
       // VRF lottery
       const vrfEntries = tier2Miners
@@ -82,9 +92,10 @@ export function distributeFees(
       const winner = selectLotteryWinner(vrfEntries, blockPreviousHash);
       lotteryWinnerId = winner?.winnerId ?? null;
 
-      for (const miner of tier2Miners) {
+      for (let i = 0; i < tier2Miners.length; i++) {
+        const miner = tier2Miners[i];
         const acct = getAccount(db, miner.accountId)!;
-        let payout = perTier2Baseline;
+        let payout = perTier2Baseline + (i === 0 ? tier2Remainder : 0n);
         if (miner.id === lotteryWinnerId) {
           payout += tier2Lottery;
         }
@@ -169,7 +180,7 @@ export function distributeFeesPublicLottery(
   let treasuryPool = 0n;
   let treasuryAccountId: string | null = null;
   if (treasuryFeeShare > 0 && treasuryFeeShare < 1) {
-    treasuryPool = BigInt(Math.floor(Number(totalFees) * treasuryFeeShare));
+    treasuryPool = scaledShare(totalFees, treasuryFeeShare);
     if (treasuryPool > 0n) {
       treasuryAccountId = ensureTreasuryAccount(db);
     }
@@ -212,7 +223,7 @@ export function distributeFeesPublicLottery(
     // expects (params describe the global split, not the post-treasury
     // remainder). Concretely: tier1=0.18, treasury=0.10, tier2=0.72;
     // tier1Pool/totalFees == 0.18 still holds.
-    tier1Pool = BigInt(Math.floor(Number(totalFees) * tier1FeeShare));
+    tier1Pool = scaledShare(totalFees, tier1FeeShare);
     if (tier1Pool > minerPool) tier1Pool = minerPool;
     tier2Pool = minerPool - tier1Pool;
   }
@@ -237,18 +248,22 @@ export function distributeFeesPublicLottery(
 
     if (tier1Count > 0 && tier1Pool > 0n) {
       perTier1 = tier1Pool / BigInt(tier1Count);
-      for (const miner of tier1Miners) {
+      const tier1Remainder = tier1Pool - perTier1 * BigInt(tier1Count);
+      for (let i = 0; i < tier1Miners.length; i++) {
+        const miner = tier1Miners[i];
+        const payout = perTier1 + (i === 0 ? tier1Remainder : 0n);
         const acct = getAccount(db, miner.accountId)!;
-        const newEarned = acct.earnedBalance + perTier1;
+        const newEarned = acct.earnedBalance + payout;
         updateBalance(db, miner.accountId, 'earned_balance', newEarned);
-        recordLog(db, miner.accountId, 'fee_distribution', 'earned', perTier1, acct.earnedBalance, newEarned, `block-${blockNumber}`, now);
+        recordLog(db, miner.accountId, 'fee_distribution', 'earned', payout, acct.earnedBalance, newEarned, `block-${blockNumber}`, now);
       }
     }
 
     if (tier2Count > 0 && tier2Pool > 0n) {
-      tier2Lottery = BigInt(Math.floor(Number(tier2Pool) * tier2LotteryShare));
+      tier2Lottery = scaledShare(tier2Pool, tier2LotteryShare);
       tier2Baseline = tier2Pool - tier2Lottery;
       perTier2Baseline = tier2Baseline / BigInt(tier2Count);
+      const tier2Remainder = tier2Baseline - perTier2Baseline * BigInt(tier2Count);
 
       // Public-input lottery: rank miners by sha256(blockHash || accountId),
       // lowest hash wins. Deterministic across every node that processes this
@@ -262,9 +277,10 @@ export function distributeFeesPublicLottery(
         }
       }
 
-      for (const miner of tier2Miners) {
+      for (let i = 0; i < tier2Miners.length; i++) {
+        const miner = tier2Miners[i];
         const acct = getAccount(db, miner.accountId)!;
-        let payout = perTier2Baseline;
+        let payout = perTier2Baseline + (i === 0 ? tier2Remainder : 0n);
         if (miner.id === lotteryWinnerId) payout += tier2Lottery;
         const newEarned = acct.earnedBalance + payout;
         updateBalance(db, miner.accountId, 'earned_balance', newEarned);
