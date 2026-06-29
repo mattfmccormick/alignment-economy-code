@@ -1,0 +1,46 @@
+{
+  "common": {
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "seeAll": "See all",
+    "noResults": "No results"
+  },
+  "nav": {
+    "wallet": "Wallet",
+    "send": "Send",
+    "receive": "Receive",
+    "tag": "Tag",
+    "verify": "Verify",
+    "more": "More"
+  },
+  "wallet": {
+    "dailyAllocations": "Daily Allocations",
+    "recentActivity": "Recent Activity",
+    "noTransactions": "No transactions yet",
+    "sent": "Sent",
+    "received": "Received",
+    "verification": "Verification",
+    "fullyVerified": "✓ 100% human · full spend",
+    "notVerified": "Not verified yet",
+    "notVerifiedDesc": "Your daily mint accumulates, but spends transfer 0 until a miner verifies you.",
+    "partiallyVerified": "{{percent}}% verified",
+    "spendMultiplier": "Spend multiplier {{multiplier}}× — recipients get {{percent}}% of what you send.",
+    "notOnNetwork": "This wallet isn't on the connected network",
+    "notOnNetworkDesc": "This account was created on a different network or database, so the node running now does not have it. Reconnect to its original network, or start over with a new wallet.",
+    "startOver": "Start over with a new wallet",
+    "startOverNote": "\"Start over\" clears this saved wallet and returns to setup. Your 12-word recovery phrase still restores the old account on its original network.",
+    "active": "Active",
+    "supportive": "Supportive",
+    "ambient": "Ambient"
+  }
+}

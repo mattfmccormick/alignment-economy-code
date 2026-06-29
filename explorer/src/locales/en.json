@@ -1,0 +1,19 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "notFound": "Not found",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "back": "Back"
+  },
+  "nav": {
+    "title": "AE Explorer",
+    "search": "Search by account, transaction, or block..."
+  },
+  "home": {
+    "latestBlocks": "Latest Blocks",
+    "latestTransactions": "Latest Transactions",
+    "networkStats": "Network Stats"
+  }
+}

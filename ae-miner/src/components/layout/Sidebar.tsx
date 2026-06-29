@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { loadMinerWallet, clearMinerWallet } from '../../lib/keys';
 import { getTheme, setTheme } from '../../lib/theme';
 import { api, type MinerStatus } from '../../lib/api';
 import { truncateId } from '../../lib/formatting';
+import { supportedLanguages, RTL_LANGUAGES } from '../../lib/i18n';
 
 const navItems = [
   {
@@ -73,6 +75,7 @@ const navItems = [
 
 export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () => void }) {
   const navigate = useNavigate();
+  const { i18n } = useTranslation();
   const wallet = loadMinerWallet();
   const [currentTheme, setCurrentTheme] = useState(getTheme());
   const [minerStatus, setMinerStatus] = useState<MinerStatus | null>(null);
@@ -176,6 +179,24 @@ export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean;
           )}
           <span>{currentTheme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
         </button>
+      </div>
+
+      {/* Language */}
+      <div className="px-4 py-2">
+        <select
+          value={i18n.language}
+          onChange={(e) => {
+            i18n.changeLanguage(e.target.value);
+            document.documentElement.dir = RTL_LANGUAGES.includes(e.target.value) ? 'rtl' : 'ltr';
+          }}
+          className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs text-muted focus:border-teal focus:outline-none appearance-none cursor-pointer"
+        >
+          {supportedLanguages.map((lang) => (
+            <option key={lang.code} value={lang.code}>
+              {lang.nativeName}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Bottom: miner ID + logout */}

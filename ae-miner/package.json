@@ -97,8 +97,11 @@
     "@noble/post-quantum": "^0.6.1",
     "@scure/bip39": "^2.2.0",
     "electron-updater": "^6.8.3",
+    "i18next": "^26.3.3",
+    "i18next-browser-languagedetector": "^8.2.1",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-i18next": "^17.0.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

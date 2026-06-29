@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import QRCode from 'qrcode';
 import { PlatformError } from '@alignmenteconomy/sdk';
 import { loadWallet, clearWallet, saveWalletLegacy } from '../lib/keys';
@@ -16,6 +17,7 @@ import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
 import { SessionReauthModal } from '../components/SessionReauthModal';
+import { supportedLanguages, RTL_LANGUAGES } from '../lib/i18n';
 
 const links = [
   { to: '/contacts', label: 'Contacts', desc: 'Manage your saved contacts' },
@@ -669,6 +671,9 @@ export function More() {
         </button>
       </div>
 
+      {/* Language */}
+      <LanguagePicker />
+
       {/* Navigation links */}
       <div className="space-y-2">
         {links.map((link) => (
@@ -731,6 +736,38 @@ interface PhraseDisplayProps {
   copied: boolean;
   onCopy: () => void;
   onHide: () => void;
+}
+
+function LanguagePicker() {
+  const { i18n } = useTranslation();
+  const current = supportedLanguages.find((l) => l.code === i18n.language) ?? supportedLanguages[0];
+
+  function changeLanguage(code: string) {
+    i18n.changeLanguage(code);
+    document.documentElement.dir = RTL_LANGUAGES.includes(code) ? 'rtl' : 'ltr';
+  }
+
+  return (
+    <div className="bg-navy rounded-xl p-4 border border-navy-light">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <p className="text-sm text-white">Language</p>
+          <p className="text-xs text-gray-500">{current.nativeName}</p>
+        </div>
+      </div>
+      <select
+        value={i18n.language}
+        onChange={(e) => changeLanguage(e.target.value)}
+        className="w-full bg-navy-dark border border-navy-light rounded-lg px-3 py-2 text-white text-sm focus:border-teal focus:outline-none appearance-none cursor-pointer"
+      >
+        {supportedLanguages.map((lang) => (
+          <option key={lang.code} value={lang.code}>
+            {lang.nativeName} — {lang.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 function PhraseDisplay({ mnemonic, copied, onCopy, onHide }: PhraseDisplayProps) {

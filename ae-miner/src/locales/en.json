@@ -1,0 +1,32 @@
+{
+  "common": {
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "back": "Back",
+    "submit": "Submit",
+    "approve": "Approve",
+    "reject": "Reject"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "verify": "Verify",
+    "vouch": "Vouch",
+    "court": "Court",
+    "income": "Income",
+    "audit": "Audit",
+    "network": "Network"
+  },
+  "dashboard": {
+    "title": "Miner Dashboard",
+    "uptime": "Uptime",
+    "tier": "Tier",
+    "earnings": "Earnings"
+  }
+}

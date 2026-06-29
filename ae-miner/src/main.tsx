@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 // and renders the page blank. Hash routing (#/path) is protocol-agnostic.
 import { HashRouter } from 'react-router-dom'
 import { initTheme } from './lib/theme'
+import './lib/i18n'
 import './index.css'
 import App from './App'
 
