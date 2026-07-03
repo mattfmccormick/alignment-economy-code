@@ -268,6 +268,7 @@ describe('Phase 35: Multi-runner end-to-end BFT', () => {
       amount: txAmount.toString(),
       pointType: 'active' as const,
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     const signature = signPayload(internalPayload, txTimestamp, senderKeys.privateKey);
@@ -280,6 +281,7 @@ describe('Phase 35: Multi-runner end-to-end BFT', () => {
         amount: 100, // display units (the API converts)
         pointType: 'active',
         isInPerson: false,
+        recipientIsHuman: false,
         memo: '',
       },
     };

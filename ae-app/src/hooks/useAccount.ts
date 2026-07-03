@@ -12,6 +12,7 @@ export interface AccountData {
   lockedBalance: string;
   percentHuman: number;
   isActive: boolean;
+  isEscrowed: boolean;
   percentOfEconomy: number;
   joinedDay: number;
 }

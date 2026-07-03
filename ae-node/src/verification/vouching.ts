@@ -1,6 +1,9 @@
-// Vouching business logic. A vouch is a peer staking points to attest to
-// another account's humanity. Stakes are locked, can be withdrawn (returned)
-// or burned (lost) depending on how the vouch resolves.
+// Vouching business logic (WP v2: percentage-based).
+//
+// A vouch locks a percentage of the voucher's total holdings (earned + locked),
+// not a fixed amount. The locked amount scales dynamically: if the voucher's
+// balance grows, the lock grows proportionally. rebalanceVouchLocks() is called
+// during the daily cycle to recalculate all active locks.
 //
 // All vouch table operations go through IVerificationStore. Account balance
 // changes (locking/unlocking) go through IAccountStore via updateBalance.
@@ -9,7 +12,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { getAccount, updateBalance } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
-import { addToFeePool } from '../core/fee-pool.js';
 import { runTransaction } from '../db/connection.js';
 import { getPolicy } from './policy.js';
 import { verificationStore } from './panel.js';
@@ -23,11 +25,15 @@ export function getVouchesGivenBy(db: DatabaseSync, accountId: string): Vouch[] 
   return verificationStore(db).findActiveVouchesGivenBy(accountId);
 }
 
+function computeStakeFromPercent(totalHoldings: bigint, percent: number): bigint {
+  return (totalHoldings * BigInt(Math.round(percent * 100))) / 10000n;
+}
+
 export function createVouch(
   db: DatabaseSync,
   voucherId: string,
   vouchedId: string,
-  stakeAmount: bigint,
+  stakePercent: number,
 ): Vouch {
   const voucher = getAccount(db, voucherId);
   if (!voucher) throw new Error(`Voucher account not found: ${voucherId}`);
@@ -37,27 +43,34 @@ export function createVouch(
   if (!vouched) throw new Error(`Vouched account not found: ${vouchedId}`);
 
   if (voucherId === vouchedId) throw new Error('Cannot vouch for yourself');
+  if (voucher.isEscrowed) throw new Error('Cannot create vouches while account is escrowed');
 
-  // Check minimum stake (white paper: 5% of voucher's earned, by default).
+  if (stakePercent <= 0 || stakePercent > 100) {
+    throw new Error(`stakePercent must be between 0 (exclusive) and 100 (inclusive), got ${stakePercent}`);
+  }
+
   const policy = getPolicy(db);
   const vouchType = policy.evidenceTypes.find((t) => t.id === 'vouch');
   const minStakePercent = vouchType?.minStakePercent ?? 5;
-  const minStake = (voucher.earnedBalance * BigInt(minStakePercent)) / 100n;
 
-  if (stakeAmount < minStake) {
-    throw new Error(`Stake ${stakeAmount} below minimum ${minStake} (${minStakePercent}% of earned balance)`);
+  if (stakePercent < minStakePercent) {
+    throw new Error(`stakePercent ${stakePercent}% below minimum ${minStakePercent}%`);
   }
+
+  const totalHoldings = voucher.earnedBalance + voucher.lockedBalance;
+  const stakeAmount = computeStakeFromPercent(totalHoldings, stakePercent);
+
   if (stakeAmount > voucher.earnedBalance) {
-    throw new Error(`Insufficient earned balance to stake: has ${voucher.earnedBalance}, needs ${stakeAmount}`);
+    throw new Error(`Insufficient earned balance to stake ${stakePercent}%: needs ${stakeAmount}, has ${voucher.earnedBalance}`);
+  }
+  if (stakeAmount === 0n) {
+    throw new Error('Stake amount rounds to zero — balance too small');
   }
 
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);
-  const totalBefore = voucher.earnedBalance + voucher.lockedBalance;
-  const stakedPercentage = Number(stakeAmount) / Number(totalBefore) * 100;
 
   runTransaction(db, () => {
-    // Lock stake: move points from earned to locked.
     const newEarned = voucher.earnedBalance - stakeAmount;
     const newLocked = voucher.lockedBalance + stakeAmount;
     updateBalance(db, voucherId, 'earned_balance', newEarned);
@@ -69,13 +82,14 @@ export function createVouch(
       voucherId,
       vouchedId,
       stakeAmount,
-      stakedPercentage,
+      stakedPercentage: stakePercent,
       createdAt: now,
     });
   });
 
   return {
-    id, voucherId, vouchedId, stakeAmount, stakedPercentage, isActive: true, createdAt: now, withdrawnAt: null,
+    id, voucherId, vouchedId, stakeAmount, stakedPercentage: stakePercent,
+    isActive: true, createdAt: now, withdrawnAt: null,
   };
 }
 
@@ -89,13 +103,15 @@ export function withdrawVouch(db: DatabaseSync, vouchId: string): void {
 
   const now = Math.floor(Date.now() / 1000);
 
+  // Use the current stakeAmount (which may have been rebalanced)
+  const unlockAmount = vouch.stakeAmount;
+
   runTransaction(db, () => {
-    // Unlock stake: move from locked back to earned.
-    const newEarned = voucher.earnedBalance + vouch.stakeAmount;
-    const newLocked = voucher.lockedBalance - vouch.stakeAmount;
+    const newEarned = voucher.earnedBalance + unlockAmount;
+    const newLocked = voucher.lockedBalance - unlockAmount;
     updateBalance(db, vouch.voucherId, 'earned_balance', newEarned);
     updateBalance(db, vouch.voucherId, 'locked_balance', newLocked);
-    recordLog(db, vouch.voucherId, 'vouch_unlock', 'earned', vouch.stakeAmount, voucher.earnedBalance, newEarned, vouchId, now);
+    recordLog(db, vouch.voucherId, 'vouch_unlock', 'earned', unlockAmount, voucher.earnedBalance, newEarned, vouchId, now);
 
     verif.markVouchInactive(vouchId, now);
   });
@@ -110,17 +126,12 @@ export function burnVouch(db: DatabaseSync, vouchId: string): void {
   if (!voucher) throw new Error(`Voucher account not found`);
 
   const now = Math.floor(Date.now() / 1000);
+  const burnAmount = vouch.stakeAmount;
 
   runTransaction(db, () => {
-    // Burn stake: remove from locked, route to fee pool. The voucher loses
-    // the stake either way; routing it to the fee pool keeps total supply
-    // conserved instead of vaporizing it on every guilty verdict.
-    const newLocked = voucher.lockedBalance - vouch.stakeAmount;
+    const newLocked = voucher.lockedBalance - burnAmount;
     updateBalance(db, vouch.voucherId, 'locked_balance', newLocked);
-    recordLog(db, vouch.voucherId, 'vouch_burn', 'earned', vouch.stakeAmount, voucher.lockedBalance, newLocked, vouchId, now);
-    if (vouch.stakeAmount > 0n) {
-      addToFeePool(db, vouch.stakeAmount);
-    }
+    recordLog(db, vouch.voucherId, 'vouch_burn', 'earned', burnAmount, voucher.lockedBalance, newLocked, vouchId, now);
 
     verif.markVouchInactive(vouchId, now);
   });
@@ -131,4 +142,56 @@ export function burnAllVouchesOnAccount(db: DatabaseSync, accountId: string): vo
   for (const vouch of vouches) {
     burnVouch(db, vouch.id);
   }
+}
+
+// WP v2: percentage-based locks scale with balance. After rebase or at the
+// start of each daily cycle, recalculate every active vouch's locked amount
+// to match its stored stakedPercentage against the voucher's current total
+// holdings. This keeps the lock proportional as balances grow or shrink.
+export function rebalanceVouchLocks(db: DatabaseSync): void {
+  const verif = verificationStore(db);
+
+  // Group all active vouches by voucher
+  const allVouches = verif.findAllActiveVouches();
+  const byVoucher = new Map<string, Vouch[]>();
+  for (const v of allVouches) {
+    const list = byVoucher.get(v.voucherId) || [];
+    list.push(v);
+    byVoucher.set(v.voucherId, list);
+  }
+
+  runTransaction(db, () => {
+    for (const [voucherId, vouches] of byVoucher) {
+      const voucher = getAccount(db, voucherId);
+      if (!voucher) continue;
+
+      const totalHoldings = voucher.earnedBalance + voucher.lockedBalance;
+      if (totalHoldings === 0n) continue;
+
+      // Calculate the new target lock for each vouch
+      let newTotalLocked = 0n;
+      const updates: Array<{ vouchId: string; newAmount: bigint }> = [];
+      for (const v of vouches) {
+        const target = computeStakeFromPercent(totalHoldings, v.stakedPercentage);
+        updates.push({ vouchId: v.id, newAmount: target });
+        newTotalLocked += target;
+      }
+
+      // Safety: can't lock more than total holdings
+      if (newTotalLocked > totalHoldings) continue;
+
+      // Apply the changes
+      const oldLocked = voucher.lockedBalance;
+      const delta = newTotalLocked - oldLocked;
+      if (delta === 0n) continue;
+
+      updateBalance(db, voucherId, 'locked_balance', newTotalLocked);
+      updateBalance(db, voucherId, 'earned_balance', voucher.earnedBalance - delta);
+
+      // Update each vouch's stakeAmount in the store
+      for (const u of updates) {
+        verif.updateVouchStakeAmount(u.vouchId, u.newAmount);
+      }
+    }
+  });
 }

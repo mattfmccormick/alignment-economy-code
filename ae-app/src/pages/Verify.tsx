@@ -21,6 +21,7 @@ interface Vouch {
   voucherId: string;
   vouchedId: string;
   stakeAmount: number;
+  stakedPercentage?: number;
 }
 
 export function Verify() {
@@ -411,7 +412,10 @@ export function Verify() {
             {receivedVouches.map((v, i) => (
               <div key={i} className="bg-navy rounded-xl p-3 border border-navy-light flex items-center justify-between">
                 <p className="text-sm text-white font-mono">{truncateId(v.voucherId)}</p>
-                <p className="text-xs text-gray-400 tabular-nums">{displayPoints(String(v.stakeAmount))} staked</p>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '—'}%</p>
+                  <p className="text-[11px] text-gray-500 tabular-nums">{displayPoints(String(v.stakeAmount))} pts</p>
+                </div>
               </div>
             ))}
           </div>
@@ -426,7 +430,10 @@ export function Verify() {
             {givenVouches.map((v, i) => (
               <div key={i} className="bg-navy rounded-xl p-3 border border-navy-light flex items-center justify-between">
                 <p className="text-sm text-white font-mono">{truncateId(v.vouchedId)}</p>
-                <p className="text-xs text-gray-400 tabular-nums">{displayPoints(String(v.stakeAmount))} staked</p>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '—'}%</p>
+                  <p className="text-[11px] text-gray-500 tabular-nums">{displayPoints(String(v.stakeAmount))} pts</p>
+                </div>
               </div>
             ))}
           </div>

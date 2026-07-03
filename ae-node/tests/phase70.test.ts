@@ -8,7 +8,7 @@
 //   earned_recurring: send a FIXED display-unit amount of earned points
 //                     to targetId on schedule. Skipped if balance is
 //                     short — recurring transfers don't accumulate IOUs.
-//                     percentHuman still gates value transfer.
+//                     WP v2: earned spends are NOT discounted by percentHuman.
 //
 // Plus stronger validation in createSmartContract:
 //   - active_standing / earned_recurring contracts now require a real,
@@ -166,7 +166,7 @@ describe('Phase 70: earned_recurring smart contracts + validation guards', () =>
     db.close();
   });
 
-  it('earned_recurring honors percentHuman: 0% sender drains earned, recipient gets nothing', () => {
+  it('earned_recurring ignores percentHuman (WP v2: earned spends not discounted)', () => {
     const db = freshDb();
     const sender = makeAccount(db, 1000, 0); // 0% verified
     const recipient = makeAccount(db);
@@ -178,10 +178,12 @@ describe('Phase 70: earned_recurring smart contracts + validation guards', () =>
 
     const senderAfter = getAccount(db, sender.id)!;
     const recipientAfter = getAccount(db, recipient.id)!;
-    // Sender lost the full intent (50 pts).
     assert.equal(senderAfter.earnedBalance, pts(1000) - pts(50));
-    // Effective = 50 * 0/100 = 0. Recipient got 0.
-    assert.equal(recipientAfter.earnedBalance, 0n);
+    // WP v2: earned-point spends pass through at full value regardless of
+    // percentHuman. Recipient gets amount minus 0.5% fee.
+    const expectedFee = pts(50) * 5n / 1000n;
+    const expectedNet = pts(50) - expectedFee;
+    assert.equal(recipientAfter.earnedBalance, expectedNet);
     db.close();
   });
 

@@ -49,6 +49,7 @@ export interface TransactionInput {
   amount: bigint;
   pointType: PointType;
   isInPerson?: boolean;
+  recipientIsHuman?: boolean;
   memo?: string;
   timestamp: number;
   signature: string;
@@ -113,6 +114,7 @@ function applyTransactionInternal(
     amount: bigint;
     pointType: PointType;
     isInPerson: boolean;
+    recipientIsHuman: boolean;
     memo: string;
     signature: string;
     receiverSignature: string | null;
@@ -126,19 +128,15 @@ function applyTransactionInternal(
     fee: bigint;
     netAmount: bigint;
     burnedUnverified: bigint;
+    senderPercentHuman: number;
   },
 ): void {
   const txStore = transactionStore(db);
+  const sqliteTxStore = txStore as import('./stores/SqliteTransactionStore.js').SqliteTransactionStore;
   runTransaction(db, () => {
     updateBalance(db, opts.from, opts.senderField, opts.newSenderBalance);
     updateBalance(db, opts.to, 'earned_balance', opts.newRecipientEarned);
     addToFeePool(db, opts.fee);
-    // Stamp the sender's last-activity clock. The dead-man-switch
-    // inheritance flow reads this; without it, an account that never
-    // sends could have inheritance config but the clock would never
-    // start, leaving the switch permanently disarmed. We bump on the
-    // SENDER specifically — receiving doesn't prove the owner has the
-    // key, sending does.
     accountStore(db).setLastActivity(opts.from, opts.timestamp);
 
     txStore.insertTransaction({
@@ -150,11 +148,20 @@ function applyTransactionInternal(
       netAmount: opts.netAmount.toString(),
       pointType: opts.pointType,
       isInPerson: opts.isInPerson,
+      recipientIsHuman: opts.recipientIsHuman,
       memo: opts.memo,
       signature: opts.signature,
       receiverSignature: opts.receiverSignature,
       timestamp: opts.timestamp,
     });
+
+    if (opts.recipientIsHuman) {
+      const credit = 2.5 * (opts.senderPercentHuman / 100);
+      sqliteTxStore.insertHumanTag(
+        uuid(), opts.to, opts.from, opts.senderPercentHuman,
+        credit, opts.txId, opts.timestamp,
+      );
+    }
 
     if (opts.blockNumber !== null) {
       txStore.linkTransactionsToBlock(opts.blockNumber, [opts.txId]);
@@ -164,10 +171,6 @@ function applyTransactionInternal(
     recordLog(db, opts.to, 'tx_receive', 'earned', opts.netAmount, opts.recipientEarnedBefore, opts.newRecipientEarned, opts.txId, opts.timestamp);
     recordLog(db, opts.from, 'fee', opts.pointType, opts.fee, opts.senderBalance, opts.newSenderBalance, opts.txId, opts.timestamp);
     if (opts.burnedUnverified > 0n) {
-      // Audit trail for the unverified-spend slippage. The sender deducted
-      // their full intent, but only (amount * percentHuman / 100) reached the
-      // recipient + fee pool. The remainder burns and shows up here so the
-      // ledger conserves: tx_send amount == tx_receive + fee + burn_unverified.
       recordLog(db, opts.from, 'burn_unverified', opts.pointType, opts.burnedUnverified, opts.senderBalance, opts.newSenderBalance, opts.txId, opts.timestamp);
     }
   });
@@ -196,6 +199,7 @@ export interface ReplayInput {
   netAmount: bigint;
   pointType: PointType;
   isInPerson: boolean;
+  recipientIsHuman: boolean;
   memo: string;
   signature: string;
   receiverSignature: string | null;
@@ -234,15 +238,12 @@ export function replayTransaction(
     amount: input.amount.toString(),
     pointType: input.pointType,
     isInPerson: input.isInPerson,
+    recipientIsHuman: input.recipientIsHuman,
     memo: input.memo,
   };
   const validSig = verifyPayload(payload, input.timestamp, input.signature, sender.publicKey);
   if (!validSig) throw new Error(`Replay: invalid signature on tx ${input.id}`);
 
-  // In-person txs must also carry a valid receiver countersignature over the
-  // same canonical bytes. We re-verify on replay so a follower can't be
-  // tricked into accepting a forged in-person tx that the authority somehow
-  // missed.
   if (input.isInPerson) {
     if (!input.receiverSignature) {
       throw new Error(`Replay: in-person tx ${input.id} missing receiver countersignature`);
@@ -251,8 +252,6 @@ export function replayTransaction(
     if (!validCounter) throw new Error(`Replay: invalid receiver countersignature on tx ${input.id}`);
   }
 
-  // Balance check. If a follower's state is corrupted we'd rather fail
-  // loudly than silently produce a negative balance.
   const senderField = BALANCE_FIELD_MAP[input.pointType];
   const senderBalance = getBalanceForType(sender, input.pointType);
   if (senderBalance < input.amount) {
@@ -261,11 +260,6 @@ export function replayTransaction(
     );
   }
 
-  // The wire carries the authoring node's already-computed amount/fee/netAmount.
-  // burnedUnverified is the implicit slippage from the percentHuman multiplier:
-  // sender deducted `amount` but only (fee + netAmount) reached the fee pool +
-  // recipient. We recompute it here for the audit log so conservation holds:
-  // tx_send amount == tx_receive netAmount + fee + burn_unverified.
   const burnedUnverified = input.amount - input.fee - input.netAmount;
   if (burnedUnverified < 0n) {
     throw new Error(`Replay: malformed tx ${input.id}: fee + netAmount > amount`);
@@ -278,14 +272,9 @@ export function replayTransaction(
     amount: input.amount,
     pointType: input.pointType,
     isInPerson: input.isInPerson,
+    recipientIsHuman: input.recipientIsHuman,
     memo: input.memo,
     signature: input.signature,
-    // Coerce a missing countersignature to null. Wire data may omit the
-    // field (it only exists for in-person txs); undefined cannot bind to
-    // SQLite and would throw inside the block-apply handler, which swallows
-    // the error and silently drops the block — a follower would stall
-    // mid-sync with no log. The isInPerson branch above already enforces a
-    // valid countersignature when one is actually required.
     receiverSignature: input.receiverSignature ?? null,
     timestamp: input.timestamp,
     blockNumber,
@@ -297,6 +286,7 @@ export function replayTransaction(
     fee: input.fee,
     netAmount: input.netAmount,
     burnedUnverified,
+    senderPercentHuman: sender.percentHuman,
   });
 }
 
@@ -313,6 +303,12 @@ export function processTransaction(
   if (!recipient.isActive) throw new Error(`Recipient account is inactive: ${input.to}`);
 
   if (input.from === input.to) throw new Error('Cannot send to self');
+
+  // WP v2 §9.3: escrowed accounts cannot send earned points. Daily
+  // allocations (active/supportive/ambient) remain spendable.
+  if (sender.isEscrowed && input.pointType === 'earned') {
+    throw new Error('Account is escrowed: earned-point transfers are frozen during court proceedings');
+  }
 
   // Cycle phase guard: during the white paper's "blackout minute" (08:59-09:00 UTC,
   // i.e. between expire+rebase and advance+mint), no daily-point transactions can
@@ -335,6 +331,7 @@ export function processTransaction(
     amount: input.amount.toString(),
     pointType: input.pointType,
     isInPerson: input.isInPerson ?? false,
+    recipientIsHuman: input.recipientIsHuman ?? false,
     memo: input.memo ?? '',
   };
   const validSig = verifyPayload(payload, input.timestamp, input.signature, sender.publicKey);
@@ -361,12 +358,16 @@ export function processTransaction(
     );
   }
 
-  // Apply the percentHuman multiplier. The sender deducts their full intent
-  // (so spending always feels like spending), but only `amount * pH/100`
-  // reaches the recipient + fee pool. The rest burns as unverified-spend
-  // slippage. Sybil resistance: a 0%-verified account can mint daily but
-  // every spend burns to zero, so duplicate accounts gain no leverage.
-  const effectiveAmount = (input.amount * BigInt(sender.percentHuman)) / 100n;
+  // WP v2: percentHuman discount applies only to daily-point spends
+  // (active/supportive/ambient). Earned-point transactions pass through at
+  // full value. Non-individual accounts (company/government) also spend
+  // without discount since they don't receive daily allocations.
+  const isDailyPointType = input.pointType !== 'earned';
+  const isIndividual = sender.type === 'individual';
+  const applyDiscount = isDailyPointType && isIndividual;
+  const effectiveAmount = applyDiscount
+    ? (input.amount * BigInt(sender.percentHuman)) / 100n
+    : input.amount;
   const fee = calculateFee(effectiveAmount);
   const netAmount = effectiveAmount - fee;
   const burnedUnverified = input.amount - effectiveAmount;
@@ -385,6 +386,7 @@ export function processTransaction(
     amount: input.amount,
     pointType: input.pointType,
     isInPerson: input.isInPerson ?? false,
+    recipientIsHuman: input.recipientIsHuman ?? false,
     memo: input.memo ?? '',
     signature: input.signature,
     receiverSignature: input.isInPerson ? (input.receiverSignature ?? null) : null,
@@ -398,6 +400,7 @@ export function processTransaction(
     fee,
     netAmount,
     burnedUnverified,
+    senderPercentHuman: sender.percentHuman,
   });
 
   const transaction: Transaction = {
@@ -409,6 +412,7 @@ export function processTransaction(
     netAmount,
     pointType: input.pointType,
     isInPerson: input.isInPerson ?? false,
+    recipientIsHuman: input.recipientIsHuman ?? false,
     memo: input.memo ?? '',
     signature: input.signature,
     receiverSignature: input.isInPerson ? (input.receiverSignature ?? null) : null,

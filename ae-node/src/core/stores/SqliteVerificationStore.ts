@@ -216,6 +216,19 @@ export class SqliteVerificationStore implements IVerificationStore {
       .run(withdrawnAt, vouchId);
   }
 
+  findAllActiveVouches(): Vouch[] {
+    const rows = this.db
+      .prepare('SELECT * FROM vouches WHERE is_active = 1')
+      .all() as Array<Record<string, unknown>>;
+    return rows.map(rowToVouch);
+  }
+
+  updateVouchStakeAmount(vouchId: string, newAmount: bigint): void {
+    this.db
+      .prepare('UPDATE vouches SET stake_amount = ? WHERE id = ?')
+      .run(newAmount.toString(), vouchId);
+  }
+
   // ── vouch_requests ─────────────────────────────────────────────
 
   insertVouchRequest(input: VouchRequestInsert): void {

@@ -284,6 +284,7 @@ export function courtRoutes(db: DatabaseSync): Router {
             challengerId: c.challengerId,
             defendantId: c.defendantId,
             challengerStake: c.challengerStake.toString(),
+            challengerStakePercent: c.challengerStakePercent,
             verdict: c.verdict,
             createdAt: c.createdAt,
             resolvedAt: c.resolvedAt,

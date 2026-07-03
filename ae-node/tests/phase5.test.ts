@@ -77,7 +77,7 @@ describe('Phase 5: Court and Enforcement System', () => {
     // Add a vouch on defendant to test burn
     const voucherResult = createAccount(db, 'individual', 1, 100);
     updateBalance(db, voucherResult.account.id, 'earned_balance', pts(5000));
-    const vouch = createVouch(db, voucherResult.account.id, defendantId, pts(500));
+    const vouch = createVouch(db, voucherResult.account.id, defendantId, 10);
 
     const challengerBefore = getAccount(db, challenger.accountId)!;
 

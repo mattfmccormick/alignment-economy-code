@@ -1,5 +1,7 @@
 export { getDb, closeDb, resetDb, runTransaction } from './db/connection.js';
 export { seedParams, getParam, setParam, getAllParams } from './config/params.js';
+export { validateParamChange, PARAM_GOVERNANCE } from './config/governance.js';
+export type { ParamClass, ParamSpec } from './config/governance.js';
 export * from './core/types.js';
 export * from './core/constants.js';
 export * from './core/crypto.js';

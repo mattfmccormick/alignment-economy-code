@@ -79,4 +79,7 @@ export interface IAccountStore {
    * direct callers should use setInheritance there for validation.
    */
   setInheritance(accountId: string, config: AccountInheritance | null): void;
+
+  /** WP v2 court escrow: freeze/unfreeze earned-point outbound transfers. */
+  setEscrowed(accountId: string, escrowed: boolean): void;
 }

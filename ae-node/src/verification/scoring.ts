@@ -57,10 +57,9 @@ export function calculateScore(db: DatabaseSync, accountId: string): ScoreBreakd
   if (policy.tierCaps.B !== null) tierB = Math.min(tierB, policy.tierCaps.B);
   if (policy.tierCaps.C !== null) tierC = Math.min(tierC, policy.tierCaps.C);
 
-  // Vouches (Tier C)
-  const vouchType = policy.evidenceTypes.find((t) => t.id === 'vouch');
-  if (vouchType && vouches.length > 0) {
-    const vouchScore = vouches.length * vouchType.scoreValue;
+  // Vouches (Tier C) — WP v2: weight = sum of stakedPercentage, not count.
+  if (vouches.length > 0) {
+    const vouchScore = Math.round(vouches.reduce((sum, v) => sum + v.stakedPercentage, 0));
     tierC += vouchScore;
     evidenceDetails.push({ typeId: 'vouch', value: vouchScore });
   }

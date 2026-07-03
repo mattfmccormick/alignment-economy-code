@@ -156,6 +156,7 @@ function serializeAccount(acct: NonNullable<ReturnType<typeof getAccount>>) {
     percentHuman: acct.percentHuman,
     joinedDay: acct.joinedDay,
     isActive: acct.isActive,
+    isEscrowed: acct.isEscrowed,
     protectionWindowEnd: acct.protectionWindowEnd,
     createdAt: acct.createdAt,
   };

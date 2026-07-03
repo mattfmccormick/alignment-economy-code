@@ -83,6 +83,7 @@ describe('Phase 73 F3: Supply conservation integration', () => {
         amount: pts(10).toString(),
         pointType: 'earned',
         isInPerson: false,
+        recipientIsHuman: false,
         memo: '',
       };
       const timestamp = now + i;
@@ -141,6 +142,7 @@ describe('Phase 73 F3: Supply conservation integration', () => {
         amount: pts(20).toString(),
         pointType: 'earned',
         isInPerson: false,
+        recipientIsHuman: false,
         memo: '',
       };
       const timestamp = now + i;

@@ -166,14 +166,9 @@ export function executeContracts(
         if (!recipient || !recipient.isActive) {
           results.push({ contractId: contract.id, type: contract.type, executed: false, reason: 'recipient inactive' });
         } else {
-          // percentHuman applies to recurring earned transfers too —
-          // unverified accounts can't move value via standing contracts
-          // either, otherwise sybil setups would route around the spend
-          // multiplier just by configuring an active_standing.
-          const effective = (amount * BigInt(acct.percentHuman)) / 100n;
-          const burned = amount - effective;
-          const fee = calculateFee(effective);
-          const net = effective - fee;
+          // WP v2: earned-point spends are not discounted by percentHuman.
+          const fee = calculateFee(amount);
+          const net = amount - fee;
           const now = Math.floor(Date.now() / 1000);
 
           runTransaction(db, () => {
@@ -187,9 +182,6 @@ export function executeContracts(
             recordLog(db, contract.targetId, 'tx_receive', 'earned', net, recipBefore, recipAfter, contract.id, now);
 
             addToFeePool(db, fee);
-            if (burned > 0n) {
-              recordLog(db, accountId, 'burn_unverified', 'earned', burned, acct.earnedBalance, newEarned, contract.id, now);
-            }
           });
           results.push({ contractId: contract.id, type: contract.type, executed: true });
         }

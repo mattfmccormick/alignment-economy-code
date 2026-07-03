@@ -63,6 +63,7 @@ describe('Phase 12: Integration Tests', () => {
           amount: txAmount.toString(),
           pointType: 'active' as const,
           isInPerson: false,
+          recipientIsHuman: false,
           memo: `day ${day}`,
         };
         const signature = signPayload(payload, timestamp, sender.privateKey);
@@ -73,6 +74,7 @@ describe('Phase 12: Integration Tests', () => {
           amount: txAmount,
           pointType: 'active',
           isInPerson: false,
+          recipientIsHuman: false,
           memo: `day ${day}`,
           signature,
           timestamp,
@@ -169,11 +171,11 @@ describe('Phase 12: Integration Tests', () => {
     const target = createAccount(db, 'individual', 1, 0);
 
     for (const voucher of vouchers) {
-      // createVouch takes bigint for stakeAmount
-      createVouch(db, voucher.account.id, target.account.id, pts(50));
+      createVouch(db, voucher.account.id, target.account.id, 10);
     }
 
     const score = calculateScore(db, target.account.id);
+    // 10 vouches × 10% = 100 score
     assert.ok(score.totalScore >= 90, `Expected >= 90, got ${score.totalScore}`);
   });
 
@@ -189,7 +191,7 @@ describe('Phase 12: Integration Tests', () => {
     for (const id of ['tx-c', 'tx-a', 'tx-b']) {
       mempool.add({
         id, from: 'a', to: 'b', amount: pts(10), fee: pts(0.05),
-        netAmount: pts(9.95), pointType: 'earned', isInPerson: false,
+        netAmount: pts(9.95), pointType: 'earned', isInPerson: false, recipientIsHuman: false,
         memo: '', signature: '', timestamp: 1000, blockNumber: null,
       });
     }

@@ -37,6 +37,7 @@ export interface Account {
    * still includes this account until it's manually deactivated).
    */
   inheritance: AccountInheritance | null;
+  isEscrowed: boolean;
 }
 
 export interface AccountInheritance {
@@ -69,6 +70,7 @@ export type ChangeType =
   | 'vouch_burn'
   | 'bounty'
   | 'court_burn'
+  | 'court_compensation'
   | 'fee_distribution';
 
 export interface TransactionLogEntry {
@@ -92,6 +94,7 @@ export interface Transaction {
   netAmount: bigint;
   pointType: PointType;
   isInPerson: boolean;
+  recipientIsHuman: boolean;
   memo: string;
   signature: string;
   /**

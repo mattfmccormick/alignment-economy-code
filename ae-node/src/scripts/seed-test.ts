@@ -45,12 +45,12 @@ console.log('');
 console.log('=== AE Test Seed ===');
 console.log('');
 
-// 1. Lower minimums for small-network testing
-setParam(db, 'court.jury_size', 1);
-setParam(db, 'mining.panel_size', 1);
-setParam(db, 'mining.min_miners_for_jury', 1);
-setParam(db, 'mining.tier1_uptime_threshold', 0);
-setParam(db, 'mining.rolling_window_days', 1);
+// 1. Lower minimums for small-network testing (skipGovernance: dev override)
+setParam(db, 'court.jury_size', 1, undefined, undefined, true);
+setParam(db, 'mining.panel_size', 1, undefined, undefined, true);
+setParam(db, 'mining.min_miners_for_jury', 1, undefined, undefined, true);
+setParam(db, 'mining.tier1_uptime_threshold', 0, undefined, undefined, true);
+setParam(db, 'mining.rolling_window_days', 1, undefined, undefined, true);
 console.log('Lowered court/mining minimums for 2-person testing.');
 
 // 2. Create genesis block

@@ -17,7 +17,7 @@ const DEFAULT_POLICY: VerificationPolicy = {
   ],
   tierCaps: { A: 30, B: 80, C: null },
   totalCap: 100,
-  decay: { monthlyRate: 10, inPersonOffset: 2.5, maxOffsetPerWindow: 10, windowDays: 30 },
+  decay: { monthlyRate: 10, humanTagCredit: 2.5, maxOffsetPerWindow: 10, windowDays: 30 },
 };
 
 export function getPolicy(db: DatabaseSync): VerificationPolicy {

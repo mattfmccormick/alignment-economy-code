@@ -39,9 +39,9 @@ async function startApp(db: DatabaseSync): Promise<{ port: number; server: Serve
 }
 
 function send(db: DatabaseSync, from: ReturnType<typeof createAccount>, to: ReturnType<typeof createAccount>, amount: bigint, ts: number): void {
-  const payload = { from: from.account.id, to: to.account.id, amount: amount.toString(), pointType: 'active' as const, isInPerson: false, memo: '' };
+  const payload = { from: from.account.id, to: to.account.id, amount: amount.toString(), pointType: 'active' as const, isInPerson: false, recipientIsHuman: false, memo: '' };
   const signature = signPayload(payload, ts, from.privateKey);
-  processTransaction(db, { from: from.account.id, to: to.account.id, amount, pointType: 'active', isInPerson: false, memo: '', timestamp: ts, signature });
+  processTransaction(db, { from: from.account.id, to: to.account.id, amount, pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '', timestamp: ts, signature });
 }
 
 describe('GET /accounts/:id/ledger', () => {

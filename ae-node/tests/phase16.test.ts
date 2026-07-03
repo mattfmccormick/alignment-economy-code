@@ -86,6 +86,7 @@ function submitTx(
     amount: amount.toString(),
     pointType: 'active' as const,
     isInPerson: false,
+    recipientIsHuman: false,
     memo: '',
   };
   const signature = signPayload(payload, timestamp, sender.privateKey);
@@ -95,6 +96,7 @@ function submitTx(
     amount,
     pointType: 'active',
     isInPerson: false,
+    recipientIsHuman: false,
     memo: '',
     timestamp,
     signature,

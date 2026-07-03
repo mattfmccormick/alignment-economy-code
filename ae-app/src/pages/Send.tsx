@@ -208,6 +208,12 @@ export function Send() {
           Available: {displayBalance}
         </div>
 
+        {account?.isEscrowed && pointType === 'earned' && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-300">
+            Your earned-point transfers are escrowed due to a pending court case. This send will be rejected.
+          </div>
+        )}
+
         {/* Amount */}
         <div>
           <label className="text-xs text-gray-400 block mb-1">Amount</label>

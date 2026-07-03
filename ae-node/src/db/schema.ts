@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 11;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -28,7 +28,8 @@ const TABLES = `
     --     {beneficiaries:[id,...], threshold:n, deadManSwitchDays:d,
     --      configuredAt:ts}
     last_activity_at INTEGER,
-    inheritance TEXT
+    inheritance TEXT,
+    is_escrowed INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS transactions (
@@ -40,6 +41,9 @@ const TABLES = `
     net_amount TEXT NOT NULL,
     point_type TEXT NOT NULL CHECK(point_type IN ('active', 'supportive', 'ambient', 'earned')),
     is_in_person INTEGER NOT NULL DEFAULT 0,
+    -- WP v2: sender attests the recipient is human. Each tag feeds the
+    -- decay-offset engine weighted by the sender's percentHuman.
+    recipient_is_human INTEGER NOT NULL DEFAULT 0,
     -- Receiver's countersignature on isInPerson transactions. NULL for
     -- normal (non-in-person) transactions. NOT NULL would break existing
     -- rows from before schema v8.
@@ -392,6 +396,23 @@ const TABLES = `
     FOREIGN KEY (to_id) REFERENCES accounts(id)
   );
 
+  -- WP v2: human-tag credits. When a sender marks recipientIsHuman=true
+  -- on a transaction, we snapshot the tagger's percentHuman and compute
+  -- the credit (2.5 * tagger_ph / 100). The decay engine sums credits
+  -- in the window instead of counting in-person transactions.
+  CREATE TABLE IF NOT EXISTS human_tags (
+    id TEXT PRIMARY KEY,
+    recipient_id TEXT NOT NULL,
+    tagger_id TEXT NOT NULL,
+    tagger_percent_human INTEGER NOT NULL,
+    credit REAL NOT NULL,
+    transaction_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (recipient_id) REFERENCES accounts(id),
+    FOREIGN KEY (tagger_id) REFERENCES accounts(id),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+  );
+
   -- Phase-3 BFT consensus validators.
   --
   -- A row in this table means: this account has staked some earned points
@@ -476,6 +497,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_contacts_favorite ON contacts(owner_id, is_favorite);
   CREATE INDEX IF NOT EXISTS idx_recurring_from ON recurring_transfers(from_id);
   CREATE INDEX IF NOT EXISTS idx_vouch_requests_to ON vouch_requests(to_id);
+  CREATE INDEX IF NOT EXISTS idx_human_tags_recipient ON human_tags(recipient_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_validators_active ON validators(is_active);
   CREATE INDEX IF NOT EXISTS idx_pending_changes_created ON pending_validator_changes(created_at);
 `;
@@ -593,6 +615,40 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
     }
     if (!cols.some((c) => c.name === 'inheritance')) {
       db.exec('ALTER TABLE accounts ADD COLUMN inheritance TEXT');
+    }
+  }
+  if (from < 10) {
+    // WP v2: recipientIsHuman tag on transactions + human_tags table.
+    const txCols = db
+      .prepare("PRAGMA table_info(transactions)")
+      .all() as Array<{ name: string }>;
+    if (!txCols.some((c) => c.name === 'recipient_is_human')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN recipient_is_human INTEGER NOT NULL DEFAULT 0');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS human_tags (
+        id TEXT PRIMARY KEY,
+        recipient_id TEXT NOT NULL,
+        tagger_id TEXT NOT NULL,
+        tagger_percent_human INTEGER NOT NULL,
+        credit REAL NOT NULL,
+        transaction_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (recipient_id) REFERENCES accounts(id),
+        FOREIGN KEY (tagger_id) REFERENCES accounts(id),
+        FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_human_tags_recipient ON human_tags(recipient_id, created_at);
+    `);
+  }
+  if (from < 11) {
+    // WP v2 court escrow: freeze defendant's earned outbound transfers
+    // while a challenge is pending. The column defaults to 0 (not escrowed).
+    const cols = db
+      .prepare("PRAGMA table_info(accounts)")
+      .all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'is_escrowed')) {
+      db.exec('ALTER TABLE accounts ADD COLUMN is_escrowed INTEGER NOT NULL DEFAULT 0');
     }
   }
 }

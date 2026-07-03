@@ -70,6 +70,7 @@ function buildPayload(opts: {
   amount: bigint;
   pointType: 'earned';
   isInPerson: boolean;
+  recipientIsHuman?: boolean;
   memo?: string;
 }) {
   return {
@@ -78,6 +79,7 @@ function buildPayload(opts: {
     amount: opts.amount.toString(),
     pointType: opts.pointType,
     isInPerson: opts.isInPerson,
+    recipientIsHuman: opts.recipientIsHuman ?? false,
     memo: opts.memo ?? '',
   };
 }
@@ -99,6 +101,7 @@ describe('Phase 67: in-person transactions require receiver countersignature', (
         amount: pts(50),
         pointType: 'earned',
         isInPerson: true,
+        recipientIsHuman: false,
         memo: '',
         timestamp: ts,
         signature: sig,
@@ -125,6 +128,7 @@ describe('Phase 67: in-person transactions require receiver countersignature', (
         amount: pts(50),
         pointType: 'earned',
         isInPerson: true,
+        recipientIsHuman: false,
         memo: '',
         timestamp: ts,
         signature: sig,
@@ -151,6 +155,7 @@ describe('Phase 67: in-person transactions require receiver countersignature', (
       amount: pts(50),
       pointType: 'earned',
       isInPerson: true,
+      recipientIsHuman: false,
       memo: '',
       timestamp: ts,
       signature: sig,
@@ -190,6 +195,7 @@ describe('Phase 67: in-person transactions require receiver countersignature', (
       amount: pts(25),
       pointType: 'earned',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
       timestamp: ts,
       signature: sig,
@@ -223,6 +229,7 @@ describe('Phase 67: in-person transactions require receiver countersignature', (
         amount: pts(10),
         pointType: 'earned',
         isInPerson: true,
+        recipientIsHuman: false,
         memo: '',
         timestamp: ts,
         signature: sig,

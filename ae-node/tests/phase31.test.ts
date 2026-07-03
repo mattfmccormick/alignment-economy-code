@@ -232,6 +232,7 @@ describe('Phase 31: BFT block production with a real transaction', () => {
       amount: txAmount.toString(),
       pointType: 'active' as const,
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     const txSig = signPayload(payload, txTimestamp, senderKeys.privateKey);
@@ -242,6 +243,7 @@ describe('Phase 31: BFT block production with a real transaction', () => {
       amount: txAmount,
       pointType: 'active',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
       timestamp: txTimestamp,
       signature: txSig,

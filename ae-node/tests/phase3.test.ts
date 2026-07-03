@@ -54,15 +54,15 @@ describe('Phase 3: Proof of Human', () => {
     submitEvidence(db, target.account.id, 'gov_id', 'hash2');
     submitEvidence(db, target.account.id, 'photo_match', 'hash3');
 
-    // Create 2 vouchers with earned balance
+    // WP v2: each vouch contributes its stakePercent as score points
     for (let i = 0; i < 2; i++) {
       const voucher = createAccount(db, 'individual', 1, 100);
       updateBalance(db, voucher.account.id, 'earned_balance', pts(10000));
-      createVouch(db, voucher.account.id, target.account.id, pts(500));
+      createVouch(db, voucher.account.id, target.account.id, 10);
     }
 
     const score = calculateScore(db, target.account.id);
-    // tierA = 25 (15+10), tierB = 60, tierC = 20 -> total 105, capped at 100
+    // tierA = 25 (15+10), tierB = 60, tierC = 20 (2×10%) -> total 105, capped at 100
     assert.equal(score.totalScore, 100);
 
     db.close();
@@ -79,11 +79,11 @@ describe('Phase 3: Proof of Human', () => {
     for (let i = 0; i < 7; i++) {
       const voucher = createAccount(db, 'individual', 1, 100);
       updateBalance(db, voucher.account.id, 'earned_balance', pts(10000));
-      createVouch(db, voucher.account.id, target.account.id, pts(500));
+      createVouch(db, voucher.account.id, target.account.id, 10);
     }
 
     const score = calculateScore(db, target.account.id);
-    // tierA = 30 (15+10+5, cap 30), tierC = 70, total = 100
+    // tierA = 30 (15+10+5, cap 30), tierC = 70 (7×10%), total = 100
     assert.equal(score.totalScore, 100);
 
     db.close();
@@ -96,11 +96,11 @@ describe('Phase 3: Proof of Human', () => {
     for (let i = 0; i < 10; i++) {
       const voucher = createAccount(db, 'individual', 1, 100);
       updateBalance(db, voucher.account.id, 'earned_balance', pts(10000));
-      createVouch(db, voucher.account.id, target.account.id, pts(500));
+      createVouch(db, voucher.account.id, target.account.id, 10);
     }
 
     const score = calculateScore(db, target.account.id);
-    // tierC = 100, total cap = 100
+    // tierC = 100 (10×10%), total cap = 100
     assert.equal(score.totalScore, 100);
 
     db.close();
@@ -153,24 +153,24 @@ describe('Phase 3: Proof of Human', () => {
     db.close();
   });
 
-  // Test 5: Vouching - lock/unlock/score
-  it('vouch locks stake, increases score; withdraw reverses both', () => {
+  // Test 5: Vouching - percentage-based lock/unlock/score (WP v2)
+  it('vouch locks percentage of holdings; withdraw reverses both', () => {
     const db = freshDb();
     const voucher = createAccount(db, 'individual', 1, 100);
     const target = createAccount(db, 'individual', 1, 0);
 
     updateBalance(db, voucher.account.id, 'earned_balance', pts(10000));
 
-    const vouch = createVouch(db, voucher.account.id, target.account.id, pts(500));
+    const vouch = createVouch(db, voucher.account.id, target.account.id, 5);
 
-    // Voucher: earned decreased, locked increased
+    // 5% of 10,000 = 500 locked
     const vAfter = getAccount(db, voucher.account.id)!;
     assert.equal(vAfter.earnedBalance, pts(10000) - pts(500));
     assert.equal(vAfter.lockedBalance, pts(500));
 
-    // Target score increased
+    // WP v2: vouch score = sum of stakedPercentage values
     const score = calculateScore(db, target.account.id);
-    assert.equal(score.totalScore, 10); // 1 vouch = 10 pts
+    assert.equal(score.totalScore, 5);
 
     // Withdraw
     withdrawVouch(db, vouch.id);
@@ -192,20 +192,20 @@ describe('Phase 3: Proof of Human', () => {
     const target = createAccount(db, 'individual', 1, 0);
 
     updateBalance(db, voucher.account.id, 'earned_balance', pts(10000));
-    const vouch = createVouch(db, voucher.account.id, target.account.id, pts(500));
+    const vouch = createVouch(db, voucher.account.id, target.account.id, 5);
 
     burnVouch(db, vouch.id);
 
     const vAfter = getAccount(db, voucher.account.id)!;
     assert.equal(vAfter.lockedBalance, 0n);
-    // Stake is destroyed, not returned
+    // 5% of 10,000 = 500 burned
     assert.equal(vAfter.earnedBalance, pts(10000) - pts(500));
 
     db.close();
   });
 
   // Test 7: Decay
-  it('decays percentHuman by 10% after 30 days, applies in-person offset', () => {
+  it('decays percentHuman by 10% after 30 days, applies human-tag offset', () => {
     const db = freshDb();
     const a = createAccount(db, 'individual', 1, 80);
 
@@ -213,14 +213,11 @@ describe('Phase 3: Proof of Human', () => {
     const score1 = applyDecay(db, a.account.id, 30, 0);
     assert.equal(score1, 72);
 
-    // Now apply with 5 in-person transactions
-    // offset = min(5 * 2.5, 10) = 10 (capped)... wait, we already applied decay
-    // Reset to 72 first (it's already 72 from above)
-    // Actually applyDecay reads current percentHuman which is now 72
-    // Apply again with 60 more days and 5 in-person txs
+    // WP v2: human-tag credits offset decay. 5 credits (e.g. 2 tags at
+    // 2.5 credit each from fully verified taggers) cap at 10.
     const score2 = applyDecay(db, a.account.id, 30, 5);
-    // 72 * 0.9 = 64.8 -> 65, then +min(5*2.5, 10) = +10 -> 75
-    assert.equal(score2, 75);
+    // 72 * 0.9 = 64.8 -> 65, then +min(5, 10) = +5 -> 70
+    assert.equal(score2, 70);
 
     db.close();
   });

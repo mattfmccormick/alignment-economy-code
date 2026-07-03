@@ -18,7 +18,7 @@ export interface VerificationPolicy {
   totalCap: number;
   decay: {
     monthlyRate: number;
-    inPersonOffset: number;
+    humanTagCredit: number;
     maxOffsetPerWindow: number;
     windowDays: number;
   };

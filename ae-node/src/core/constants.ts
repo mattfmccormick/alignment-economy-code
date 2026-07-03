@@ -9,7 +9,8 @@ export const DAILY_SUPPORTIVE_POINTS = 14_400_000_000n;     // 144.00000000 poin
 export const DAILY_AMBIENT_POINTS = 1_440_000_000n;          // 14.40000000 points
 
 // Target earned balance per participant (for rebase)
-export const TARGET_EARNED_PER_PERSON = 1_440_000_000_000n;  // 14,400.00000000 points
+// One year of daily allocations: 365 × 1,440 = 525,600
+export const TARGET_EARNED_PER_PERSON = 52_560_000_000_000n;  // 525,600.00000000 points
 
 // Transaction fee in basis points (50 = 0.50%)
 export const TRANSACTION_FEE_RATE = 50n;

@@ -98,6 +98,7 @@ function buildSignedTx(db: DatabaseSync): TxSubmission {
     amount: storageAmount.toString(),
     pointType: 'active',
     isInPerson: false,
+    recipientIsHuman: false,
     memo: '',
   };
   const timestamp = Math.floor(Date.now() / 1000);
@@ -113,6 +114,7 @@ function buildSignedTx(db: DatabaseSync): TxSubmission {
         amount: 50,
         pointType: 'active',
         isInPerson: false,
+        recipientIsHuman: false,
         memo: '',
       },
     },

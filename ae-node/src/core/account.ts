@@ -114,6 +114,10 @@ export function updatePercentHuman(db: DatabaseSync, accountId: string, percentH
   accountStore(db).updatePercentHuman(accountId, percentHuman);
 }
 
+export function setEscrowed(db: DatabaseSync, accountId: string, escrowed: boolean): void {
+  accountStore(db).setEscrowed(accountId, escrowed);
+}
+
 export function deactivateAccount(db: DatabaseSync, accountId: string): void {
   accountStore(db).deactivate(accountId);
 }

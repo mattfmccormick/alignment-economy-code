@@ -234,26 +234,19 @@ export class AlignmentEconomyClient {
   }
 
   /**
-   * Vouch for another account. The voucher commits `stakeAmount` of their
-   * earned balance: it locks until released, and burns if the vouchee is
-   * later proven non-human in court. `stakeAmount` is in base units
-   * (PRECISION = 10^8 — the same encoding the bigint balances use).
-   *
-   * The voucher's identity is taken from the signature, not the body,
-   * so a third party cannot stake someone else's balance. Callers pass
-   * the voucher's private key; the SDK signs `{vouchedId, stakeAmount}`
-   * locally and sends the signed envelope.
+   * Vouch for another account (WP v2: percentage-based).
+   * Locks `stakePercent`% of the voucher's total holdings.
    */
   async submitVouch(opts: {
     voucherId: string;
     voucherPrivateKey: string;
     vouchedId: string;
-    stakeAmountBaseUnits: bigint;
+    stakePercent: number;
   }): Promise<{ vouch: Vouch }> {
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = {
       vouchedId: opts.vouchedId,
-      stakeAmount: Number(opts.stakeAmountBaseUnits),
+      stakePercent: opts.stakePercent,
     };
     const signature = signPayload(payload, timestamp, opts.voucherPrivateKey);
     return this.request('POST', '/miners/vouches', {

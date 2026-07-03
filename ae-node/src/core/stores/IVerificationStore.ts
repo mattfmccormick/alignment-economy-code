@@ -101,6 +101,12 @@ export interface IVerificationStore {
   /** Mark a vouch inactive (withdrawn or burned). */
   markVouchInactive(vouchId: string, withdrawnAt: number): void;
 
+  /** All active vouches across all accounts (for daily rebalance). */
+  findAllActiveVouches(): Vouch[];
+
+  /** Update the stakeAmount for an active vouch (used by rebalanceVouchLocks). */
+  updateVouchStakeAmount(vouchId: string, newAmount: bigint): void;
+
   // ── vouch_requests ─────────────────────────────────────────────
 
   insertVouchRequest(input: VouchRequestInsert): void;

@@ -63,7 +63,7 @@ function signTx(
   const timestamp = Math.floor(Date.now() / 1000);
   const payload = {
     from: fromId, to: toId, amount: amount.toString(),
-    pointType, isInPerson: false, memo: '',
+    pointType, isInPerson: false, recipientIsHuman: false, memo: '',
   };
   return { timestamp, signature: signPayload(payload, timestamp, privateKey) };
 }
@@ -266,6 +266,63 @@ describe('Phase 61: percentHuman as spend multiplier (Option B)', () => {
     const entityAfter = getAccount(db, cityEntity.account.id)!;
     assert.equal(entityAfter.earnedBalance, 0n);
 
+    db.close();
+  });
+
+  it('earned-point spends are NOT discounted by percentHuman (WP v2)', () => {
+    const db = freshDb();
+    const sender = createAccount(db, 'individual', 1, 0); // 0% verified
+    const recipient = createAccount(db, 'individual', 1, 100);
+    updateBalance(db, sender.account.id, 'earned_balance', pts(1000));
+
+    const amount = pts(100);
+    const { timestamp, signature } = signTx(
+      sender.account.id, recipient.account.id, amount, 'earned', sender.privateKey,
+    );
+    const result = processTransaction(db, {
+      from: sender.account.id, to: recipient.account.id, amount,
+      pointType: 'earned', timestamp, signature,
+    });
+
+    // WP v2: earned spends pass through at full value regardless of percentHuman.
+    const expectedFee = calculateFee(amount);
+    assert.equal(result.fee, expectedFee);
+    assert.equal(result.netAmount, amount - expectedFee);
+
+    const recipientAfter = getAccount(db, recipient.account.id)!;
+    assert.equal(recipientAfter.earnedBalance, amount - expectedFee);
+
+    // No burn_unverified log for earned-point spends.
+    const burnLogs = db.prepare(
+      "SELECT * FROM transaction_log WHERE account_id = ? AND change_type = 'burn_unverified'",
+    ).all(sender.account.id) as any[];
+    assert.equal(burnLogs.length, 0);
+
+    db.close();
+  });
+
+  it('non-individual accounts spend without percentHuman discount (WP v2)', () => {
+    const db = freshDb();
+    const company = createAccount(db, 'company', 1, 0);
+    const recipient = createAccount(db, 'individual', 1, 100);
+    updateBalance(db, company.account.id, 'active_balance', pts(1000));
+
+    const amount = pts(100);
+    const { timestamp, signature } = signTx(
+      company.account.id, recipient.account.id, amount, 'active', company.privateKey,
+    );
+    const result = processTransaction(db, {
+      from: company.account.id, to: recipient.account.id, amount,
+      pointType: 'active', timestamp, signature,
+    });
+
+    // Non-individual accounts don't receive daily allocations so no discount applies.
+    const expectedFee = calculateFee(amount);
+    assert.equal(result.fee, expectedFee);
+    assert.equal(result.netAmount, amount - expectedFee);
+
+    const recipientAfter = getAccount(db, recipient.account.id)!;
+    assert.equal(recipientAfter.earnedBalance, amount - expectedFee);
     db.close();
   });
 

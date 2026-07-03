@@ -1,20 +1,21 @@
 // Verification score decay.
 //
-// The protocol erodes percentHuman over time without verification activity,
-// nudging accounts to re-engage. In-person transactions count toward an
-// offset that protects the score against decay.
+// WP v2: percentHuman erodes monthly without verification activity.
+// Human-tags (recipientIsHuman on transactions) offset the decay,
+// replacing the legacy in-person transaction counter.
 
 import { DatabaseSync } from 'node:sqlite';
 import { getAccount, updatePercentHuman } from '../core/account.js';
 import { getActiveIndividuals } from '../core/account.js';
 import { transactionStore } from '../core/transaction.js';
 import { getPolicy } from './policy.js';
+import type { SqliteTransactionStore } from '../core/stores/SqliteTransactionStore.js';
 
 export function applyDecay(
   db: DatabaseSync,
   accountId: string,
   daysSinceActivity: number,
-  inPersonTxCount: number,
+  humanTagCredits: number,
 ): number {
   const acct = getAccount(db, accountId);
   if (!acct) throw new Error(`Account not found: ${accountId}`);
@@ -24,7 +25,6 @@ export function applyDecay(
 
   let score = acct.percentHuman;
 
-  // Apply decay: one application per 30-day window without activity
   if (daysSinceActivity >= decay.windowDays) {
     const periods = Math.floor(daysSinceActivity / decay.windowDays);
     for (let i = 0; i < periods; i++) {
@@ -32,8 +32,9 @@ export function applyDecay(
     }
   }
 
-  // Apply in-person offset
-  const offset = Math.min(inPersonTxCount * decay.inPersonOffset, decay.maxOffsetPerWindow);
+  // WP v2: offset comes from summed human-tag credits in the window,
+  // capped at maxOffsetPerWindow.
+  const offset = Math.min(humanTagCredits, decay.maxOffsetPerWindow);
   score = Math.min(100, score + offset);
   score = Math.round(score);
   score = Math.max(0, score);
@@ -45,18 +46,16 @@ export function applyDecay(
 export function runDecayForAll(db: DatabaseSync, currentDay: number): void {
   const individuals = getActiveIndividuals(db);
   const policy = getPolicy(db);
-  const txStore = transactionStore(db);
+  const txStore = transactionStore(db) as SqliteTransactionStore;
 
   for (const acct of individuals) {
     if (acct.percentHuman <= 0) continue;
 
-    // Check last verification activity (simplified: use joined_day as proxy).
-    // Production tracks a real "last activity" timestamp.
     const daysSinceJoin = currentDay - acct.joinedDay;
     if (daysSinceJoin >= policy.decay.windowDays) {
       const windowStart = Math.floor(Date.now() / 1000) - policy.decay.windowDays * 86400;
-      const inPersonCount = txStore.countInPersonTransactionsSince(acct.id, windowStart);
-      applyDecay(db, acct.id, daysSinceJoin, inPersonCount);
+      const humanTagCredits = txStore.sumHumanTagCreditsSince(acct.id, windowStart);
+      applyDecay(db, acct.id, daysSinceJoin, humanTagCredits);
     }
   }
 }

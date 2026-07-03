@@ -50,6 +50,7 @@ function rowToAccount(row: Record<string, unknown>): Account {
     createdAt: row.created_at as number,
     lastActivityAt: (row.last_activity_at as number | null) ?? null,
     inheritance: parseInheritance(row.inheritance),
+    isEscrowed: (row.is_escrowed as number) === 1,
   };
 }
 
@@ -124,6 +125,10 @@ export class SqliteAccountStore implements IAccountStore {
 
   updatePercentHuman(accountId: string, percentHuman: number): void {
     this.db.prepare('UPDATE accounts SET percent_human = ? WHERE id = ?').run(percentHuman, accountId);
+  }
+
+  setEscrowed(accountId: string, escrowed: boolean): void {
+    this.db.prepare('UPDATE accounts SET is_escrowed = ? WHERE id = ?').run(escrowed ? 1 : 0, accountId);
   }
 
   deactivate(accountId: string): void {

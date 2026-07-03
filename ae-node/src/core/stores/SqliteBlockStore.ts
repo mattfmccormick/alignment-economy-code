@@ -107,6 +107,13 @@ export class SqliteBlockStore implements IBlockStore {
       );
   }
 
+  pruneBlocksThrough(cutoffNumber: number): number {
+    const result = this.db
+      .prepare('DELETE FROM blocks WHERE number > 0 AND number <= ?')
+      .run(cutoffNumber);
+    return Number(result.changes);
+  }
+
   saveCommitCertificate(blockNumber: number, cert: CommitCertificate): void {
     // bigint-safe JSON encoding (CommitCertificate.precommits has number
     // fields, no bigints, but using the same encoder is harmless and

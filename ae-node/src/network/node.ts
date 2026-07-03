@@ -139,6 +139,7 @@ export class AENode {
             netAmount: BigInt(tx.netAmount ?? '0'),
             pointType: (tx.pointType ?? 'earned') as WireTransaction['pointType'],
             isInPerson: Boolean(tx.isInPerson),
+            recipientIsHuman: Boolean(tx.recipientIsHuman),
             memo: String(tx.memo ?? ''),
             signature: String(tx.signature ?? ''),
             receiverSignature: tx.receiverSignature ?? null,

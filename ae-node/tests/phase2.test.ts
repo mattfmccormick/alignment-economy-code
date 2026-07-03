@@ -42,12 +42,12 @@ function sendActive(
   const timestamp = Math.floor(Date.now() / 1000);
   const payload = {
     from: from.id, to: to.id, amount: amount.toString(),
-    pointType: 'active', isInPerson: false, memo: '',
+    pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '',
   };
   const signature = signPayload(payload, timestamp, from.privateKey);
   return processTransaction(db, {
     from: from.id, to: to.id, amount, pointType: 'active',
-    isInPerson: false, memo: '', timestamp, signature,
+    isInPerson: false, recipientIsHuman: false, memo: '', timestamp, signature,
   });
 }
 
@@ -117,7 +117,7 @@ describe('Phase 2: Daily Cycle', () => {
         // Multiplier = target / pre_rebase
         if (day === 1) {
           assert.equal(event.participantCount, 2);
-          // Target = 2 * 14400 = 28800
+          // Target = 2 * 525600
           assert.equal(event.targetTotal, TARGET_EARNED_PER_PERSON * 2n);
           // Multiplier should be high (bootstrapping)
           assert.ok(event.rebaseMultiplier > 5, `Day 1 multiplier should be >5, got ${event.rebaseMultiplier}`);
@@ -207,7 +207,7 @@ describe('Phase 2: Daily Cycle', () => {
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = {
       from: ind.account.id, to: co.account.id, amount: DAILY_ACTIVE_POINTS.toString(),
-      pointType: 'active', isInPerson: false, memo: '',
+      pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '',
     };
     const sig = signPayload(payload, timestamp, ind.privateKey);
     processTransaction(db, {
@@ -332,7 +332,7 @@ describe('Phase 2: Daily Cycle', () => {
         const ts = Math.floor(Date.now() / 1000) + i;
         const payload = {
           from: sender.account.id, to: receiver.account.id, amount: acct.activeBalance.toString(),
-          pointType: 'active', isInPerson: false, memo: '',
+          pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '',
         };
         processTransaction(db, {
           from: sender.account.id, to: receiver.account.id, amount: acct.activeBalance,

@@ -28,18 +28,11 @@ export const DEFAULT_PARAMS: Record<string, unknown> = {
   'decay.in_person_offset_per_tx': 2.5,
   'decay.max_offset_per_window': 10,
 
-  // Mining + Treasury split. Per-block fees are sliced three ways:
-  //   - tier1_fee_share goes to Tier 1 operators (equal split)
-  //   - treasury_fee_share routes to the protocol treasury account
-  //     (funds public goods: audits, explorer, docs, the nonprofit)
-  //   - the remainder goes to Tier 2 (60/40 lottery/baseline within tier 2)
-  // The three must sum to <= 1.0; the rest is implicitly burned.
-  'mining.tier1_fee_share': 0.18,
-  'treasury.fee_share': 0.10,
-  // Default empty so getParam doesn't throw before ensureTreasuryAccount
-  // runs. Filled in with the deterministic id on the first fee distribution.
-  'treasury.account_id': '',
-  'mining.tier2_fee_share': 0.72,
+  // Mining fee split. Per-block fees are sliced two ways:
+  //   - 20% to Tier 1 operators (equal split)
+  //   - 80% to Tier 2 validators (60/40 lottery/baseline)
+  'mining.tier1_fee_share': 0.20,
+  'mining.tier2_fee_share': 0.80,
   'mining.tier2_lottery_share': 0.60,
   'mining.tier2_baseline_share': 0.40,
   'mining.tier1_uptime_threshold': 0.90,
@@ -62,6 +55,15 @@ export const DEFAULT_PARAMS: Record<string, unknown> = {
   'court.max_appeals': 1,
   'court.appeal_window_days': 7,
   'court.evidence_deadline_days': 7,
+  'court.forfeited_challenger_def_share': 0.50,
+  'court.duplicate_penalty_multiplier': 2,
+
+  // Governance
+  'governance.referendum_quorum': 0.10,
+  'governance.referendum_supermajority': 2 / 3,
+
+  // Blockchain
+  'blockchain.history_window_years': 7,
 
   // Network
   'network.day_length_seconds': 86400,

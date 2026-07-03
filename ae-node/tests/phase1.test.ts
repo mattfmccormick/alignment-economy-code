@@ -45,6 +45,7 @@ function signTx(
     amount: amount.toString(),
     pointType,
     isInPerson: opts.isInPerson ?? false,
+    recipientIsHuman: false,
     memo: opts.memo ?? '',
   };
   const signature = signPayload(payload, timestamp, privateKey);
@@ -82,7 +83,7 @@ describe('Phase 1: Core Ledger Engine', () => {
 
     const result = processTransaction(db, {
       from: a.account.id, to: b.account.id, amount: balance,
-      pointType: 'active', isInPerson: false, memo: '', timestamp, signature,
+      pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '', timestamp, signature,
     });
 
     // Fee = 1000 * 0.005 = 5.0 points
@@ -174,7 +175,7 @@ describe('Phase 1: Core Ledger Engine', () => {
       const timestamp = Math.floor(Date.now() / 1000) + i;
       const payload = {
         from: sender.account.id, to: receiver.account.id,
-        amount: txAmount.toString(), pointType: 'earned', isInPerson: false, memo: '',
+        amount: txAmount.toString(), pointType: 'earned', isInPerson: false, recipientIsHuman: false, memo: '',
       };
       const sig = signPayload(payload, timestamp, sender.privateKey);
 

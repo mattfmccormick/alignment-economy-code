@@ -13,6 +13,8 @@ import type { IBlockStore } from './stores/IBlockStore.js';
 import { SqliteTransactionStore } from './stores/SqliteTransactionStore.js';
 import type { ITransactionStore } from './stores/ITransactionStore.js';
 import { commitBlockSideEffects } from '../mining/rewards.js';
+import { getParam } from '../config/params.js';
+import { runTransaction } from '../db/connection.js';
 
 export function blockStore(db: DatabaseSync): IBlockStore {
   return new SqliteBlockStore(db);
@@ -238,4 +240,56 @@ export function validateBlock(db: DatabaseSync, block: Block): { valid: boolean;
 
 export function validateChain(db: DatabaseSync): { valid: boolean; error?: string; blockNumber?: number } {
   return validateChainWithStore(blockStore(db));
+}
+
+// ─── Chain pruning (WP v2 §7: 7-year rolling window) ─────────────────
+
+export interface PruneResult {
+  prunedBlocks: number;
+  prunedTransactions: number;
+  prunedLogs: number;
+  cutoffBlockNumber: number;
+}
+
+export function pruneChain(db: DatabaseSync, nowSeconds?: number): PruneResult {
+  const windowYears = getParam<number>(db, 'blockchain.history_window_years');
+  const now = nowSeconds ?? Math.floor(Date.now() / 1000);
+  const cutoffTimestamp = now - Math.round(windowYears * 365.25 * 86400);
+
+  const cutoffRow = db
+    .prepare('SELECT MAX(number) as n FROM blocks WHERE timestamp < ? AND number > 0')
+    .get(cutoffTimestamp) as { n: number | null } | undefined;
+
+  const cutoffBlockNumber = cutoffRow?.n ?? 0;
+  if (cutoffBlockNumber <= 0) {
+    return { prunedBlocks: 0, prunedTransactions: 0, prunedLogs: 0, cutoffBlockNumber: 0 };
+  }
+
+  let prunedBlocks = 0;
+  let prunedTransactions = 0;
+  let prunedLogs = 0;
+
+  runTransaction(db, () => {
+    const txIds = db
+      .prepare('SELECT id FROM transactions WHERE block_number > 0 AND block_number <= ?')
+      .all(cutoffBlockNumber) as Array<{ id: string }>;
+
+    if (txIds.length > 0) {
+      const idList = txIds.map((r) => r.id);
+      for (const txId of idList) {
+        const logResult = db
+          .prepare('DELETE FROM transaction_log WHERE reference_id = ?')
+          .run(txId);
+        prunedLogs += Number(logResult.changes);
+      }
+      for (const txId of idList) {
+        db.prepare('DELETE FROM transactions WHERE id = ?').run(txId);
+      }
+      prunedTransactions = idList.length;
+    }
+
+    prunedBlocks = blockStore(db).pruneBlocksThrough(cutoffBlockNumber);
+  });
+
+  return { prunedBlocks, prunedTransactions, prunedLogs, cutoffBlockNumber };
 }

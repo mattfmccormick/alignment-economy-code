@@ -105,6 +105,7 @@ describe('Phase 7: API Layer', () => {
       amount: storageAmount.toString(),
       pointType: 'active',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     const timestamp = Math.floor(Date.now() / 1000);
@@ -116,6 +117,7 @@ describe('Phase 7: API Layer', () => {
       amount: 100,
       pointType: 'active',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
 
@@ -194,6 +196,7 @@ describe('Phase 7: API Layer', () => {
         amount: storageAmt.toString(),
         pointType: 'active',
         isInPerson: false,
+        recipientIsHuman: false,
         memo: '',
       };
       const timestamp = Math.floor(Date.now() / 1000) + i;
@@ -203,7 +206,7 @@ describe('Phase 7: API Layer', () => {
         accountId: sender.account.id,
         timestamp,
         signature,
-        payload: { to: receiver.account.id, amount: 1, pointType: 'active', isInPerson: false, memo: '' },
+        payload: { to: receiver.account.id, amount: 1, pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '' },
       });
 
       if (status === 429) {
@@ -365,7 +368,7 @@ describe('Phase 7: API Layer', () => {
     resetRateLimits();
 
     const sender = createAccount(db, 'individual', 1, 100);
-    const payload = { to: 'nonexistent', amount: -100, pointType: 'active', isInPerson: false, memo: '' };
+    const payload = { to: 'nonexistent', amount: -100, pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '' };
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = signPayload(payload, timestamp, sender.privateKey);
 

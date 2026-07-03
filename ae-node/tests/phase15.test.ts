@@ -85,6 +85,7 @@ function buildPayload(
     netAmount: '0',
     pointType: 'earned' as const,
     isInPerson: false,
+    recipientIsHuman: false,
     memo: '',
     signature: '',
     timestamp,

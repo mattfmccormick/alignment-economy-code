@@ -151,6 +151,7 @@ describe('Phase 38: BFT catch-up sync', () => {
       amount: txAmount.toString(),
       pointType: 'active' as const,
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     const txSig = signPayload(txInternalPayload, txTimestamp, senderKeys.privateKey);
@@ -160,6 +161,7 @@ describe('Phase 38: BFT catch-up sync', () => {
       amount: txAmount,
       pointType: 'active',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
       timestamp: txTimestamp,
       signature: txSig,
@@ -225,6 +227,7 @@ describe('Phase 38: BFT catch-up sync', () => {
               netAmount: BigInt(wireTx.netAmount),
               pointType: wireTx.pointType,
               isInPerson: wireTx.isInPerson,
+              recipientIsHuman: wireTx.recipientIsHuman ?? false,
               memo: wireTx.memo,
               signature: wireTx.signature,
               receiverSignature: wireTx.receiverSignature ?? null,

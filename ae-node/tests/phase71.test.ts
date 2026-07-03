@@ -96,7 +96,7 @@ describe('Phase 71: auth-hardening regression', () => {
       const r = await request(app, 'POST', '/api/v1/miners/vouches', {
         voucherId: voucher.accountId,
         vouchedId: vouchee.accountId,
-        stakeAmount: '100',
+        stakePercent: 10,
       });
       assert.equal(r.status, 401);
       assert.equal(r.data?.error?.code, 'AUTH_MISSING');
@@ -109,7 +109,7 @@ describe('Phase 71: auth-hardening regression', () => {
       const vouchee = makeAccount(db);
       const attacker = generateKeyPair(); // not the voucher's key
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { vouchedId: vouchee.accountId, stakeAmount: '100' };
+      const payload = { vouchedId: vouchee.accountId, stakePercent: 10 };
       const sig = signPayload(payload, ts, attacker.privateKey);
       const app = createApp(db);
       const r = await request(app, 'POST', '/api/v1/miners/vouches', {
@@ -129,7 +129,7 @@ describe('Phase 71: auth-hardening regression', () => {
       const vouchee = makeAccount(db);
       const someoneElse = makeAccount(db);
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { voucherId: someoneElse.accountId, vouchedId: vouchee.accountId, stakeAmount: '100' };
+      const payload = { voucherId: someoneElse.accountId, vouchedId: vouchee.accountId, stakePercent: 10 };
       const sig = signPayload(payload, ts, voucher.privateKey);
       const app = createApp(db);
       const r = await request(app, 'POST', '/api/v1/miners/vouches', {
@@ -148,7 +148,7 @@ describe('Phase 71: auth-hardening regression', () => {
       const voucher = makeAccount(db); // 0 earned balance
       const vouchee = makeAccount(db);
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { vouchedId: vouchee.accountId, stakeAmount: '10000000000' }; // 100 pts
+      const payload = { vouchedId: vouchee.accountId, stakePercent: 10 };
       const sig = signPayload(payload, ts, voucher.privateKey);
       const app = createApp(db);
       const r = await request(app, 'POST', '/api/v1/miners/vouches', {

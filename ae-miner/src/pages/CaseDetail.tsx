@@ -221,6 +221,12 @@ function CaseHeaderCard({
         </div>
       </div>
 
+      {!caseHeader.verdict && isDefendant && (
+        <div className="p-2 rounded bg-red/10 text-xs text-red">
+          Defendant's earned-point transfers are escrowed while this case is open.
+        </div>
+      )}
+
       {caseHeader.verdict && (
         <div className={`p-2 rounded text-sm font-medium ${
           caseHeader.verdict === 'guilty' ? 'bg-red/10 text-red' : 'bg-teal/10 text-teal'

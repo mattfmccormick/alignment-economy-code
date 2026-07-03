@@ -1,9 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { sha256 } from '../core/crypto.js';
-import { getAccount, updateBalance, deactivateAccount } from '../core/account.js';
+import { getAccount, updateBalance, deactivateAccount, setEscrowed } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
-import { addToFeePool } from '../core/fee-pool.js';
 import { runTransaction } from '../db/connection.js';
 import { getParam } from '../config/params.js';
 import { getMinerByAccount, getActiveMiners, getMiner, setMinerTier, miningStore } from '../mining/registration.js';
@@ -105,6 +104,11 @@ export function fileChallenge(
     updateBalance(db, challengerAccountId, 'earned_balance', newEarned);
     updateBalance(db, challengerAccountId, 'locked_balance', newLocked);
     recordLog(db, challengerAccountId, 'vouch_lock', 'earned', stakeAmount, challenger.earnedBalance, newEarned, id, now);
+
+    // WP v2 §9.3: escrow defendant's earned balance from the moment the
+    // challenge is posted. Earned-point outbound transfers are blocked;
+    // daily allocations still mint and are spendable.
+    setEscrowed(db, defendantAccountId, true);
 
     store.insertCase({
       id,
@@ -390,17 +394,8 @@ function applyGuiltyVerdict(
   updateBalance(db, courtCase.challengerId, 'earned_balance', newChallengerEarned);
   recordLog(db, courtCase.challengerId, 'bounty', 'earned', bountyAmount, challenger.earnedBalance, newChallengerEarned, courtCase.id, now);
 
-  // Burn defendant balance. Whatever wasn't paid as bounty routes into the
-  // fee pool so miners pick it up across subsequent blocks. At small scale
-  // pure deflation would empty the network in a single case; this keeps
-  // total supply conserved while preserving the deterrent (the defendant
-  // still loses everything).
   updateBalance(db, courtCase.defendantId, 'earned_balance', 0n);
   recordLog(db, courtCase.defendantId, 'court_burn', 'earned', defendant.earnedBalance, defendant.earnedBalance, 0n, courtCase.id, now);
-  const burnToPool = defendant.earnedBalance - bountyAmount;
-  if (burnToPool > 0n) {
-    addToFeePool(db, burnToPool);
-  }
 
   // Return challenger stake
   const challengerAfterBounty = getAccount(db, courtCase.challengerId)!;
@@ -424,24 +419,30 @@ function applyInnocentVerdict(
   jurors: import('./types.js').JurorRecord[],
   now: number,
 ): void {
-  // Burn challenger stake (frivolous-challenge deterrent). Routes to the
-  // fee pool rather than disappearing.
+  // WP v2 §9.3: release escrow on innocent verdict.
+  setEscrowed(db, courtCase.defendantId, false);
+
+  // WP v2: challenger stake split 50% to defendant (compensation for the
+  // freeze), 50% true-burned.
   const challenger = getAccount(db, courtCase.challengerId)!;
   const newLocked = challenger.lockedBalance - courtCase.challengerStake;
   updateBalance(db, courtCase.challengerId, 'locked_balance', newLocked);
   recordLog(db, courtCase.challengerId, 'vouch_burn', 'earned', courtCase.challengerStake, challenger.lockedBalance, newLocked, courtCase.id, now);
-  if (courtCase.challengerStake > 0n) {
-    addToFeePool(db, courtCase.challengerStake);
+
+  const defendantShare = courtCase.challengerStake / 2n;
+  if (defendantShare > 0n) {
+    const defendant = getAccount(db, courtCase.defendantId)!;
+    const newDefEarned = defendant.earnedBalance + defendantShare;
+    updateBalance(db, courtCase.defendantId, 'earned_balance', newDefEarned);
+    recordLog(db, courtCase.defendantId, 'court_compensation', 'earned', defendantShare, defendant.earnedBalance, newDefEarned, courtCase.id, now);
   }
 
-  // Set protection window
   const protectionDays = getParam<number>(db, 'court.protection_window_days');
   const state = db.prepare('SELECT current_day FROM day_cycle_state WHERE id = 1').get() as { current_day: number };
   db.prepare('UPDATE accounts SET protection_window_end = ? WHERE id = ?').run(
     state.current_day + protectionDays, courtCase.defendantId,
   );
 
-  // Juror stakes: majority returned, minority burned
   const majorityVote: Vote = 'human';
   processJurorStakes(db, jurors, majorityVote, courtCase.id, now);
 }
@@ -467,13 +468,9 @@ function processJurorStakes(
       updateBalance(db, acctId, 'locked_balance', newLocked);
       recordLog(db, acctId, 'vouch_unlock', 'earned', stake, acct.earnedBalance, newEarned, caseId, now);
     } else {
-      // Burn stake (minority juror loses to fee pool, not the void).
       const newLocked = acct.lockedBalance - stake;
       updateBalance(db, acctId, 'locked_balance', newLocked);
       recordLog(db, acctId, 'vouch_burn', 'earned', stake, acct.lockedBalance, newLocked, caseId, now);
-      if (stake > 0n) {
-        addToFeePool(db, stake);
-      }
     }
   }
 }
@@ -555,6 +552,7 @@ export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
     if (reversed && originalCase.verdict === 'guilty' && verdict === 'innocent') {
       // Reverse guilty: reopen defendant account (but balance stays 0, burns are irreversible)
       db.prepare('UPDATE accounts SET is_active = 1 WHERE id = ?').run(appealCase.defendantId);
+      setEscrowed(db, appealCase.defendantId, false);
 
       // Burn the bounty from challenger (clawback)
       const challenger = getAccount(db, appealCase.challengerId)!;
@@ -568,9 +566,6 @@ export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
         const newEarned = challenger.earnedBalance - burnAmount;
         updateBalance(db, appealCase.challengerId, 'earned_balance', newEarned);
         recordLog(db, appealCase.challengerId, 'vouch_burn', 'earned', burnAmount, challenger.earnedBalance, newEarned, appealCaseId, now);
-        if (burnAmount > 0n) {
-          addToFeePool(db, burnAmount);
-        }
       }
 
       // Set protection window for defendant

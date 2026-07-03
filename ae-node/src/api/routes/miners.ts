@@ -85,19 +85,10 @@ export function minerRoutes(db: DatabaseSync) {
     }
   });
 
-  // POST /vouches - create a vouch (stake points on someone's humanity).
-  // Auth-required: the voucher IS the authenticated account. Pre-auth
-  // versions of this route accepted `voucherId` from the request body
-  // verbatim, which let any third party drain a victim's earned balance
-  // into vouches the victim didn't authorize. authMiddleware now verifies
-  // that the caller signed `{ vouchedId, stakeAmount }` with their own
-  // private key before we do anything with their balance.
+  // POST /vouches - create a vouch (WP v2: stake a percentage of holdings).
   router.post('/vouches', authMiddleware(db), (req, res) => {
     const voucherId = req.accountId!;
-    const { vouchedId, stakeAmount } = req.body.payload || req.body;
-    // Backwards-compat shim: older clients still POST a top-level voucherId
-    // alongside the envelope. If present it MUST match the signed account
-    // — otherwise the caller is trying to stake someone else's balance.
+    const { vouchedId, stakePercent } = req.body.payload || req.body;
     const claimedVoucherId =
       (req.body.payload && req.body.payload.voucherId) ?? req.body.voucherId;
     if (claimedVoucherId && claimedVoucherId !== voucherId) {
@@ -106,12 +97,12 @@ export function minerRoutes(db: DatabaseSync) {
         error: { code: 'VOUCHER_MISMATCH', message: 'voucherId does not match the authenticated account' },
       });
     }
-    if (!vouchedId || !stakeAmount) {
-      return res.status(400).json({ error: 'vouchedId and stakeAmount required' });
+    if (!vouchedId || stakePercent == null) {
+      return res.status(400).json({ error: 'vouchedId and stakePercent required' });
     }
 
     try {
-      const vouch = createVouch(db, voucherId, vouchedId, BigInt(stakeAmount));
+      const vouch = createVouch(db, voucherId, vouchedId, Number(stakePercent));
       res.json({ vouch: { ...vouch, stakeAmount: vouch.stakeAmount.toString() } });
     } catch (err) {
       res.status(400).json({ error: String(err) });

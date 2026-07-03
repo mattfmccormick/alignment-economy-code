@@ -25,6 +25,7 @@ export interface TransactionRow {
   netAmount: string;
   pointType: PointType;
   isInPerson: boolean;
+  recipientIsHuman: boolean;
   memo: string;
   signature: string;
   /**
@@ -81,10 +82,16 @@ export interface ITransactionStore {
 
   /**
    * Count of in-person transactions involving the account at or after the
-   * given timestamp. Used by the decay engine to compute activity offsets
-   * against percentHuman erosion.
+   * given timestamp. Legacy decay method; superseded by sumHumanTagCreditsSince.
    */
   countInPersonTransactionsSince(accountId: string, sinceTimestamp: number): number;
+
+  /**
+   * Sum of human-tag credits received by an account since a timestamp.
+   * WP v2: each recipientIsHuman tag contributes 2.5 × (tagger's percentHuman / 100).
+   * Used by the decay engine to compute activity offsets.
+   */
+  sumHumanTagCreditsSince(recipientId: string, sinceTimestamp: number): number;
 
   /**
    * Stamp a list of transactions with the block number that committed them.

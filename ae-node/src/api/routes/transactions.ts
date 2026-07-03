@@ -28,7 +28,7 @@ export function transactionRoutes(
   router.post('/', (req, res, next) => {
     try {
       const { payload, accountId, timestamp, signature } = req.body;
-      const { to, amount, pointType, isInPerson, memo, receiverSignature } = payload;
+      const { to, amount, pointType, isInPerson, recipientIsHuman, memo, receiverSignature } = payload;
 
       if (!to || amount == null || !pointType) {
         res.status(400).json({
@@ -62,6 +62,7 @@ export function transactionRoutes(
         amount: storageAmount,
         pointType: pointType as PointType,
         isInPerson: isInPerson ?? false,
+        recipientIsHuman: recipientIsHuman ?? false,
         memo: memo ?? '',
         timestamp,
         signature,
@@ -86,6 +87,7 @@ export function transactionRoutes(
             netAmount: result.netAmount.toString(),
             pointType: result.transaction.pointType,
             isInPerson: result.transaction.isInPerson,
+            recipientIsHuman: result.transaction.recipientIsHuman,
             receiverSignature: result.transaction.receiverSignature,
             memo: result.transaction.memo,
             signature: result.transaction.signature,

@@ -72,6 +72,7 @@ export interface WireTransaction {
   netAmount: string;
   pointType: 'active' | 'supportive' | 'ambient' | 'earned';
   isInPerson: boolean;
+  recipientIsHuman: boolean;
   /**
    * Receiver's countersignature (hex). Required (non-null) on isInPerson
    * transactions so a follower can re-verify dual consent before applying

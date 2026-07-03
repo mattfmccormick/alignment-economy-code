@@ -204,6 +204,7 @@ describe('Phase 49: Spec-driven two-runner bootstrap', () => {
       amount: txAmount.toString(),
       pointType: 'earned' as const,
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     const signature = signPayload(internalPayload, txTimestamp, ksA.account.privateKey);
@@ -216,6 +217,7 @@ describe('Phase 49: Spec-driven two-runner bootstrap', () => {
         amount: 100, // display
         pointType: 'earned',
         isInPerson: false,
+        recipientIsHuman: false,
         memo: '',
       },
     };

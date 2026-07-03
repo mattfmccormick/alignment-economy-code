@@ -231,7 +231,7 @@ describe('Phase 10: P2P Networking', () => {
 
     const mkTx = (id: string, ts: number) => ({
       id, from: 'a', to: 'b', amount: 100n, fee: 1n, netAmount: 99n,
-      pointType: 'earned' as const, isInPerson: false, memo: '', signature: '', timestamp: ts, blockNumber: null,
+      pointType: 'earned' as const, isInPerson: false, recipientIsHuman: false, memo: '', signature: '', timestamp: ts, blockNumber: null,
     });
 
     mempool.add(mkTx('zz-tx', 1000));

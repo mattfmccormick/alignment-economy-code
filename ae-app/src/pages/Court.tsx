@@ -13,6 +13,7 @@ interface MyCase {
   challengerId: string;
   defendantId: string;
   challengerStake: string;
+  challengerStakePercent?: number;
   verdict: string | null;
   createdAt: number;
   resolvedAt: number | null;
@@ -122,7 +123,12 @@ export function Court() {
                     ? `Challenger: ${c.challengerId.slice(0, 12)}…`
                     : `Defendant: ${c.defendantId.slice(0, 12)}…`}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">Stake: {c.challengerStake}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Stake: {c.challengerStakePercent != null ? `${c.challengerStakePercent}%` : c.challengerStake}
+                </p>
+                {c.isDefendant && !c.verdict && (
+                  <p className="text-xs text-red-400 mt-1">Earned transfers escrowed</p>
+                )}
                 {c.verdict && (
                   <p className={`text-sm mt-2 font-medium ${c.verdict === 'guilty' ? 'text-red-400' : 'text-teal'}`}>
                     Verdict: {c.verdict}

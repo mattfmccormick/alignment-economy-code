@@ -157,12 +157,10 @@ export const api = {
   getEvidenceScore: (accountId: string) =>
     request<{ score: number; vouchCount: number }>('GET', `/miners/evidence/score/${accountId}`),
 
-  // Vouches.
-  // Authenticated: the voucher (caller) signs `{ vouchedId, stakeAmount }`
-  // with their own private key. The route reads voucherId from the
-  // signature, not the body, so a third party can't stake someone
-  // else's balance.
-  createVouch: (envelope: { accountId: string; timestamp: number; signature: string; payload: { vouchedId: string; stakeAmount: number } }) =>
+  // Vouches (WP v2: percentage-based).
+  // The voucher signs `{ vouchedId, stakePercent }` — the backend computes
+  // the actual locked amount from the voucher's total holdings.
+  createVouch: (envelope: { accountId: string; timestamp: number; signature: string; payload: { vouchedId: string; stakePercent: number } }) =>
     request<any>('POST', '/miners/vouches', envelope),
 
   getVouches: (accountId: string) =>

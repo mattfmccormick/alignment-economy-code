@@ -20,11 +20,7 @@ import { signPayload } from '../lib/crypto';
 import { displayPoints, truncateId, timeAgo } from '../lib/formatting';
 
 const PRECISION = 100_000_000n;
-const MIN_STAKE_PERCENT = 5n; // matches white-paper default vouch policy
-
-function pointsToRaw(displayPoints: number): bigint {
-  return BigInt(Math.round(displayPoints * Number(PRECISION)));
-}
+const MIN_STAKE_PERCENT = 5; // matches white-paper default vouch policy
 
 export default function Vouch() {
   const wallet = loadMinerWallet();
@@ -87,35 +83,37 @@ export default function Vouch() {
     );
   }
 
-  // Earned balance is the source of stake. Treat both string and {balances} shapes
-  // safely — older API responses returned a flat earnedBalance, newer ones return
-  // a nested balances object.
+  // Earned + locked = total holdings. Treat both string and {balances} shapes
+  // safely — older API responses returned flat fields, newer ones nest under balances.
   const earnedRaw = BigInt(
     (account as any)?.earnedBalance ?? account?.balances?.earned ?? '0',
   );
-  const minStakeRaw = (earnedRaw * MIN_STAKE_PERCENT) / 100n;
+  const lockedRaw = BigInt(
+    (account as any)?.lockedBalance ?? account?.balances?.locked ?? '0',
+  );
+  const totalHoldings = earnedRaw + lockedRaw;
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold">Vouch</h2>
         <p className="text-sm text-muted mt-1">
-          Stake your earned points to attest someone is human. Vouches feed their
-          %Human score; if they're later challenged and judged not human, your
-          stake burns.
+          Stake a percentage of your holdings to attest someone is human. Vouches
+          feed their %Human score; if they're later challenged and judged not
+          human, your stake burns.
         </p>
       </div>
 
       {/* Stake budget summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
-          label="Your Earned"
-          value={displayPoints(earnedRaw.toString()) + ' pts'}
-          hint="Source of stake"
+          label="Total Holdings"
+          value={displayPoints(totalHoldings.toString()) + ' pts'}
+          hint="Earned + locked (stake base)"
         />
         <StatCard
-          label="Min Stake (5%)"
-          value={displayPoints(minStakeRaw.toString()) + ' pts'}
+          label="Min Stake"
+          value={`${MIN_STAKE_PERCENT}%`}
           hint="Per vouch policy"
         />
         <StatCard
@@ -130,8 +128,8 @@ export default function Vouch() {
       <IncomingRequestsCard
         requests={requests?.incoming ?? []}
         myAccountId={wallet.accountId}
-        minStakeRaw={minStakeRaw}
         earnedRaw={earnedRaw}
+        totalHoldings={totalHoldings}
         onChanged={refresh}
       />
 
@@ -232,12 +230,12 @@ function SendRequestCard({ fromId, onSent }: { fromId: string; onSent: () => voi
 // ---------- Incoming requests ----------
 
 function IncomingRequestsCard({
-  requests, myAccountId, minStakeRaw, earnedRaw, onChanged,
+  requests, myAccountId, earnedRaw, totalHoldings, onChanged,
 }: {
   requests: any[];
   myAccountId: string;
-  minStakeRaw: bigint;
   earnedRaw: bigint;
+  totalHoldings: bigint;
   onChanged: () => void;
 }) {
   return (
@@ -257,8 +255,8 @@ function IncomingRequestsCard({
               key={r.id}
               request={r}
               myAccountId={myAccountId}
-              minStakeRaw={minStakeRaw}
               earnedRaw={earnedRaw}
+              totalHoldings={totalHoldings}
               onChanged={onChanged}
             />
           ))}
@@ -269,41 +267,41 @@ function IncomingRequestsCard({
 }
 
 function IncomingRow({
-  request, myAccountId, minStakeRaw, earnedRaw, onChanged,
+  request, myAccountId, earnedRaw, totalHoldings, onChanged,
 }: {
   request: any;
   myAccountId: string;
-  minStakeRaw: bigint;
   earnedRaw: bigint;
+  totalHoldings: bigint;
   onChanged: () => void;
 }) {
-  const minStakeDisplay = Number(minStakeRaw) / Number(PRECISION);
-  const [stakeInput, setStakeInput] = useState<string>(minStakeDisplay.toFixed(2));
+  const [stakePercent, setStakePercent] = useState<string>(String(MIN_STAKE_PERCENT));
   const [busy, setBusy] = useState<'accept' | 'decline' | null>(null);
   const [rowErr, setRowErr] = useState('');
 
+  const pct = Number(stakePercent);
+  const previewAmount = totalHoldings > 0n
+    ? (totalHoldings * BigInt(Math.round(pct * 100))) / 10000n
+    : 0n;
+
   const accept = async () => {
     setRowErr('');
-    const stakeNum = Number(stakeInput);
-    if (!isFinite(stakeNum) || stakeNum <= 0) { setRowErr('Stake must be a positive number.'); return; }
-    const stakeRaw = pointsToRaw(stakeNum);
-    if (stakeRaw < minStakeRaw) {
-      setRowErr(`Stake below minimum ${displayPoints(minStakeRaw.toString())} pts (5% of earned).`);
+    if (!isFinite(pct) || pct <= 0) { setRowErr('Stake must be a positive percentage.'); return; }
+    if (pct > 100) { setRowErr('Stake cannot exceed 100%.'); return; }
+    if (pct < MIN_STAKE_PERCENT) {
+      setRowErr(`Minimum stake is ${MIN_STAKE_PERCENT}% of your holdings.`);
       return;
     }
-    if (stakeRaw > earnedRaw) {
-      setRowErr(`Stake exceeds your earned balance.`);
+    if (previewAmount > earnedRaw) {
+      setRowErr('Stake exceeds your available earned balance.');
       return;
     }
     setBusy('accept');
     try {
-      // Sign the vouch with the miner's private key. The route now reads
-      // voucherId from the signature, not the body, so a third party
-      // can't drain another miner's earned balance.
       const w = loadMinerWallet();
       if (!w) { setRowErr('Wallet not loaded. Sign in again.'); return; }
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { vouchedId: request.fromId, stakeAmount: Number(stakeRaw) };
+      const payload = { vouchedId: request.fromId, stakePercent: pct };
       const signature = signPayload(payload, ts, w.privateKey);
       const v = await api.submitVouch({
         accountId: myAccountId,
@@ -315,8 +313,6 @@ function IncomingRow({
         setRowErr(v.error?.message ?? 'Failed to lock stake.');
         return;
       }
-      // updateVouchRequest is now signed too; only the request's recipient
-      // (this miner) can accept it. Reuse the wallet we already loaded.
       const ts2 = Math.floor(Date.now() / 1000);
       const payload2 = { status: 'accepted' as const };
       const sig2 = signPayload(payload2, ts2, w.privateKey);
@@ -372,14 +368,15 @@ function IncomingRow({
         <div className="flex items-center gap-2 shrink-0">
           <input
             type="number"
-            min={0}
-            step={0.01}
-            value={stakeInput}
-            onChange={(e) => setStakeInput(e.target.value)}
-            className="w-24 bg-card border border-border rounded px-2 py-1.5 text-sm text-right tabular-nums"
+            min={MIN_STAKE_PERCENT}
+            max={100}
+            step={1}
+            value={stakePercent}
+            onChange={(e) => setStakePercent(e.target.value)}
+            className="w-20 bg-card border border-border rounded px-2 py-1.5 text-sm text-right tabular-nums"
             disabled={busy !== null}
           />
-          <span className="text-[11px] text-muted">pts</span>
+          <span className="text-[11px] text-muted">%</span>
           <button
             onClick={accept}
             disabled={busy !== null}
@@ -396,6 +393,11 @@ function IncomingRow({
           </button>
         </div>
       </div>
+      {previewAmount > 0n && (
+        <p className="text-[11px] text-muted mt-1">
+          ≈ {displayPoints(previewAmount.toString())} pts will be locked
+        </p>
+      )}
       {rowErr && <p className="text-xs text-red mt-2">{rowErr}</p>}
     </li>
   );
@@ -448,8 +450,9 @@ function ActiveVouchesCard({ received, given }: { received: any[]; given: any[] 
             {received.map((v) => (
               <li key={v.id} className="bg-bg border border-border/50 rounded p-3 flex items-center justify-between gap-3">
                 <div className="text-xs font-mono text-muted truncate">{truncateId(v.voucherId)}</div>
-                <div className="text-xs tabular-nums shrink-0">
-                  {displayPoints(v.stakeAmount)} pts
+                <div className="text-xs tabular-nums shrink-0 text-right">
+                  <div>{v.stakedPercentage ?? '—'}%</div>
+                  <div className="text-muted">{displayPoints(v.stakeAmount)} pts</div>
                 </div>
               </li>
             ))}
@@ -469,8 +472,9 @@ function ActiveVouchesCard({ received, given }: { received: any[]; given: any[] 
             {given.map((v) => (
               <li key={v.id} className="bg-bg border border-border/50 rounded p-3 flex items-center justify-between gap-3">
                 <div className="text-xs font-mono text-muted truncate">→ {truncateId(v.vouchedId)}</div>
-                <div className="text-xs tabular-nums shrink-0">
-                  {displayPoints(v.stakeAmount)} pts locked
+                <div className="text-xs tabular-nums shrink-0 text-right">
+                  <div>{v.stakedPercentage ?? '—'}% locked</div>
+                  <div className="text-muted">{displayPoints(v.stakeAmount)} pts</div>
                 </div>
               </li>
             ))}

@@ -233,6 +233,7 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       amount: txAmount.toString(),
       pointType: 'active' as const,
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     const txSig = signPayload(payload, txTimestamp, senderKeys.privateKey);
@@ -242,6 +243,7 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       amount: txAmount,
       pointType: 'active',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
       timestamp: txTimestamp,
       signature: txSig,
@@ -273,6 +275,7 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       netAmount: txRow.netAmount,
       pointType: txRow.pointType,
       isInPerson: txRow.isInPerson,
+      recipientIsHuman: txRow.recipientIsHuman ?? false,
       memo: txRow.memo,
       signature: txRow.signature,
       timestamp: txRow.timestamp,
@@ -387,6 +390,7 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       amount: txAmount.toString(),
       pointType: 'active' as const,
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     const txSig = signPayload(txPayload, txTimestamp, senderKeys.privateKey);
@@ -396,6 +400,7 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       amount: txAmount,
       pointType: 'active',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
       timestamp: txTimestamp,
       signature: txSig,
@@ -410,6 +415,7 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       netAmount: txRow.netAmount,
       pointType: txRow.pointType,
       isInPerson: txRow.isInPerson,
+      recipientIsHuman: txRow.recipientIsHuman ?? false,
       memo: txRow.memo,
       signature: txRow.signature,
       timestamp: txRow.timestamp,

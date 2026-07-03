@@ -136,7 +136,7 @@ describe('Phase 69: inheritance + dead-man-switch', () => {
     const sender = makeParty(db, 1000);
     const recipient = makeParty(db);
     const ts = 1_700_000_000;
-    const payload = { from: sender.accountId, to: recipient.accountId, amount: pts(50).toString(), pointType: 'earned', isInPerson: false, memo: '' };
+    const payload = { from: sender.accountId, to: recipient.accountId, amount: pts(50).toString(), pointType: 'earned', isInPerson: false, recipientIsHuman: false, memo: '' };
     const sig = signPayload(payload, ts, sender.privateKey);
     processTransaction(db, {
       from: sender.accountId,
@@ -144,6 +144,7 @@ describe('Phase 69: inheritance + dead-man-switch', () => {
       amount: pts(50),
       pointType: 'earned',
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
       timestamp: ts,
       signature: sig,
@@ -165,11 +166,11 @@ describe('Phase 69: inheritance + dead-man-switch', () => {
     const ts0 = 1_700_000_000;
 
     // Owner sends, starting the clock.
-    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, memo: '' };
+    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, recipientIsHuman: false, memo: '' };
     const sig = signPayload(payload, ts0, owner.privateKey);
     processTransaction(db, {
       from: owner.accountId, to: a.accountId, amount: pts(1), pointType: 'earned',
-      isInPerson: false, memo: '', timestamp: ts0, signature: sig,
+      isInPerson: false, recipientIsHuman: false, memo: '', timestamp: ts0, signature: sig,
     });
 
     setInheritance(db, owner.accountId, {
@@ -195,11 +196,11 @@ describe('Phase 69: inheritance + dead-man-switch', () => {
     const b = makeParty(db);
     const ts0 = 1_700_000_000;
 
-    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, memo: '' };
+    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, recipientIsHuman: false, memo: '' };
     const sig = signPayload(payload, ts0, owner.privateKey);
     processTransaction(db, {
       from: owner.accountId, to: a.accountId, amount: pts(1), pointType: 'earned',
-      isInPerson: false, memo: '', timestamp: ts0, signature: sig,
+      isInPerson: false, recipientIsHuman: false, memo: '', timestamp: ts0, signature: sig,
     });
 
     setInheritance(db, owner.accountId, {
@@ -232,11 +233,11 @@ describe('Phase 69: inheritance + dead-man-switch', () => {
     const ts0 = 1_700_000_000;
 
     // Arm the switch.
-    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, memo: '' };
+    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, recipientIsHuman: false, memo: '' };
     const sig = signPayload(payload, ts0, owner.privateKey);
     processTransaction(db, {
       from: owner.accountId, to: a.accountId, amount: pts(1), pointType: 'earned',
-      isInPerson: false, memo: '', timestamp: ts0, signature: sig,
+      isInPerson: false, recipientIsHuman: false, memo: '', timestamp: ts0, signature: sig,
     });
 
     setInheritance(db, owner.accountId, {
@@ -281,11 +282,11 @@ describe('Phase 69: inheritance + dead-man-switch', () => {
     const stranger = makeParty(db);
     const ts0 = 1_700_000_000;
 
-    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, memo: '' };
+    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, recipientIsHuman: false, memo: '' };
     const sig = signPayload(payload, ts0, owner.privateKey);
     processTransaction(db, {
       from: owner.accountId, to: a.accountId, amount: pts(1), pointType: 'earned',
-      isInPerson: false, memo: '', timestamp: ts0, signature: sig,
+      isInPerson: false, recipientIsHuman: false, memo: '', timestamp: ts0, signature: sig,
     });
 
     setInheritance(db, owner.accountId, {
@@ -311,11 +312,11 @@ describe('Phase 69: inheritance + dead-man-switch', () => {
     const eve = makeParty(db);
     const ts0 = 1_700_000_000;
 
-    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, memo: '' };
+    const payload = { from: owner.accountId, to: a.accountId, amount: pts(1).toString(), pointType: 'earned', isInPerson: false, recipientIsHuman: false, memo: '' };
     const sig = signPayload(payload, ts0, owner.privateKey);
     processTransaction(db, {
       from: owner.accountId, to: a.accountId, amount: pts(1), pointType: 'earned',
-      isInPerson: false, memo: '', timestamp: ts0, signature: sig,
+      isInPerson: false, recipientIsHuman: false, memo: '', timestamp: ts0, signature: sig,
     });
 
     setInheritance(db, owner.accountId, {

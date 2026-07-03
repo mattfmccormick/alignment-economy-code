@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_PARAMS } from './defaults.js';
+import { validateParamChange } from './governance.js';
 import { runTransaction } from '../db/connection.js';
 
 const cache = new Map<string, unknown>();
@@ -39,13 +40,21 @@ export function getParam<T = unknown>(db: DatabaseSync, key: string): T {
   return parsed;
 }
 
+// skipGovernance: bypass governance validation for admin/dev operations.
+// Governance validation enforces WP v2 Appendix A rules (constitutional
+// immutability, bounded ranges). Admin and dev seed scripts may need to
+// set values outside normal governance bounds (e.g., jury_size=1 for
+// small-network testing).
 export function setParam(
   db: DatabaseSync,
   key: string,
   value: unknown,
   updatedBy?: string,
   signature?: string,
+  skipGovernance?: boolean,
 ): void {
+  if (!skipGovernance) validateParamChange(key, value);
+
   const now = Math.floor(Date.now() / 1000);
   const jsonValue = JSON.stringify(value);
 

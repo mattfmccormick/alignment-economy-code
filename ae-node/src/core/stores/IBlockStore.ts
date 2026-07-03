@@ -53,6 +53,13 @@ export interface IBlockStore {
   findCommitCertificate(blockNumber: number): CommitCertificate | null;
 
   /**
+   * Delete blocks with number > 0 (preserve genesis) AND number <= cutoff.
+   * Returns the count of deleted rows. Used by the 7-year rolling-window
+   * pruning mechanism (WP v2 §7).
+   */
+  pruneBlocksThrough(cutoffNumber: number): number;
+
+  /**
    * Persist the validator set as it was at block N. Used by BFT chains so
    * a historical cert can be verified against the contemporaneous set
    * even after validators have been slashed or deregistered. Idempotent.

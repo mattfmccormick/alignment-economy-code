@@ -15,6 +15,7 @@ import {
 } from './account.js';
 import { recordLog, transactionStore } from './transaction.js';
 import { runTransaction } from '../db/connection.js';
+import { rebalanceVouchLocks } from '../verification/vouching.js';
 import type { CyclePhase, RebaseEvent } from './types.js';
 
 // --------------- Day cycle state ---------------
@@ -310,6 +311,7 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
 export function runExpireAndRebase(db: DatabaseSync): RebaseEvent | null {
   expireDaily(db);                  // phase: expiring
   const event = rebase(db);         // phase: rebasing
+  rebalanceVouchLocks(db);          // WP v2: percentage-based locks scale with balance
   setPhase(db, 'between_cycles');   // blackout: daily-point txs blocked
   return event;
 }

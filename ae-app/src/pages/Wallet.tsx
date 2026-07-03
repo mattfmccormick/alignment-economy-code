@@ -78,6 +78,28 @@ export function Wallet() {
         lockedBalance={account.lockedBalance}
       />
 
+      {account.isEscrowed && (
+        <div className="mx-4 bg-red-500/10 rounded-xl p-4 border border-red-500/40">
+          <div className="flex items-start gap-3">
+            <span className="text-red-400 text-lg shrink-0">⚠</span>
+            <div>
+              <p className="text-sm font-medium text-red-300">Account Escrowed</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                A court case is pending against this account. Outbound earned-point
+                transfers are blocked until the case resolves. Daily point spending
+                is unaffected.
+              </p>
+              <Link
+                to="/court"
+                className="inline-block text-xs text-red-300 mt-2 hover:text-red-200"
+              >
+                View case details →
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       <VerificationStatus percentHuman={account.percentHuman ?? 0} />
 
       <div className="bg-navy rounded-xl p-4 mx-4 border border-navy-light space-y-3">
