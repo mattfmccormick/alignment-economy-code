@@ -19,7 +19,6 @@ import { loadMinerWallet } from '../lib/keys';
 import { signPayload } from '../lib/crypto';
 import { displayPoints, truncateId, timeAgo } from '../lib/formatting';
 
-const PRECISION = 100_000_000n;
 const MIN_STAKE_PERCENT = 5; // matches white-paper default vouch policy
 
 export default function Vouch() {

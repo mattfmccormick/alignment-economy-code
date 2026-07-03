@@ -43,7 +43,7 @@ import { runTransaction } from '../../db/connection.js';
 import { getAccount, updateBalance } from '../account.js';
 import { recordLog } from '../transaction.js';
 import { SqliteValidatorSet } from './SqliteValidatorSet.js';
-import { verifyVote, type Vote } from './votes.js';
+import { verifyVote } from './votes.js';
 import { voteId } from './votes.js';
 import type { EquivocationEvidence } from './vote-aggregator.js';
 

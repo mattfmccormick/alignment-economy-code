@@ -98,6 +98,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       case '--help':
       case '-h':
         usage();
+        break;
       default:
         console.error(`Unknown flag: ${a}`);
         usage();

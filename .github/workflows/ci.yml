@@ -1,0 +1,68 @@
+# CI for the three core apps: ae-node (protocol), ae-app (wallet), ae-miner (dashboard).
+#
+# One job per app. Every push to main and every pull request runs them, so a
+# broken change can't merge silently. platform-server has its own workflow
+# (platform-server.yml); this file deliberately does not touch it.
+#
+# ae-node is the money + consensus core: it builds (tsc) and runs the full
+# node:test suite. The frontends lint and type-check via their build step.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ae-node:
+    name: ae-node (build + test)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ae-node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ae-node/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  ae-app:
+    name: ae-app (lint + build)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ae-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ae-app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  ae-miner:
+    name: ae-miner (lint + build)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ae-miner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ae-miner/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

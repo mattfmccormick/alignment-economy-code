@@ -5,6 +5,9 @@ import { getAccount } from '../../core/account.js';
 import { getMinerByAccount } from '../../mining/registration.js';
 
 declare global {
+  // Module augmentation of Express's Request is the standard pattern here;
+  // it genuinely requires `namespace`, so the rule is disabled for this block.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       accountId?: string;

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import WebSocket, { WebSocketServer } from 'ws';
+import { WebSocketServer } from 'ws';
 import { createServer, type Server } from 'http';
 import { PeerManager } from './peer.js';
 import { Mempool } from './mempool.js';

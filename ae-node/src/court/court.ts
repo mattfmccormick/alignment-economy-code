@@ -10,7 +10,7 @@ import { burnAllVouchesOnAccount } from '../verification/vouching.js';
 import { getCompositeAccuracy } from '../mining/accuracy.js';
 import { SqliteCourtStore } from '../core/stores/SqliteCourtStore.js';
 import type { ICourtStore } from '../core/stores/ICourtStore.js';
-import type { CourtCase, CaseType, Vote, Verdict, JuryAssignment, CaseArgument, ArgumentRole } from './types.js';
+import type { CourtCase, CaseType, Vote, Verdict, CaseArgument, ArgumentRole } from './types.js';
 
 export function courtStore(db: DatabaseSync): ICourtStore {
   return new SqliteCourtStore(db);
@@ -282,7 +282,6 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
 
   // Deterministic random selection
   const seed = sha256(caseId + blockHash);
-  const selected: typeof pool = [];
   const targetSize = Math.min(jurySize, pool.length);
   // Make it odd
   const actualSize = targetSize % 2 === 0 ? targetSize - 1 : targetSize;
@@ -380,10 +379,11 @@ function applyGuiltyVerdict(
 ): void {
   const defendant = getAccount(db, courtCase.defendantId)!;
   const bountyPercent = getParam<number>(db, 'court.bounty_percent');
-  const burnPercent = getParam<number>(db, 'court.burn_percent');
 
+  // Challenger receives the bounty; the defendant's entire earned balance is
+  // then zeroed (below). Net effect: bounty transferred, remainder burned,
+  // which is why burn_percent isn't read separately here.
   const bountyAmount = (defendant.earnedBalance * BigInt(bountyPercent)) / 100n;
-  const burnAmount = (defendant.earnedBalance * BigInt(burnPercent)) / 100n;
 
   // Close defendant account
   deactivateAccount(db, courtCase.defendantId);
@@ -554,13 +554,10 @@ export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
       db.prepare('UPDATE accounts SET is_active = 1 WHERE id = ?').run(appealCase.defendantId);
       setEscrowed(db, appealCase.defendantId, false);
 
-      // Burn the bounty from challenger (clawback)
+      // Burn the bounty from challenger (clawback). The original bounty amount
+      // can't be reconstructed once the defendant balance is gone, so we claw
+      // back the challenger's stake instead (it was already unlocked on reversal).
       const challenger = getAccount(db, appealCase.challengerId)!;
-      const bountyPercent = getParam<number>(db, 'court.bounty_percent');
-      // Recalculate original bounty based on what was taken from defendant
-      // The bounty was defendant.earnedBalance * bountyPercent / 100
-      // Since we can't know the exact amount anymore, burn challenger's stake instead
-      // Actually, the challenger got bounty + stake back. Burn the stake (it was already unlocked).
       const burnAmount = appealCase.challengerStake;
       if (challenger.earnedBalance >= burnAmount) {
         const newEarned = challenger.earnedBalance - burnAmount;

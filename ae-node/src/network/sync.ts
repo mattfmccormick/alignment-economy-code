@@ -6,6 +6,7 @@ import {
   validateIncomingBlock,
   type IncomingBlockPayload,
 } from './block-validator.js';
+import type { WebSocket } from 'ws';
 import type { PeerManager } from './peer.js';
 import type { IConsensusEngine } from '../core/consensus/IConsensusEngine.js';
 import type { IValidatorSet } from '../core/consensus/IValidatorSet.js';
@@ -282,7 +283,7 @@ export class ChainSync {
       }
 
       // ws is the raw WebSocket passed through from peer.ts
-      this.peerManager.sendToWs(ws as any, 'blocks', blocks);
+      this.peerManager.sendToWs(ws as WebSocket, 'blocks', blocks);
     });
 
     // ── Live gossip: a freshly produced block arrives outside of sync.

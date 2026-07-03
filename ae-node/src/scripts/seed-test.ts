@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { initializeSchema } from '../db/schema.js';
 import { seedParams, setParam } from '../config/params.js';
-import { createAccount, getAccount } from '../core/account.js';
+import { createAccount } from '../core/account.js';
 import { createGenesisBlock, getLatestBlock } from '../core/block.js';
 import { runDayCycle, getCycleState } from '../core/day-cycle.js';
 import { registerMiner } from '../mining/registration.js';
@@ -69,11 +69,7 @@ const wifeMiner = registerMiner(db, wife.account.id);
 runDayCycle(db);
 const state = getCycleState(db);
 
-// 6. Get updated balances
-const mattAcct = getAccount(db, matt.account.id)!;
-const wifeAcct = getAccount(db, wife.account.id)!;
-
-// 7. Save keys to a file for easy reference
+// 6. Save keys to a file for easy reference
 const keyFile = {
   warning: 'KEEP THIS FILE SAFE. These are real private keys for your test accounts.',
   created: new Date().toISOString(),

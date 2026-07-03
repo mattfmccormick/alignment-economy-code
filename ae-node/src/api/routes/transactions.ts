@@ -3,7 +3,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { processTransaction, TransactionInput, transactionStore } from '../../core/transaction.js';
 import { PRECISION } from '../../core/constants.js';
 import { getAccount } from '../../core/account.js';
-import { authMiddleware } from '../middleware/auth.js';
 import { eventBus } from '../websocket.js';
 import type { PointType } from '../../core/types.js';
 import type { WireTransaction } from '../../network/block-validator.js';

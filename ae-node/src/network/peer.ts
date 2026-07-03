@@ -262,7 +262,7 @@ export class PeerManager extends EventEmitter {
       }
       case 'new_block': {
         if (!this.isAuthenticatedSender(msg.publicKey, ws)) return;
-        const blockHash = (msg.data as any).hash;
+        const blockHash = (msg.data as { hash: string }).hash;
         if (!this.markSeenAndAccept(this.seenBlocks, blockHash, 1000)) return;
         // The third arg (publicKey) lets validators bind producer identity to
         // the cryptographic key, not just the spoofable senderId string.
@@ -275,7 +275,7 @@ export class PeerManager extends EventEmitter {
       }
       case 'new_transaction': {
         if (!this.isAuthenticatedSender(msg.publicKey, ws)) return;
-        const txId = (msg.data as any).id;
+        const txId = (msg.data as { id: string }).id;
         if (!this.markSeenAndAccept(this.seenTx, txId, 5000)) return;
         this.emit('transaction:received', msg.data, msg.senderId);
         this.relayGossip('new_transaction', msg.data, msg.senderId);

@@ -33,7 +33,7 @@ export function useAccount(accountId: string | null) {
       } else {
         setError(res.error?.message || 'Failed to load account');
       }
-    } catch (e) {
+    } catch {
       setError('Network error');
     } finally {
       setLoading(false);

@@ -23,10 +23,11 @@ export function distributeFees(
 ): FeeDistribution | null {
   if (totalFees === 0n) return null;
 
+  // tier2 pool and baseline are derived by subtraction below (tier2Pool =
+  // totalFees - tier1Pool; tier2Baseline = tier2Pool - lottery), so only the
+  // tier1 and lottery shares need to be read from params.
   const tier1FeeShare = getParam<number>(db, 'mining.tier1_fee_share');
-  const tier2FeeShare = getParam<number>(db, 'mining.tier2_fee_share');
   const tier2LotteryShare = getParam<number>(db, 'mining.tier2_lottery_share');
-  const tier2BaselineShare = getParam<number>(db, 'mining.tier2_baseline_share');
 
   const tier1Miners = getActiveMiners(db, 1);
   const tier2Miners = getActiveMiners(db, 2);

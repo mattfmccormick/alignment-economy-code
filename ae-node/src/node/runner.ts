@@ -14,7 +14,7 @@ import {
   getNextCycleAt,
   setNextCycleAt,
 } from '../core/day-cycle.js';
-import { createApp, startServer } from '../api/server.js';
+import { startServer } from '../api/server.js';
 import { AENode } from '../network/node.js';
 import { loadOrCreateNodeIdentity, type NodeIdentity } from '../network/node-identity.js';
 import { payloadToBlock, type IncomingBlockPayload, type WireTransaction } from '../network/block-validator.js';

@@ -31,7 +31,7 @@ import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { getAccount } from '../../core/account.js';
 import { getCycleState } from '../../core/day-cycle.js';
-import { registerProduct, getProduct } from '../../tagging/products.js';
+import { registerProduct } from '../../tagging/products.js';
 import { registerSpace, getSpace } from '../../tagging/spaces.js';
 import {
   submitSupportiveTags,
@@ -188,7 +188,7 @@ export function tagRoutes(db: DatabaseSync): Router {
     const owner = getAccount(db, accountId);
     if (!owner) return res.status(404).json({ error: 'account not found' });
 
-    const inputs: TagInput[] = tags.map((t: any) => ({
+    const inputs: TagInput[] = tags.map((t: Record<string, unknown>) => ({
       productId: String(t.productId),
       minutesUsed: Number(t.minutesUsed),
     }));
@@ -206,8 +206,9 @@ export function tagRoutes(db: DatabaseSync): Router {
           status: t.status,
         })),
       });
-    } catch (e: any) {
-      res.status(400).json({ error: e?.message ?? 'invalid submission' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'invalid submission';
+      res.status(400).json({ error: message });
     }
   });
 
@@ -246,7 +247,7 @@ export function tagRoutes(db: DatabaseSync): Router {
     const owner = getAccount(db, accountId);
     if (!owner) return res.status(404).json({ error: 'account not found' });
 
-    const inputs: AmbientTagInput[] = tags.map((t: any) => ({
+    const inputs: AmbientTagInput[] = tags.map((t: Record<string, unknown>) => ({
       spaceId: String(t.spaceId),
       minutesOccupied: Number(t.minutesOccupied),
     }));
@@ -264,8 +265,9 @@ export function tagRoutes(db: DatabaseSync): Router {
           status: t.status,
         })),
       });
-    } catch (e: any) {
-      res.status(400).json({ error: e?.message ?? 'invalid submission' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'invalid submission';
+      res.status(400).json({ error: message });
     }
   });
 

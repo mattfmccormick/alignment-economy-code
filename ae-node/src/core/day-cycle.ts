@@ -1,5 +1,4 @@
 import { DatabaseSync } from 'node:sqlite';
-import { v4 as uuid } from 'uuid';
 import {
   DAILY_ACTIVE_POINTS,
   DAILY_SUPPORTIVE_POINTS,
@@ -20,14 +19,6 @@ import type { CyclePhase, RebaseEvent } from './types.js';
 
 // --------------- Day cycle state ---------------
 
-export function getDayCycleState(db: DatabaseSync): { currentDay: number; cyclePhase: CyclePhase; phaseStartedAt: number } {
-  return db.prepare('SELECT current_day, cycle_phase, phase_started_at FROM day_cycle_state WHERE id = 1').get() as {
-    current_day: number;
-    cycle_phase: CyclePhase;
-    phase_started_at: number;
-  } & { currentDay?: number } |
-  any;
-}
 
 export function getCycleState(db: DatabaseSync): { currentDay: number; cyclePhase: CyclePhase; phaseStartedAt: number } {
   const row = db.prepare('SELECT current_day, cycle_phase, phase_started_at FROM day_cycle_state WHERE id = 1').get() as {

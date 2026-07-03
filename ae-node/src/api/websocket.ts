@@ -81,11 +81,6 @@ export function setupWebSocket(server: Server, db: DatabaseSync): WebSocketServe
     });
   });
 
-  // Route events to appropriate clients
-  eventBus.on('*', (eventType: string, data: unknown) => {
-    // This won't actually fire with EventEmitter, we use specific events below
-  });
-
   // General events: broadcast to all
   for (const evt of ['block:new', 'rebase:complete', 'network:day-change']) {
     eventBus.on(evt, (data) => {

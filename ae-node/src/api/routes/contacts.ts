@@ -70,8 +70,9 @@ export function contactRoutes(db: DatabaseSync) {
       ).run(id, ownerId, contactAccountId, nickname || '', now);
 
       res.json({ id, ownerId, contactAccountId, nickname: nickname || '' });
-    } catch (err: any) {
-      if (err.message?.includes('UNIQUE')) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('UNIQUE')) {
         return res.status(409).json({ error: 'Contact already exists' });
       }
       throw err;

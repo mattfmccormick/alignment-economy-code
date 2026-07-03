@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src",
     "dev": "tsx watch src/node/cli.ts",
     "start": "node dist/node/cli.js",
     "test": "tsx --test tests/*.test.ts",
@@ -25,11 +26,15 @@
     "ws": "^8.20.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/express": "^5.0.6",
     "@types/node": "^22.10.0",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
+    "eslint": "^9.39.4",
+    "globals": "^17.7.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.58.1"
   }
 }
