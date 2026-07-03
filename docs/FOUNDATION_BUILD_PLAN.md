@@ -28,14 +28,16 @@ Last updated: July 3, 2026.
 - **Group C: not started.**
 - **Group D: tracked below.**
 
-CI status: the ae-node job runs the **deterministic** suite (65 files: money,
-court, verification, mining, crypto, rebase, tagging, API) as the blocking gate.
-The 15 multi-runner BFT/consensus/sync E2E tests (renamed `*.e2e.ts`) run as a
-**non-blocking** step because their fixed `wait()` delays flake on GitHub's
-slower shared runners — they pass locally. Run `npm run test:e2e` (or
-`test:all`) to exercise them locally. Stabilizing them with event-based waits so
-they can rejoin the gate is D9. The frontend jobs install with
-`--legacy-peer-deps` (D6); ae-app is lint-only (D8).
+CI status: the ae-node job runs the **deterministic** suite (~58 files: money,
+court, verification, mining, crypto, rebase, tagging, API, block/tx/validator
+logic) as the blocking gate. Every test that spins up a real multi-node P2P
+network with timing-based `wait()` synchronization (~21 files) is renamed
+`*.e2e.ts` and runs as a **non-blocking** step — those flake on GitHub's slower
+shared runners even though they pass locally. The rule used to classify: any
+test using `await wait()` with the runner/PeerManager harness is E2E. Run
+`npm run test:e2e` (or `test:all`) to exercise them locally. Stabilizing them
+with event-based waits so they can rejoin the gate is D9. The frontend jobs
+install with `--legacy-peer-deps` (D6); ae-app is lint-only (D8).
 
 ## Why this plan exists
 
