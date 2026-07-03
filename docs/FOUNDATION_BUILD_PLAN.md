@@ -14,9 +14,23 @@ Last updated: July 3, 2026.
     The frontends' pre-existing `any` warnings on API plumbing are demoted to
     tracked warnings (see Group D) so their build gate is meaningful today; the
     generated `dev-dist/` service-worker files are now excluded from linting.
-- **Group B: not started.**
+- **Group B: in progress.**
+  - B1 (typed errors): started. `core/errors.ts` adds an `AppError` base with
+    typed subclasses (Validation, InsufficientBalance, Auth, Forbidden, NotFound,
+    Conflict). `errorHandler.ts` now reads status/code off `AppError` and, crucially,
+    **no longer leaks internal error messages on unexpected 500s** (they're logged
+    server-side and the client gets a generic body). The money path
+    (`transaction.ts`, `account.ts`) is migrated to typed errors. The legacy
+    substring matcher is retained as a fallback until the remaining throw sites
+    (court, verification, mining, tagging) are migrated — that migration and the
+    removal of the fallback is the rest of B1.
+  - B2, B3: not started.
 - **Group C: not started.**
 - **Group D: tracked below.**
+
+CI status: the ae-node job (build + full test suite) passes on GitHub's Linux
+runners, which is the authoritative gate. The frontend jobs install with
+`--legacy-peer-deps` (see Group D6).
 
 ## Why this plan exists
 
@@ -163,6 +177,12 @@ Real, not blocking. Documented so they aren't forgotten.
   Do this after D4 so the tests catch any regressions. Includes the one real `react-hooks/purity`
   smell in `ae-app/src/pages/Tag.tsx` (`Date.now()` read during render for the "just saved"
   checkmark; move to a timer + state).
+- **D6. Frontend dependency conflict.** `vite-plugin-pwa@1.2.0` peers on vite <=7 but both
+  frontends run vite 8, so `npm ci` needs `--legacy-peer-deps` (the CI jobs pass this). Bump
+  `vite-plugin-pwa` to a vite-8-compatible release (or pin vite to 7) and drop the flag.
+- **D7. Finish B1 error migration.** Migrate the remaining `throw new Error` sites in
+  `court/`, `verification/`, `mining/`, and `tagging/` to typed `AppError`s, then delete the
+  legacy substring matcher from `errorHandler.ts`.
 
 ---
 

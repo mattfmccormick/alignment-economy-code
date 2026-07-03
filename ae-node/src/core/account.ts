@@ -9,6 +9,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { generateKeyPair, deriveAccountId } from './crypto.js';
+import { ConflictError } from './errors.js';
 import type { Account, AccountCreationResult, AccountType } from './types.js';
 import { SqliteAccountStore } from './stores/SqliteAccountStore.js';
 import type { BalanceField, IAccountStore } from './stores/IAccountStore.js';
@@ -57,7 +58,7 @@ export function createAccountWithStore(
   // this catches the case where a client retries account creation with the
   // same mnemonic after a network blip.
   if (store.findById(id)) {
-    throw new Error(`Account already exists for this public key: ${id}`);
+    throw new ConflictError(`Account already exists for this public key: ${id}`, 'ACCOUNT_EXISTS');
   }
 
   store.insert({

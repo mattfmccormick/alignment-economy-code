@@ -12,6 +12,7 @@ import { TRANSACTION_FEE_RATE, FEE_DENOMINATOR } from './constants.js';
 import { getAccount, updateBalance, accountStore } from './account.js';
 import { addToFeePool } from './fee-pool.js';
 import { runTransaction } from '../db/connection.js';
+import { NotFoundError, ValidationError, ForbiddenError, InsufficientBalanceError } from './errors.js';
 import { SqliteTransactionStore } from './stores/SqliteTransactionStore.js';
 import type { ITransactionStore } from './stores/ITransactionStore.js';
 import type { Transaction, PointType, ChangeType } from './types.js';
@@ -295,19 +296,19 @@ export function processTransaction(
   input: TransactionInput,
 ): TransactionResult {
   const sender = getAccount(db, input.from);
-  if (!sender) throw new Error(`Sender account not found: ${input.from}`);
-  if (!sender.isActive) throw new Error(`Sender account is inactive: ${input.from}`);
+  if (!sender) throw new NotFoundError(`Sender account not found: ${input.from}`);
+  if (!sender.isActive) throw new ValidationError(`Sender account is inactive: ${input.from}`, 'ACCOUNT_INACTIVE');
 
   const recipient = getAccount(db, input.to);
-  if (!recipient) throw new Error(`Recipient account not found: ${input.to}`);
-  if (!recipient.isActive) throw new Error(`Recipient account is inactive: ${input.to}`);
+  if (!recipient) throw new NotFoundError(`Recipient account not found: ${input.to}`);
+  if (!recipient.isActive) throw new ValidationError(`Recipient account is inactive: ${input.to}`, 'ACCOUNT_INACTIVE');
 
-  if (input.from === input.to) throw new Error('Cannot send to self');
+  if (input.from === input.to) throw new ValidationError('Cannot send to self', 'SELF_TRANSFER');
 
   // WP v2 §9.3: escrowed accounts cannot send earned points. Daily
   // allocations (active/supportive/ambient) remain spendable.
   if (sender.isEscrowed && input.pointType === 'earned') {
-    throw new Error('Account is escrowed: earned-point transfers are frozen during court proceedings');
+    throw new ForbiddenError('Account is escrowed: earned-point transfers are frozen during court proceedings', 'ACCOUNT_ESCROWED');
   }
 
   // Cycle phase guard: during the white paper's "blackout minute" (08:59-09:00 UTC,
@@ -320,7 +321,7 @@ export function processTransaction(
     const phaseRow = db.prepare('SELECT cycle_phase FROM day_cycle_state WHERE id = 1').get() as { cycle_phase: string } | undefined;
     const phase = phaseRow?.cycle_phase ?? 'idle';
     if (phase !== 'idle' && phase !== 'active') {
-      throw new Error(`Daily-point transactions are paused during the ${phase} cycle phase`);
+      throw new ValidationError(`Daily-point transactions are paused during the ${phase} cycle phase`, 'CYCLE_PHASE_BLOCKED');
     }
   }
 
@@ -335,7 +336,7 @@ export function processTransaction(
     memo: input.memo ?? '',
   };
   const validSig = verifyPayload(payload, input.timestamp, input.signature, sender.publicKey);
-  if (!validSig) throw new Error('Invalid transaction signature');
+  if (!validSig) throw new ValidationError('Invalid transaction signature', 'INVALID_SIGNATURE');
 
   // In-person attestation requires the receiver's countersignature over the
   // same payload bytes. Without it, the sender alone could mark any
@@ -344,16 +345,16 @@ export function processTransaction(
   // 2.6 — counterparty consent is the whole point of the in-person attestation).
   if (input.isInPerson === true) {
     if (!input.receiverSignature) {
-      throw new Error('In-person transactions require the receiver countersignature');
+      throw new ValidationError('In-person transactions require the receiver countersignature', 'MISSING_COUNTERSIGNATURE');
     }
     const validCounter = verifyPayload(payload, input.timestamp, input.receiverSignature, recipient.publicKey);
-    if (!validCounter) throw new Error('Invalid receiver countersignature on in-person transaction');
+    if (!validCounter) throw new ValidationError('Invalid receiver countersignature on in-person transaction', 'INVALID_COUNTERSIGNATURE');
   }
 
   // Check balance
   const senderBalance = getBalanceForType(sender, input.pointType);
   if (senderBalance < input.amount) {
-    throw new Error(
+    throw new InsufficientBalanceError(
       `Insufficient ${input.pointType} balance: has ${senderBalance}, needs ${input.amount}`,
     );
   }
