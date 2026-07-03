@@ -183,6 +183,15 @@ Real, not blocking. Documented so they aren't forgotten.
 - **D7. Finish B1 error migration.** Migrate the remaining `throw new Error` sites in
   `court/`, `verification/`, `mining/`, and `tagging/` to typed `AppError`s, then delete the
   legacy substring matcher from `errorHandler.ts`.
+- **D8. Fix the ae-app clean build.** On a fresh checkout `ae-app` won't build: it imports the
+  sibling `@alignmenteconomy/sdk` workspace package (not installed by a standalone `npm ci`) and
+  `tsc` surfaces pre-existing `catch (e: unknown)` type errors that local incremental builds
+  masked. Set up workspace resolution (or build the SDK first in CI) and fix the catch typings,
+  then restore the `build` step to the ae-app CI job (currently lint-only).
+- **D9. Stabilize the flaky multi-runner tests.** Phase 60 (and the Phase 35/49/53/59 family)
+  are timing-flaky: they use fixed `wait()` delays for validator restart/catch-up. CI retries the
+  test step once to absorb this, but the real fix is event-based waits so a single run is
+  deterministic. Then drop the retry.
 
 ---
 
