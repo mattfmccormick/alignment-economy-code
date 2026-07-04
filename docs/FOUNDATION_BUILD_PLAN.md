@@ -237,12 +237,17 @@ Real, not blocking. Documented so they aren't forgotten.
   code that wrongly assumed the ML-DSA-65 public key is the last 1952 bytes of the secret key — it
   isn't, and nothing used it. **Remaining:** component/flow tests (RTL + jsdom) for the
   send/verify/vouch pages.
-- **D5. Frontend `any` burn-down.** A2 demoted `no-explicit-any` and a few react-hooks advisory
-  rules to warnings in the two frontends (~84 in ae-app, ~25 in ae-miner), almost all `any` on
-  API-response plumbing. Type the API responses properly and promote these rules back to errors.
-  Do this after D4 so the tests catch any regressions. Includes the one real `react-hooks/purity`
-  smell in `ae-app/src/pages/Tag.tsx` (`Date.now()` read during render for the "just saved"
-  checkmark; move to a timer + state).
+- **D5. Frontend `any` burn-down.** 🟡 **Started (ae-app).** A2 demoted `no-explicit-any` and a
+  few react-hooks advisory rules to warnings (~72 `any` in ae-app, ~25 in ae-miner), almost all on
+  API-response plumbing — 51 of ae-app's are in `lib/api.ts`'s `request<…>` generics. Started the
+  burn-down: added `lib/types.ts` with real `AccountData` / `AccountDetail` shapes (mirroring the
+  ae-node serializer), typed `getAccount` / `createAccount`, de-duplicated the copy of `AccountData`
+  that `useAccount` carried, and removed the internal `json: any` in the request helper (now
+  narrowed `unknown`) plus a `catch (e: any)` in `Send.tsx`. ae-app is at 68 `any` (from 72), build
+  + tests green. **Remaining:** type the list responses (transactions, contacts, vouches, cases,
+  tags — mind the mixed camel/snake casing on tx rows), the ae-miner side, the one real
+  `react-hooks/purity` bug in `Tag.tsx` (`Date.now()` during render), then promote the rules to
+  errors once each reaches zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`

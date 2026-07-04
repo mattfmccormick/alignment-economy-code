@@ -158,8 +158,9 @@ export function Send() {
       } else {
         setResult({ success: false, message: res.error?.message || 'Transaction failed' });
       }
-    } catch (e: any) {
-      setResult({ success: false, message: e.message || 'Network error' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Network error';
+      setResult({ success: false, message });
     } finally {
       setSending(false);
     }

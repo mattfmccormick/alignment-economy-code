@@ -1,3 +1,5 @@
+import type { AccountData, AccountDetail } from './types';
+
 // Pick the right backend URL for the current runtime:
 //   - Vite dev server: same-origin '/api/v1' (proxied to localhost:3000 by vite.config)
 //   - Production browser at app.alignmenteconomy.org: relative '/api/v1' served by reverse proxy
@@ -69,7 +71,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     };
   }
 
-  let json: any;
+  let json: unknown;
   try {
     json = await res.json();
   } catch {
@@ -81,11 +83,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   // of the wrapped success value. Treat that as "node alive".
   setNodeStatus('ok');
 
-  // Some newer routes return plain JSON without success wrapper
-  if (typeof json.success === 'boolean') {
-    return json;
+  // Some newer routes return plain JSON without the success wrapper.
+  if (json && typeof json === 'object' && typeof (json as { success?: unknown }).success === 'boolean') {
+    return json as ApiResponse<T>;
   }
-  // Wrap plain responses in standard format
+  // Wrap plain responses in the standard format.
   return { success: res.ok, data: json as T };
 }
 
@@ -94,10 +96,10 @@ export const api = {
   // Pass `publicKey` for client-custody mode (mnemonic-derived keys never
   // touch the server). Omit it for the legacy server-generated path.
   createAccount: (type: string, publicKey?: string) =>
-    request<{ account: any; publicKey: string; privateKey?: string }>('POST', '/accounts', publicKey ? { type, publicKey } : { type }),
+    request<{ account: AccountData; publicKey: string; privateKey?: string }>('POST', '/accounts', publicKey ? { type, publicKey } : { type }),
 
   getAccount: (id: string) =>
-    request<any>('GET', `/accounts/${id}`),
+    request<AccountDetail>('GET', `/accounts/${id}`),
 
   getTransactions: (id: string, page = 1, limit = 50) =>
     request<{ transactions: any[]; total: number }>('GET', `/accounts/${id}/transactions?page=${page}&limit=${limit}`),

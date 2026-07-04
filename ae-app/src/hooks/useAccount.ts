@@ -1,21 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { wsClient } from '../lib/websocket';
+import type { AccountDetail } from '../lib/types';
 
-export interface AccountData {
-  id: string;
-  type: string;
-  earnedBalance: string;
-  activeBalance: string;
-  supportiveBalance: string;
-  ambientBalance: string;
-  lockedBalance: string;
-  percentHuman: number;
-  isActive: boolean;
-  isEscrowed: boolean;
-  percentOfEconomy: number;
-  joinedDay: number;
-}
+// Re-exported under the historical name so existing importers keep working.
+export type AccountData = AccountDetail;
 
 export function useAccount(accountId: string | null) {
   const [account, setAccount] = useState<AccountData | null>(null);
