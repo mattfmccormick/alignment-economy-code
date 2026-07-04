@@ -3,7 +3,7 @@ import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
-import { displayPoints, truncateId } from '../lib/formatting';
+import { displayPoints, truncateId, toBaseUnits } from '../lib/formatting';
 
 type Tab = 'contacts' | 'search' | 'recent';
 
@@ -119,14 +119,15 @@ export function Send() {
     try {
       const from = wallet.accountId;
       const to = recipient.accountId;
-      const storageAmount = BigInt(Math.round(amountNum * 100_000_000));
+      // Canonical base-unit string: the one value we sign AND send on the wire.
+      const storageAmount = toBaseUnits(amountNum);
       const timestamp = Math.floor(Date.now() / 1000);
 
       // Build payload for signing (must match backend verification format)
       const internalPayload = {
         from,
         to,
-        amount: storageAmount.toString(),
+        amount: storageAmount,
         pointType,
         isInPerson: false,
         memo: memo || '',
@@ -139,7 +140,7 @@ export function Send() {
       const res = await api.sendTransaction({
         payload: {
           to,
-          amount: storageAmount.toString(),
+          amount: storageAmount,
           pointType,
           isInPerson: false,
           memo: memo || '',

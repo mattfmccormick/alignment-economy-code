@@ -22,15 +22,6 @@ export function signPayload(payload: object, timestamp: number, privateKeyHex: s
   return bytesToHex(sig);
 }
 
-export function derivePublicKey(privateKeyHex: string): string {
-  // ML-DSA secret key contains the public key in the last 1952 bytes
-  const secretKey = hexToBytes(privateKeyHex);
-  // For ML-DSA-65, public key is 1952 bytes, secret key is 4032 bytes
-  // The public key is embedded at the end of the secret key
-  const publicKey = secretKey.slice(secretKey.length - 1952);
-  return bytesToHex(publicKey);
-}
-
 // ─── BIP39 mnemonic-derived keys ─────────────────────────────────────────
 //
 // A user's wallet boils down to a 12-word phrase. From it we deterministically

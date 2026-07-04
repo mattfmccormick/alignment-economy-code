@@ -8,6 +8,21 @@ export function displayPoints(raw: string | bigint | number): string {
   return display.toFixed(2);
 }
 
+/**
+ * Convert a display amount (points, may be fractional) into the canonical
+ * base-unit integer string (10^8 per point) that the protocol signs and stores.
+ * This is the single place the wallet turns a user-entered amount into money;
+ * it matches the server's base-unit contract (see the transaction route). The
+ * rounding to whole base units means fractions below 10^-8 are dropped.
+ */
+export function toBaseUnits(displayAmount: string | number): string {
+  const n = typeof displayAmount === 'string' ? Number(displayAmount) : displayAmount;
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`invalid amount: ${displayAmount}`);
+  }
+  return BigInt(Math.round(n * PRECISION)).toString();
+}
+
 export function displayPercent(share: number): string {
   if (share >= 1) return share.toFixed(2) + '%';
   if (share >= 0.01) return share.toFixed(4) + '%';

@@ -42,7 +42,7 @@ jobs:
         continue-on-error: true
 
   ae-app:
-    name: ae-app (lint + build)
+    name: ae-app (lint + test + build)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -59,11 +59,12 @@ jobs:
       - name: Build the SDK
         working-directory: sdk
         run: npm ci && npm run build
-      - name: Lint + build ae-app
+      - name: Lint, test, build ae-app
         working-directory: ae-app
         run: |
           npm ci
           npm run lint
+          npm test
           npm run build
 
   ae-miner:
