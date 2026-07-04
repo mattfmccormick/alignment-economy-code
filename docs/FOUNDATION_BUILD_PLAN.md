@@ -227,15 +227,16 @@ Real, not blocking. Documented so they aren't forgotten.
   SQL anymore. (Remaining non-store SQL elsewhere, e.g. block-height/miner counts in
   `network.ts`, is out of scope for the day-cycle store and can be extracted alongside its own
   store later.)
-- **D4. Frontend tests.** 🟡 **Started (ae-app).** Vitest is set up in `ae-app` with a `test`
-  script, wired into the ae-app CI job (lint + test + build). Unit tests cover the
-  correctness-critical pure logic: `formatting.ts` (incl. a new `toBaseUnits` helper extracted
-  from `Send.tsx` so the display→base-unit money conversion is centralized and tested, plus a
-  round-trip against `displayPoints`) and `crypto.ts` (mnemonic→keypair determinism, validation,
-  signing). Writing these caught and removed a real bug: `derivePublicKey` was dead code that
-  wrongly assumed the ML-DSA-65 public key is the last 1952 bytes of the secret key — it isn't,
-  and nothing used it. **Remaining:** component/flow tests (RTL + jsdom) for send/verify/vouch,
-  and the same harness in `ae-miner`.
+- **D4. Frontend tests.** 🟡 **Unit layer done, both frontends.** Vitest is set up in `ae-app`
+  and `ae-miner`, each with a `test` script wired into its CI job (both are now lint + test +
+  build). Unit tests cover the correctness-critical pure logic: `formatting.ts` (incl. a new
+  `toBaseUnits` helper extracted from `Send.tsx` so the display→base-unit money conversion is
+  centralized and tested, plus a round-trip against `displayPoints`), `crypto.ts` (mnemonic→keypair
+  determinism, validation, signing), and the miner's `ledger.ts` (income classification +
+  per-source aggregation). Writing these caught and removed a real bug: `derivePublicKey` was dead
+  code that wrongly assumed the ML-DSA-65 public key is the last 1952 bytes of the secret key — it
+  isn't, and nothing used it. **Remaining:** component/flow tests (RTL + jsdom) for the
+  send/verify/vouch pages.
 - **D5. Frontend `any` burn-down.** A2 demoted `no-explicit-any` and a few react-hooks advisory
   rules to warnings in the two frontends (~84 in ae-app, ~25 in ae-miner), almost all `any` on
   API-response plumbing. Type the API responses properly and promote these rules back to errors.

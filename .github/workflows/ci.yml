@@ -68,7 +68,7 @@ jobs:
           npm run build
 
   ae-miner:
-    name: ae-miner (lint + build)
+    name: ae-miner (lint + test + build)
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -82,4 +82,5 @@ jobs:
           cache-dependency-path: ae-miner/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
