@@ -5,6 +5,11 @@
 // Part of the D5 burn-down: replacing `any` in the API client with real types,
 // starting with the account (the money-critical entity most pages read).
 
+/** A bare acknowledgement returned by mutation routes that carry no payload. */
+export interface SuccessResponse {
+  success: boolean;
+}
+
 export interface AccountData {
   id: string;
   type: string;

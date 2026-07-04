@@ -19,6 +19,7 @@ import type {
   AccountSearchResult,
   RecurringTransferData,
   PanelSummary,
+  SuccessResponse,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -135,17 +136,17 @@ export const api = {
 
   // Auth-required: signed account is the contact owner.
   addContact: (envelope: { accountId: string; timestamp: number; signature: string; payload: { contactAccountId: string; nickname: string } }) =>
-    request<any>('POST', '/contacts', envelope),
+    request<{ id: string; ownerId: string; contactAccountId: string; nickname: string }>('POST', '/contacts', envelope),
 
   // Auth + ownership-checked: only the contact's owner can modify.
   updateContact: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { nickname: string } }) =>
-    request<any>('PUT', `/contacts/${id}`, envelope),
+    request<SuccessResponse>('PUT', `/contacts/${id}`, envelope),
 
   toggleFavorite: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { isFavorite: boolean } }) =>
-    request<any>('PUT', `/contacts/${id}/favorite`, envelope),
+    request<SuccessResponse>('PUT', `/contacts/${id}/favorite`, envelope),
 
   deleteContact: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
-    request<any>('DELETE', `/contacts/${id}`, envelope),
+    request<SuccessResponse>('DELETE', `/contacts/${id}`, envelope),
 
   searchAccounts: (query: string) =>
     request<{ accounts: AccountSearchResult[] }>('GET', `/contacts/search/accounts?q=${encodeURIComponent(query)}`),
@@ -156,14 +157,14 @@ export const api = {
 
   // Auth-required: signed account is the sender. fromId is implicit.
   createRecurring: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; amount: number; pointType: string; schedule: string } }) =>
-    request<any>('POST', '/recurring', envelope),
+    request<{ id: string; fromId: string; toId: string; amount: string; pointType: string; schedule: string; isActive: boolean }>('POST', '/recurring', envelope),
 
   // Auth + ownership-checked: only the recurring-transfer creator can modify.
   updateRecurring: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { amount?: number; pointType?: string; schedule?: string; isActive?: boolean } }) =>
-    request<any>('PUT', `/recurring/${id}`, envelope),
+    request<SuccessResponse>('PUT', `/recurring/${id}`, envelope),
 
   deleteRecurring: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
-    request<any>('DELETE', `/recurring/${id}`, envelope),
+    request<SuccessResponse>('DELETE', `/recurring/${id}`, envelope),
 
   // Miners
   // Auth-required: only the account being registered can register itself.

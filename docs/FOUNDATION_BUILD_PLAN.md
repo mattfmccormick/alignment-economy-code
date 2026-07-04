@@ -276,10 +276,12 @@ Real, not blocking. Documented so they aren't forgotten.
   map. Then typed the verification-panel list/request responses (`PanelSummary`, matching
   ae-node's `VerificationPanel`) on `getAccountPanels` and `requestPanel`, replacing an unsafe
   `res.data.panels as PanelSummary[]` cast in `Verify` and de-duplicating its local copy of the
-  type. ae-app is at **20 `any` (from 72)**, build + tests green. **Remaining:** the panel-detail
-  response and evidence, the vouch-request update, the two `(data: any)` websocket handlers in
-  `CaseDetail`, a handful of mutation responses whose callers ignore the body, the ae-miner side,
-  then promote the rules to errors once each frontend reaches zero.
+  type. Then typed the contact and recurring mutation responses (a shared `SuccessResponse` for the
+  bare-ack routes, real shapes for `addContact` / `createRecurring`). ae-app is at
+  **13 `any` (from 72)**, build + tests green. **Remaining:** `sendTransaction`, `submitEvidence`,
+  the vouch-request update, the panel-detail + verification-evidence responses, `generateGenesis`,
+  `feePool` / `advanceDay`, the two `(data: any)` websocket handlers in `CaseDetail`, `websocket.ts`,
+  then the ae-miner side — after which promote the rules to errors once each frontend reaches zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`
