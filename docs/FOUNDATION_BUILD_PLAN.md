@@ -227,7 +227,7 @@ Real, not blocking. Documented so they aren't forgotten.
   SQL anymore. (Remaining non-store SQL elsewhere, e.g. block-height/miner counts in
   `network.ts`, is out of scope for the day-cycle store and can be extracted alongside its own
   store later.)
-- **D4. Frontend tests.** 🟡 **Unit layer done, both frontends.** Vitest is set up in `ae-app`
+- **D4. Frontend tests.** 🟢 **Unit + send/verify/vouch flow layer done, both frontends.** Vitest is set up in `ae-app`
   and `ae-miner`, each with a `test` script wired into its CI job (both are now lint + test +
   build). Unit tests cover the correctness-critical pure logic: `formatting.ts` (incl. a new
   `toBaseUnits` helper extracted from `Send.tsx` so the display→base-unit money conversion is
@@ -247,8 +247,13 @@ Real, not blocking. Documented so they aren't forgotten.
   (`submitVouch` with the default 5% policy minimum) and only *then* marks the request accepted
   (`updateVouchRequest`), verified with `invocationCallOrder` — the exact ordering that prevents a
   failed stake from leaving a stale "accepted" record. A second test asserts that when the stake
-  fails to lock, `updateVouchRequest` is never called and the error surfaces. **Remaining:** flow
-  tests for the ae-app verify page and the miner court/verify pages as they change.
+  fails to lock, `updateVouchRequest` is never called and the error surfaces. **Then the ae-app
+  verify page:** `Verify.test.tsx` drives the "request a vouch" modal — fill the recipient id + a
+  message, submit — and asserts the app POSTs `createVouchRequest` with exactly `{ toId, message }`
+  signed as the requester, and shows the "sent" confirmation; a second test asserts a rejected
+  request surfaces the server error instead of a false success. That completes the send/verify/vouch
+  flow triad this item called for. **Remaining:** the miner court/verify pages can pick up the same
+  harness as they change; not blocking.
 - **D5. Frontend `any` burn-down.** ✅ **Done (both frontends at 0 `any`, rules promoted to error).** A2 demoted `no-explicit-any` and a
   few react-hooks advisory rules to warnings (~72 `any` in ae-app, ~25 in ae-miner), almost all on
   API-response plumbing — 51 of ae-app's are in `lib/api.ts`'s `request<…>` generics. Started the
