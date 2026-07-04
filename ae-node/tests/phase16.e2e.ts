@@ -71,6 +71,28 @@ function wait(ms: number): Promise<void> {
 }
 
 /**
+ * Poll until `check()` is true or the deadline passes. Replaces fixed
+ * `wait(ms)` sleeps that assumed an async settle (sync catch-up, ban
+ * propagation) finished within an arbitrary window — the source of the
+ * timing flake under load. Polling to a generous deadline is strictly more
+ * robust: it returns the instant the condition holds, and only fails after
+ * genuinely waiting long enough, so a slow CI runner no longer produces a
+ * false negative. Returns the final condition value.
+ */
+async function waitForCondition(
+  check: () => boolean,
+  timeoutMs = 10_000,
+  intervalMs = 25,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return true;
+    await wait(intervalMs);
+  }
+  return check();
+}
+
+/**
  * Submit a real signed transaction. Returns the resulting tx id.
  */
 function submitTx(
@@ -214,7 +236,13 @@ describe('Phase 16: Tx-to-block linkage + strong catch-up sync', () => {
   it('catch-up sync verifies merkleRoot for every historical block', async () => {
     // Authority builds a 3-block chain with REAL transactions.
     const dbAuth = freshDb();
-    createGenesisBlock(dbAuth);
+    // Genesis carries a Date.now() timestamp, so two independent
+    // createGenesisBlock() calls produce different hashes when they land in
+    // different seconds. Real nodes never do that — they share one genesis
+    // from the network spec. Capture the authority's genesis and hand the
+    // SAME block to the follower below, or the follower's block-1 parent-hash
+    // check fails intermittently and it wrongly bans the honest authority.
+    const sharedGenesis = createGenesisBlock(dbAuth);
 
     const sender = createAccount(dbAuth, 'individual', 1, 100);
     const receiver = createAccount(dbAuth, 'individual', 1, 100);
@@ -248,9 +276,10 @@ describe('Phase 16: Tx-to-block linkage + strong catch-up sync', () => {
       authPeers.handleIncomingConnection(ws, req.socket.remoteAddress ?? '127.0.0.1');
     });
 
-    // Follower with only genesis. Bound to authority's publicKey.
+    // Follower with only genesis. Bound to authority's publicKey. Shares the
+    // authority's exact genesis so the chains agree at height 0.
     const dbNew = freshDb();
-    createGenesisBlock(dbNew);
+    blockStore(dbNew).insert(sharedGenesis, /* isGenesis */ true);
     const newIdentity = generateNodeIdentity();
     const newConsensus = new AuthorityConsensus(
       'authority',
@@ -275,10 +304,17 @@ describe('Phase 16: Tx-to-block linkage + strong catch-up sync', () => {
     });
     newPeers.connectToPeer('127.0.0.1', srv.port);
     await connected;
-    await wait(50);
+    // Wait for the authority's advertised height to register on our peer
+    // record before starting sync. startSync() is a one-shot that silently
+    // no-ops if the best peer's height still looks <= ours (the old fixed
+    // wait(50) occasionally fired before the handshake height propagated,
+    // leaving appliedBlocks empty — the documented Phase 17 flake).
+    await waitForCondition(() =>
+      newPeers.getConnectedPeers().some((p) => p.blockHeight >= 3),
+    );
 
     newSync.startSync();
-    await wait(500);
+    await waitForCondition(() => appliedBlocks.length >= 3);
 
     assert.deepEqual(appliedBlocks, [1, 2, 3], 'follower must apply all 3 blocks');
     assert.equal(newPeers.getBlockHeight(), 3);
@@ -294,7 +330,9 @@ describe('Phase 16: Tx-to-block linkage + strong catch-up sync', () => {
     // the txIds it ships (now missing one) won't reproduce the merkleRoot
     // stored on the block. The follower must reject + ban.
     const dbAuth = freshDb();
-    createGenesisBlock(dbAuth);
+    // Share one genesis with the follower (see the note in the sync test
+    // above): independent createGenesisBlock() calls diverge by timestamp.
+    const sharedGenesis = createGenesisBlock(dbAuth);
 
     const sender = createAccount(dbAuth, 'individual', 1, 100);
     const receiver = createAccount(dbAuth, 'individual', 1, 100);
@@ -329,7 +367,7 @@ describe('Phase 16: Tx-to-block linkage + strong catch-up sync', () => {
     });
 
     const dbNew = freshDb();
-    createGenesisBlock(dbNew);
+    blockStore(dbNew).insert(sharedGenesis, /* isGenesis */ true);
     const newIdentity = generateNodeIdentity();
     const newConsensus = new AuthorityConsensus(
       'authority',
@@ -346,10 +384,14 @@ describe('Phase 16: Tx-to-block linkage + strong catch-up sync', () => {
     });
     newPeers.connectToPeer('127.0.0.1', srv.port);
     await connected;
-    await wait(50);
+    // As above: wait for the authority's height (1) to register before the
+    // one-shot startSync, so the sync actually requests the block.
+    await waitForCondition(() =>
+      newPeers.getConnectedPeers().some((p) => p.blockHeight >= 1),
+    );
 
     _newSync.startSync();
-    await wait(500);
+    await waitForCondition(() => newPeers.isBanned(authIdentity.publicKey));
 
     assert.equal(
       newPeers.isBanned(authIdentity.publicKey),
