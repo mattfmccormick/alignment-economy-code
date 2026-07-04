@@ -18,6 +18,7 @@ import { rateLimitMiddleware } from './middleware/rateLimit.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setupWebSocket } from './websocket.js';
+import { buildOpenApiSpec } from './openapi.js';
 import { logger } from '../node/logger.js';
 
 export interface CreateAppOptions {
@@ -62,6 +63,12 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
   app.use('/api/v1/validators', validatorRoutes(db));
   app.use('/api/v1/tags', tagRoutes(db));
   app.use('/api/v1/founder', founderRoutes());
+
+  // Machine-readable API contract, generated from the same zod schemas the
+  // write routes validate against.
+  app.get('/api/v1/openapi.json', (_req, res) => {
+    res.json(buildOpenApiSpec());
+  });
 
   // Error handler (must be last)
   app.use(errorHandler);

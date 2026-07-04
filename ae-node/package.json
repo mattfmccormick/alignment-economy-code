@@ -13,6 +13,7 @@
     "test:e2e": "tsx --test tests/*.e2e.ts",
     "test:all": "tsx --test tests/*.test.ts tests/*.e2e.ts",
     "seed:test": "tsx src/scripts/seed-test.ts",
+    "gen:openapi": "tsx src/scripts/gen-openapi.ts",
     "genesis:init": "tsx src/scripts/init-genesis.ts",
     "validator:setup": "tsx src/scripts/setup-validator.ts"
   },

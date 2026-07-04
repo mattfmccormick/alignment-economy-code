@@ -27,7 +27,14 @@ Last updated: July 3, 2026.
     returns the id in every error body so a user can quote it.
     `tests/request-id.test.ts` proves the header, the echo, and the incoming-id
     passthrough.
-  - C2 (OpenAPI): not started.
+  - C2 (OpenAPI): **DONE.** `api/openapi.ts` builds an OpenAPI 3.1 spec from the
+    same zod schemas the write routes validate against (via zod 4's native
+    `z.toJSONSchema` — no extra dependency), so the contract and the runtime
+    validation can't drift. Served at `GET /api/v1/openapi.json`; written to
+    `docs/openapi.json` by `npm run gen:openapi`. `tests/openapi.test.ts` checks
+    the endpoint, that the transaction amount is documented as a base-unit
+    integer-string pattern, and that the checked-in file matches the generated
+    spec (a drift guard that fails CI if a schema changes without regenerating).
 
 Group B detail (kept for reference):
   - B1 (typed errors): **DONE.** `core/errors.ts` adds an `AppError` base with

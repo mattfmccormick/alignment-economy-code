@@ -70,10 +70,13 @@ describe('Phase 11: Deployment and Operations', () => {
 
   // Test 3: Logger respects log levels
   it('logger filters messages below configured level', () => {
-    // Capture console output
+    // The logger emits structured JSON, one object per line, and routes error
+    // lines to stderr — capture both streams.
     const messages: string[] = [];
     const origLog = console.log;
+    const origErr = console.error;
     console.log = (...args: any[]) => { messages.push(args.join(' ')); };
+    console.error = (...args: any[]) => { messages.push(args.join(' ')); };
 
     setLogLevel('warn');
     logger.debug('test', 'debug message');
@@ -82,12 +85,16 @@ describe('Phase 11: Deployment and Operations', () => {
     logger.error('test', 'error message');
 
     console.log = origLog;
+    console.error = origErr;
     setLogLevel('info'); // restore
 
-    // Only warn and error should appear
+    // Only warn and error should appear (debug/info are below the warn threshold).
     assert.equal(messages.length, 2);
-    assert.ok(messages[0].includes('WARN'));
-    assert.ok(messages[1].includes('ERROR'));
+    const parsed = messages.map((m) => JSON.parse(m));
+    assert.equal(parsed[0].level, 'warn');
+    assert.equal(parsed[0].msg, 'warn message');
+    assert.equal(parsed[1].level, 'error');
+    assert.equal(parsed[1].msg, 'error message');
   });
 
   // Test 4: Health endpoint returns ok
