@@ -53,3 +53,60 @@ export interface TransactionData {
   timestamp: number;
   blockNumber: number | null;
 }
+
+// ─── Court ───────────────────────────────────────────────────────────────
+
+/** A dispute case as serialized by the court routes (`serializeCase`). */
+export interface CourtCaseData {
+  id: string;
+  type: string;
+  level: string;
+  challengerId: string;
+  defendantId: string;
+  challengerStake: string;
+  challengerStakePercent: number;
+  status: string;
+  arbitrationDeadline: number;
+  votingDeadline: number;
+  verdict: string | null;
+  appealOf: string | null;
+  createdAt: number;
+  resolvedAt: number | null;
+}
+
+/** A case in the "my cases" list — a subset plus the viewer's role flags. */
+export interface MyCaseData {
+  id: string;
+  type: string;
+  level: string;
+  status: string;
+  challengerId: string;
+  defendantId: string;
+  challengerStake: string;
+  challengerStakePercent: number;
+  verdict: string | null;
+  createdAt: number;
+  resolvedAt: number | null;
+  isDefendant: boolean;
+  isChallenger: boolean;
+}
+
+/** A juror row in a case's panel. `vote` is 'sealed' until all have voted. */
+export interface JurorData {
+  minerId: string;
+  jurorAccountId: string;
+  stakeAmount: string;
+  vote: string | null;
+  votedAt: number | null;
+}
+
+/** An entry in a case's append-only argument log. */
+export interface CaseArgumentData {
+  id: string;
+  caseId: string;
+  submitterId: string;
+  role: 'challenger' | 'defendant';
+  text: string;
+  attachmentHash: string | null;
+  createdAt: number;
+}

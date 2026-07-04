@@ -1,4 +1,12 @@
-import type { AccountData, AccountDetail, TransactionData } from './types';
+import type {
+  AccountData,
+  AccountDetail,
+  TransactionData,
+  CourtCaseData,
+  MyCaseData,
+  JurorData,
+  CaseArgumentData,
+} from './types';
 
 // Pick the right backend URL for the current runtime:
 //   - Vite dev server: same-origin '/api/v1' (proxied to localhost:3000 by vite.config)
@@ -200,29 +208,29 @@ export const api = {
   // Court — disputes and verdicts
   // List active cases on the network (public).
   getActiveCases: () =>
-    request<{ cases: any[] }>('GET', '/court/cases'),
+    request<{ cases: CourtCaseData[] }>('GET', '/court/cases'),
 
   // Get full case detail (public). Includes the argument log alongside the
   // jury panel and the case header.
   getCase: (caseId: string) =>
-    request<{ case: any; jury: any[]; votesRevealed: boolean; arguments: any[] }>('GET', `/court/cases/${caseId}`),
+    request<{ case: CourtCaseData; jury: JurorData[]; votesRevealed: boolean; arguments: CaseArgumentData[] }>('GET', `/court/cases/${caseId}`),
 
   // Submit an argument or rebuttal on a case (signed; backend gates submitter
   // to challenger or defendant).
   submitCaseArgument: (caseId: string, signedBody: unknown) =>
-    request<{ argument: any }>('POST', `/court/cases/${caseId}/arguments`, signedBody),
+    request<{ argument: CaseArgumentData }>('POST', `/court/cases/${caseId}/arguments`, signedBody),
 
   // Cases involving this account (defendant or challenger). Public.
   getMyCases: (accountId: string) =>
-    request<{ cases: any[] }>('GET', `/court/my-cases/${accountId}`),
+    request<{ cases: MyCaseData[] }>('GET', `/court/my-cases/${accountId}`),
 
   // File a challenge against another account (signed; miner only on backend).
   fileChallenge: (signedBody: unknown) =>
-    request<{ case: any }>('POST', '/court/challenges', signedBody),
+    request<{ case: CourtCaseData }>('POST', '/court/challenges', signedBody),
 
   // Escalate a case from arbitration to full court (signed; only the original challenger).
   escalateCase: (caseId: string, signedBody: unknown) =>
-    request<{ case: any; juryMinerIds: string[] }>('POST', `/court/cases/${caseId}/escalate`, signedBody),
+    request<{ case: CourtCaseData; juryMinerIds: string[] }>('POST', `/court/cases/${caseId}/escalate`, signedBody),
 
   // Network
   getNetworkStatus: () =>

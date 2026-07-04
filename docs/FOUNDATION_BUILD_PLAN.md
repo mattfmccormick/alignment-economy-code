@@ -247,10 +247,13 @@ Real, not blocking. Documented so they aren't forgotten.
   (`TransactionData`, camelCase per `rowToTransaction`) on `getTransactions` and its consumers
   (`History`, `Wallet`) — which caught a second real bug: `History` rendered `tx.point_type`
   (snake) while the payload is `tx.pointType`, so the per-transaction point-type label was always
-  blank. ae-app is at **63 `any` (from 72)**, build + tests green. **Remaining:** the other list
-  responses (contacts, vouches, cases, tags), the ae-miner side, the real `react-hooks/purity` bug
-  in `Tag.tsx` (`Date.now()` during render), then promote the rules to errors once each reaches
-  zero.
+  blank. Then typed the court responses — `CourtCaseData`, `MyCaseData`, `JurorData`,
+  `CaseArgumentData` — across `getActiveCases`, `getCase`, `getMyCases`, `fileChallenge`,
+  `escalateCase`, and `submitCaseArgument`. ae-app is at **55 `any` (from 72)**, build + tests
+  green. **Remaining:** the rest of the list responses (contacts, vouches, tags, verification
+  panels), the two `(data: any)` websocket handlers in `CaseDetail`, the ae-miner side, the real
+  `react-hooks/purity` bug in `Tag.tsx` (`Date.now()` during render), then promote the rules to
+  errors once each frontend reaches zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`
