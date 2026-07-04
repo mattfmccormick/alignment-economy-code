@@ -241,8 +241,14 @@ Real, not blocking. Documented so they aren't forgotten.
   the first real flow test on the money-critical page: `Send.test.tsx` drives the recipient →
   amount → send path and asserts the app signs and transmits the amount as the canonical base-unit
   integer string (`toBaseUnits`, the real one — not mocked), never the float, plus a failure-path
-  test that a rejected send surfaces the error to the user. **Remaining:** flow tests for the
-  verify/vouch pages, then the same harness in ae-miner.
+  test that a rejected send surfaces the error to the user. **Then the same harness in ae-miner**
+  (its own `vitest.config.ts`, jsdom + RTL) with `Vouch.test.tsx` on the verification-critical
+  inbox accept flow: it drives the "Accept" action and asserts the app locks the stake first
+  (`submitVouch` with the default 5% policy minimum) and only *then* marks the request accepted
+  (`updateVouchRequest`), verified with `invocationCallOrder` — the exact ordering that prevents a
+  failed stake from leaving a stale "accepted" record. A second test asserts that when the stake
+  fails to lock, `updateVouchRequest` is never called and the error surfaces. **Remaining:** flow
+  tests for the ae-app verify page and the miner court/verify pages as they change.
 - **D5. Frontend `any` burn-down.** ✅ **Done (both frontends at 0 `any`, rules promoted to error).** A2 demoted `no-explicit-any` and a
   few react-hooks advisory rules to warnings (~72 `any` in ae-app, ~25 in ae-miner), almost all on
   API-response plumbing — 51 of ae-app's are in `lib/api.ts`'s `request<…>` generics. Started the
