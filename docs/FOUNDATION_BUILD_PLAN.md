@@ -14,7 +14,22 @@ Last updated: July 3, 2026.
     The frontends' pre-existing `any` warnings on API plumbing are demoted to
     tracked warnings (see Group D) so their build gate is meaningful today; the
     generated `dev-dist/` service-worker files are now excluded from linting.
-- **Group B: in progress.**
+- **Group A ✅, Group B ✅ (B1/B2/B3 + D7 all done).**
+- **Group C: in progress.**
+  - C1 (structured logging): **DONE.** Note a deliberate deviation from the plan:
+    instead of adding `pino` (a heavy dependency to a project that keeps only 6
+    runtime deps, which matters for auditability), the existing `node/logger.ts`
+    was upgraded to emit one JSON object per line (`time, level, tag, msg, ...`),
+    with `logger.child(fields)` for bound context and `LOG_LEVEL` from the env.
+    A new `api/middleware/requestId.ts` assigns (or honors an incoming) request
+    id, sets the `X-Request-Id` response header, and attaches a request-scoped
+    child logger. The error handler logs unexpected faults with that id and
+    returns the id in every error body so a user can quote it.
+    `tests/request-id.test.ts` proves the header, the echo, and the incoming-id
+    passthrough.
+  - C2 (OpenAPI): not started.
+
+Group B detail (kept for reference):
   - B1 (typed errors): **DONE.** `core/errors.ts` adds an `AppError` base with
     typed subclasses (Validation, InsufficientBalance, Auth, Forbidden, NotFound,
     Conflict). Every user-facing `throw` in the money path, court, verification,

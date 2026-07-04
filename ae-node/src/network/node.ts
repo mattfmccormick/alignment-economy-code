@@ -14,6 +14,7 @@ import { serializeBlock } from './messages.js';
 import type { NodeIdentity } from './node-identity.js';
 import type { WireTransaction } from './block-validator.js';
 import { replayTransaction } from '../core/transaction.js';
+import { logger } from '../node/logger.js';
 
 export interface NodeConfig {
   nodeId: string;
@@ -166,7 +167,7 @@ export class AENode {
     });
 
     this.server.listen(this.config.p2pPort, () => {
-      console.log(`P2P node listening on port ${this.config.p2pPort}`);
+      logger.info('p2p', 'P2P node listening', { port: this.config.p2pPort });
     });
 
     // Start peer discovery

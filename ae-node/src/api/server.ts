@@ -15,8 +15,10 @@ import { validatorRoutes } from './routes/validators.js';
 import { tagRoutes } from './routes/tags.js';
 import { founderRoutes } from './routes/founder.js';
 import { rateLimitMiddleware } from './middleware/rateLimit.js';
+import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setupWebSocket } from './websocket.js';
+import { logger } from '../node/logger.js';
 
 export interface CreateAppOptions {
   /**
@@ -31,7 +33,9 @@ export interface CreateAppOptions {
 export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
   const app = express();
 
-  // Middleware
+  // Middleware. requestId runs first so every later step (and the error
+  // handler) can log and return a stable request id.
+  app.use(requestIdMiddleware);
   app.use(express.json());
   app.use(rateLimitMiddleware());
 
@@ -75,7 +79,7 @@ export function startServer(
   const wss = setupWebSocket(server, db);
 
   server.listen(port, () => {
-    console.log(`AE Node API running on port ${port}`);
+    logger.info('api', 'AE Node API listening', { port });
   });
 
   return { app, server, wss };
