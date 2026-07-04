@@ -236,9 +236,10 @@ Real, not blocking. Documented so they aren't forgotten.
   Do this after D4 so the tests catch any regressions. Includes the one real `react-hooks/purity`
   smell in `ae-app/src/pages/Tag.tsx` (`Date.now()` read during render for the "just saved"
   checkmark; move to a timer + state).
-- **D6. Frontend dependency conflict.** `vite-plugin-pwa@1.2.0` peers on vite <=7 but both
-  frontends run vite 8, so `npm ci` needs `--legacy-peer-deps` (the CI jobs pass this). Bump
-  `vite-plugin-pwa` to a vite-8-compatible release (or pin vite to 7) and drop the flag.
+- **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
+  frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
+  without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`
+  resolves with no ERESOLVE and both PWA builds still generate their service workers.
 - ~~**D7. Finish B1 error migration.**~~ **Done.** All user-facing throws in court,
   verification, mining, and tagging are typed `AppError`s and the legacy substring matcher is
   removed from `errorHandler.ts`.
