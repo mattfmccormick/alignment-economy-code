@@ -30,3 +30,26 @@ export interface AccountData {
 export interface AccountDetail extends AccountData {
   percentOfEconomy: number;
 }
+
+/**
+ * A settled transaction as returned by `GET /accounts/:id/transactions`
+ * (ae-node's `rowToTransaction`). CamelCase; amounts are base-unit strings.
+ * Note: this is the transaction record, distinct from the snake_case
+ * `transaction_log` audit rows the ledger endpoint returns.
+ */
+export interface TransactionData {
+  id: string;
+  from: string;
+  to: string;
+  amount: string;
+  fee: string;
+  netAmount: string;
+  pointType: string;
+  isInPerson: boolean;
+  recipientIsHuman: boolean;
+  memo: string;
+  signature: string;
+  receiverSignature: string | null;
+  timestamp: number;
+  blockNumber: number | null;
+}

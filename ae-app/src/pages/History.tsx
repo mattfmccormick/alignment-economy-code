@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
 import { displayPoints, timeAgo } from '../lib/formatting';
+import type { TransactionData } from '../lib/types';
 
 export function History() {
   const wallet = loadWallet();
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<TransactionData[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -69,13 +70,13 @@ export function History() {
       ) : (
         <>
           <div className="space-y-2">
-            {transactions.map((tx: any) => (
+            {transactions.map((tx) => (
               <div key={tx.id} className="bg-navy rounded-lg p-3 border border-navy-light">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-white">
                       {tx.from === wallet?.accountId ? 'Sent' : 'Received'}
-                      <span className="text-gray-500 ml-1 text-xs">{tx.point_type}</span>
+                      <span className="text-gray-500 ml-1 text-xs">{tx.pointType}</span>
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">{timeAgo(tx.timestamp)}</p>
                   </div>

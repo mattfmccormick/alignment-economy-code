@@ -1,4 +1,4 @@
-import type { AccountData, AccountDetail } from './types';
+import type { AccountData, AccountDetail, TransactionData } from './types';
 
 // Pick the right backend URL for the current runtime:
 //   - Vite dev server: same-origin '/api/v1' (proxied to localhost:3000 by vite.config)
@@ -102,7 +102,7 @@ export const api = {
     request<AccountDetail>('GET', `/accounts/${id}`),
 
   getTransactions: (id: string, page = 1, limit = 50) =>
-    request<{ transactions: any[]; total: number }>('GET', `/accounts/${id}/transactions?page=${page}&limit=${limit}`),
+    request<{ transactions: TransactionData[]; total: number; page: number; limit: number }>('GET', `/accounts/${id}/transactions?page=${page}&limit=${limit}`),
 
   // Transactions
   sendTransaction: (body: unknown) =>

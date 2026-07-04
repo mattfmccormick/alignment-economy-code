@@ -243,11 +243,14 @@ Real, not blocking. Documented so they aren't forgotten.
   burn-down: added `lib/types.ts` with real `AccountData` / `AccountDetail` shapes (mirroring the
   ae-node serializer), typed `getAccount` / `createAccount`, de-duplicated the copy of `AccountData`
   that `useAccount` carried, and removed the internal `json: any` in the request helper (now
-  narrowed `unknown`) plus a `catch (e: any)` in `Send.tsx`. ae-app is at 68 `any` (from 72), build
-  + tests green. **Remaining:** type the list responses (transactions, contacts, vouches, cases,
-  tags — mind the mixed camel/snake casing on tx rows), the ae-miner side, the one real
-  `react-hooks/purity` bug in `Tag.tsx` (`Date.now()` during render), then promote the rules to
-  errors once each reaches zero.
+  narrowed `unknown`) plus a `catch (e: any)` in `Send.tsx`. Then typed the transaction response
+  (`TransactionData`, camelCase per `rowToTransaction`) on `getTransactions` and its consumers
+  (`History`, `Wallet`) — which caught a second real bug: `History` rendered `tx.point_type`
+  (snake) while the payload is `tx.pointType`, so the per-transaction point-type label was always
+  blank. ae-app is at **63 `any` (from 72)**, build + tests green. **Remaining:** the other list
+  responses (contacts, vouches, cases, tags), the ae-miner side, the real `react-hooks/purity` bug
+  in `Tag.tsx` (`Date.now()` during render), then promote the rules to errors once each reaches
+  zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`

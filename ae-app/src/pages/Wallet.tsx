@@ -7,12 +7,13 @@ import { ShareDisplay } from '../components/wallet/ShareDisplay';
 import { BalanceCard } from '../components/wallet/BalanceCard';
 import { AllocationBar } from '../components/wallet/AllocationBar';
 import { displayPoints, timeAgo } from '../lib/formatting';
+import type { TransactionData } from '../lib/types';
 
 export function Wallet() {
   const wallet = loadWallet();
   const { account, loading, error } = useAccount(wallet?.accountId ?? null);
   const [network, setNetwork] = useState<any>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<TransactionData[]>([]);
 
   useEffect(() => {
     api.getNetworkStatus().then((r) => { if (r.success) setNetwork(r.data); });
@@ -121,7 +122,7 @@ export function Wallet() {
           <p className="text-xs text-gray-500 text-center py-4">No transactions yet</p>
         ) : (
           <div className="space-y-1">
-            {transactions.map((tx: any) => (
+            {transactions.map((tx) => (
               <div key={tx.id} className="bg-navy rounded-lg p-3 flex items-center justify-between border border-navy-light">
                 <div>
                   <p className="text-sm text-white">
