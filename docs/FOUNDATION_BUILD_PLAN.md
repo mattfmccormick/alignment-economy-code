@@ -235,8 +235,14 @@ Real, not blocking. Documented so they aren't forgotten.
   determinism, validation, signing), and the miner's `ledger.ts` (income classification +
   per-source aggregation). Writing these caught and removed a real bug: `derivePublicKey` was dead
   code that wrongly assumed the ML-DSA-65 public key is the last 1952 bytes of the secret key — it
-  isn't, and nothing used it. **Remaining:** component/flow tests (RTL + jsdom) for the
-  send/verify/vouch pages.
+  isn't, and nothing used it. **Component layer started (ae-app):** stood up a jsdom + React
+  Testing Library harness (a dedicated `vitest.config.ts` with `environment: 'jsdom'`, kept separate
+  from `vite.config.ts` so the PWA/service-worker plugin doesn't run under the test runner) and wrote
+  the first real flow test on the money-critical page: `Send.test.tsx` drives the recipient →
+  amount → send path and asserts the app signs and transmits the amount as the canonical base-unit
+  integer string (`toBaseUnits`, the real one — not mocked), never the float, plus a failure-path
+  test that a rejected send surfaces the error to the user. **Remaining:** flow tests for the
+  verify/vouch pages, then the same harness in ae-miner.
 - **D5. Frontend `any` burn-down.** ✅ **Done (both frontends at 0 `any`, rules promoted to error).** A2 demoted `no-explicit-any` and a
   few react-hooks advisory rules to warnings (~72 `any` in ae-app, ~25 in ae-miner), almost all on
   API-response plumbing — 51 of ae-app's are in `lib/api.ts`'s `request<…>` generics. Started the
