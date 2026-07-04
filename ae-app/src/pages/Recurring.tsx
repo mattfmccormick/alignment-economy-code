@@ -63,8 +63,21 @@ export function Recurring() {
         api.getContacts(wallet.accountId),
       ]);
       if (recurRes.success && recurRes.data) {
-        const list = recurRes.data.transfers || (recurRes.data as any) || [];
-        setTransfers(Array.isArray(list) ? list : []);
+        // Map the route's snake_case rows to the camelCase shape the UI uses.
+        // (Reading t.isActive / t.toId / t.pointType off the raw rows silently
+        // returned undefined before this mapping — the toggle, recipient, and
+        // point-type were all broken.)
+        setTransfers(
+          (recurRes.data.transfers ?? []).map((r) => ({
+            id: r.id,
+            fromId: r.from_id,
+            toId: r.to_id,
+            amount: Number(r.amount),
+            pointType: r.point_type,
+            schedule: r.schedule,
+            isActive: r.is_active === 1,
+          })),
+        );
       }
       if (contactRes.success && contactRes.data) {
         // Map the route's snake_case rows to the camelCase shape the UI uses.

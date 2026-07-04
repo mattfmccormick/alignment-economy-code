@@ -124,6 +124,22 @@ export interface AccountSearchResult {
   is_active: number;
 }
 
+/**
+ * A recurring-transfer row from `GET /recurring/:accountId`. Snake_case — the
+ * route returns raw joined DB columns (`SELECT r.*, a.public_key …`).
+ */
+export interface RecurringTransferData {
+  id: string;
+  from_id: string;
+  to_id: string;
+  amount: string | number;
+  point_type: string;
+  schedule: string;
+  is_active: number;
+  created_at: number;
+  to_public_key?: string;
+}
+
 // ─── Tagging (durable goods & spaces) ─────────────────────────────────────
 
 /** A durable-good product (camelCase; mapped from DB rows by the route). */

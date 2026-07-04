@@ -270,10 +270,13 @@ Real, not blocking. Documented so they aren't forgotten.
   state, and the purity warning is gone. Then typed `searchAccounts` (`AccountSearchResult`,
   snake_case) — which caught another casing bug: `Send`'s recipient search read `acc.percentHuman`
   while the payload field is `acc.percent_human`, so search hits always showed "0% human". Fixed.
-  ae-app is at **24 `any` (from 72)**, build + tests green. **Remaining:** verification panels,
-  evidence, the recurring-transfer response (same snake→camel bug as contacts — `isActive` toggle
-  is broken), the vouch-request update, the two `(data: any)` websocket handlers in `CaseDetail`,
-  the ae-miner side, then promote the rules to errors once each frontend reaches zero.
+  Then typed the recurring-transfer response (`RecurringTransferData`, snake_case) — same bug as
+  contacts: `Recurring` read `t.isActive` / `t.toId` / `t.pointType` off raw snake_case rows, so
+  the active/paused toggle, recipient, and point-type were all broken; fixed with a snake→camel
+  map. ae-app is at **22 `any` (from 72)**, build + tests green. **Remaining:** verification
+  panels, evidence, the vouch-request update, the two `(data: any)` websocket handlers in
+  `CaseDetail`, a handful of mutation responses whose callers ignore the body, the ae-miner side,
+  then promote the rules to errors once each frontend reaches zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`

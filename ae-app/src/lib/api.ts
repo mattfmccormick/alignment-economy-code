@@ -17,6 +17,7 @@ import type {
   SupportiveTagData,
   AmbientTagData,
   AccountSearchResult,
+  RecurringTransferData,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -150,7 +151,7 @@ export const api = {
 
   // Recurring Transfers
   getRecurring: (accountId: string) =>
-    request<{ transfers: any[] }>('GET', `/recurring/${accountId}`),
+    request<{ transfers: RecurringTransferData[] }>('GET', `/recurring/${accountId}`),
 
   // Auth-required: signed account is the sender. fromId is implicit.
   createRecurring: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; amount: number; pointType: string; schedule: string } }) =>
