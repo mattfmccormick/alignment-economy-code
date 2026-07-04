@@ -3,6 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { createAccount, getAccount, getTotalEarnedPool } from '../../core/account.js';
 import { transactionStore } from '../../core/transaction.js';
 import { getCycleState } from '../../core/day-cycle.js';
+import { validateBody } from '../middleware/validate.js';
+import * as schemas from '../schemas.js';
 import type { AccountType } from '../../core/types.js';
 
 export function accountRoutes(db: DatabaseSync): Router {
@@ -21,7 +23,7 @@ export function accountRoutes(db: DatabaseSync): Router {
   // New accounts always start at percentHuman: 0. Score is earned through
   // miner verification panels, vouches, and evidence — never granted by a
   // server flag. This is the protocol's single source of identity truth.
-  router.post('/', (req, res, next) => {
+  router.post('/', validateBody(schemas.createAccount), (req, res, next) => {
     try {
       const body = req.body?.payload || req.body || {};
       const { type, publicKey } = body;

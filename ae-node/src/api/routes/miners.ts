@@ -7,6 +7,8 @@ import { calculateScore } from '../../verification/scoring.js';
 import { createVouch, getActiveVouchesForAccount } from '../../verification/vouching.js';
 import { verificationStore } from '../../verification/panel.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import * as schemas from '../schemas.js';
 import { v4 as uuid } from 'uuid';
 
 export function minerRoutes(db: DatabaseSync) {
@@ -51,7 +53,7 @@ export function minerRoutes(db: DatabaseSync) {
   // account being verified can submit evidence about themselves. Without
   // this, a third party could spam fake evidence in someone else's name
   // (sybil farming via free percent-human bumps once a reviewer signs off).
-  router.post('/evidence', authMiddleware(db), (req, res) => {
+  router.post('/evidence', authMiddleware(db), validateBody(schemas.submitEvidence), (req, res) => {
     const accountId = req.accountId!;
     const { evidenceTypeId, evidenceHash } = req.body.payload || req.body;
     const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
@@ -86,7 +88,7 @@ export function minerRoutes(db: DatabaseSync) {
   });
 
   // POST /vouches - create a vouch (WP v2: stake a percentage of holdings).
-  router.post('/vouches', authMiddleware(db), (req, res) => {
+  router.post('/vouches', authMiddleware(db), validateBody(schemas.createVouch), (req, res) => {
     const voucherId = req.accountId!;
     const { vouchedId, stakePercent } = req.body.payload || req.body;
     const claimedVoucherId =
@@ -124,7 +126,7 @@ export function minerRoutes(db: DatabaseSync) {
   // the requestor (fromId) is the authenticated account. Without this, a
   // third party could spam vouch requests in someone else's name, polluting
   // miner inboxes and creating social-engineering opportunities.
-  router.post('/vouch-requests', authMiddleware(db), (req, res) => {
+  router.post('/vouch-requests', authMiddleware(db), validateBody(schemas.createVouchRequest), (req, res) => {
     const fromId = req.accountId!;
     const { toId, message } = req.body.payload || req.body;
     const claimedFromId = (req.body.payload && req.body.payload.fromId) ?? req.body.fromId;
@@ -161,7 +163,7 @@ export function minerRoutes(db: DatabaseSync) {
   // pending requests as 'accepted' or 'declined' and either bypass a real
   // accept-flow stake (the now-fixed /miners/vouches gap) or hide a
   // genuine request from the intended responder.
-  router.put('/vouch-requests/:id', authMiddleware(db), (req, res) => {
+  router.put('/vouch-requests/:id', authMiddleware(db), validateBody(schemas.respondVouchRequest), (req, res) => {
     const responderId = req.accountId!;
     const { status } = req.body.payload || req.body;
     if (status !== 'accepted' && status !== 'declined') {

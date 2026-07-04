@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { authMiddleware, minerAuthMiddleware } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import * as schemas from '../schemas.js';
 import { eventBus } from '../websocket.js';
 import { createPanel, submitPanelScore, getPanelReviews, verificationStore } from '../../verification/panel.js';
 import { getEvidenceForAccount, submitEvidence } from '../../verification/evidence.js';
@@ -58,7 +60,7 @@ export function verificationRoutes(db: DatabaseSync): Router {
   // the participant's account and any open panel can use it for review.
   // (This already exists at /miners/evidence with no auth — this version
   // adds proper auth and ties to the request signer.)
-  router.post('/evidence', authMiddleware(db), (req, res, next) => {
+  router.post('/evidence', authMiddleware(db), validateBody(schemas.submitEvidence), (req, res, next) => {
     try {
       const accountId = req.accountId!;
       const { evidenceTypeId, evidenceHash } = req.body.payload || req.body;
@@ -179,7 +181,7 @@ export function verificationRoutes(db: DatabaseSync): Router {
   // for an assigned panel. Auth + miner-required. When the last assigned
   // miner submits, the median is computed and the applicant's percentHuman
   // is updated atomically inside submitPanelScore.
-  router.post('/panels/:id/score', authMiddleware(db), minerAuthMiddleware(db), (req, res, next) => {
+  router.post('/panels/:id/score', authMiddleware(db), minerAuthMiddleware(db), validateBody(schemas.scorePanel), (req, res, next) => {
     try {
       const minerId = req.minerId!;
       const panelId = req.params.id as string;

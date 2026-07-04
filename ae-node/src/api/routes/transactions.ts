@@ -3,6 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { processTransaction, TransactionInput, transactionStore } from '../../core/transaction.js';
 import { PRECISION } from '../../core/constants.js';
 import { getAccount } from '../../core/account.js';
+import { validateBody } from '../middleware/validate.js';
+import { createTransaction } from '../schemas.js';
 import { eventBus } from '../websocket.js';
 import type { PointType } from '../../core/types.js';
 import type { WireTransaction } from '../../network/block-validator.js';
@@ -24,7 +26,7 @@ export function transactionRoutes(
   const router = Router();
 
   // POST /transactions (processTransaction does its own sig verification)
-  router.post('/', (req, res, next) => {
+  router.post('/', validateBody(createTransaction), (req, res, next) => {
     try {
       const { payload, accountId, timestamp, signature } = req.body;
       const { to, amount, pointType, isInPerson, recipientIsHuman, memo, receiverSignature } = payload;

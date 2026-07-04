@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { authMiddleware, minerAuthMiddleware } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import * as schemas from '../schemas.js';
 import { eventBus } from '../websocket.js';
 import {
   fileChallenge,
@@ -25,7 +27,7 @@ export function courtRoutes(db: DatabaseSync): Router {
   // Auth + miner-required: only registered miners can challenge. Stake is a
   // percentage of the challenger's Earned, locked at filing and burned if
   // the case is lost.
-  router.post('/challenges', authMiddleware(db), minerAuthMiddleware(db), (req, res, next) => {
+  router.post('/challenges', authMiddleware(db), minerAuthMiddleware(db), validateBody(schemas.fileChallenge), (req, res, next) => {
     try {
       const challengerAccountId = req.accountId!;
       const { defendantAccountId, caseType, stakePercent, openingArgument } = req.body.payload || req.body;
@@ -115,7 +117,7 @@ export function courtRoutes(db: DatabaseSync): Router {
 
   // POST /court/cases/:id/arguments - submit an argument or rebuttal on a case.
   // Auth required; backend gates the submitter to challenger or defendant.
-  router.post('/cases/:id/arguments', authMiddleware(db), (req, res, next) => {
+  router.post('/cases/:id/arguments', authMiddleware(db), validateBody(schemas.submitArgument), (req, res, next) => {
     try {
       const caseId = req.params.id as string;
       const { text, attachmentHash } = req.body.payload || req.body;
@@ -193,7 +195,7 @@ export function courtRoutes(db: DatabaseSync): Router {
 
   // POST /court/cases/:id/vote - juror submits a sealed vote.
   // Auth + miner-required: only the assigned juror miner can vote.
-  router.post('/cases/:id/vote', authMiddleware(db), minerAuthMiddleware(db), (req, res, next) => {
+  router.post('/cases/:id/vote', authMiddleware(db), minerAuthMiddleware(db), validateBody(schemas.castVote), (req, res, next) => {
     try {
       const caseId = req.params.id as string;
       const minerId = req.minerId!;

@@ -44,6 +44,8 @@ import {
   type AmbientTagInput,
 } from '../../tagging/ambient.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import * as schemas from '../schemas.js';
 import type { SpaceType } from '../../tagging/types.js';
 
 const VALID_SPACE_TYPES: SpaceType[] = [
@@ -58,7 +60,7 @@ export function tagRoutes(db: DatabaseSync): Router {
   // POST /tags/products — auth-required. The signed account is taken to be
   // the product creator (`createdBy`). Body createdBy is back-compat;
   // 403 ACCOUNT_MISMATCH if it disagrees with the signature.
-  router.post('/products', authMiddleware(db), (req, res) => {
+  router.post('/products', authMiddleware(db), validateBody(schemas.registerProduct), (req, res) => {
     const createdBy = req.accountId!;
     const { name, category, manufacturerId } = req.body.payload || req.body;
     const claimedCreatedBy = (req.body.payload && req.body.payload.createdBy) ?? req.body.createdBy;
@@ -122,7 +124,7 @@ export function tagRoutes(db: DatabaseSync): Router {
   // creator. Spaces don't currently track `createdBy` in the schema, but
   // we still gate on signature so future schema additions or analytics
   // can attribute correctly.
-  router.post('/spaces', authMiddleware(db), (req, res) => {
+  router.post('/spaces', authMiddleware(db), validateBody(schemas.registerSpace), (req, res) => {
     const { name, type, parentId, entityId, collectionRate } = req.body.payload || req.body;
     if (!name || !type) {
       return res.status(400).json({ error: 'name and type are required' });
@@ -172,7 +174,7 @@ export function tagRoutes(db: DatabaseSync): Router {
   // POST /tags/supportive — auth-required. The signed account is taken to
   // be the tag owner; a top-level `accountId` in the body is back-compat
   // only and rejected with 403 if it disagrees with the signed caller.
-  router.post('/supportive', authMiddleware(db), (req, res) => {
+  router.post('/supportive', authMiddleware(db), validateBody(schemas.submitTags), (req, res) => {
     const accountId = req.accountId!;
     const { day, tags } = req.body.payload || req.body;
     const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
@@ -231,7 +233,7 @@ export function tagRoutes(db: DatabaseSync): Router {
   // ----- Ambient tags -----
 
   // POST /tags/ambient — auth-required. Mirrors /supportive's auth shape.
-  router.post('/ambient', authMiddleware(db), (req, res) => {
+  router.post('/ambient', authMiddleware(db), validateBody(schemas.submitTags), (req, res) => {
     const accountId = req.accountId!;
     const { day, tags } = req.body.payload || req.body;
     const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;

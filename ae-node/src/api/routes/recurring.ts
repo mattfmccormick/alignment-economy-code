@@ -3,6 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { getAccount } from '../../core/account.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import * as schemas from '../schemas.js';
 
 export function recurringRoutes(db: DatabaseSync) {
   const router = Router();
@@ -50,7 +52,7 @@ export function recurringRoutes(db: DatabaseSync) {
   // points/day from Alice to Mallory" against a victim's balance). Even
   // before the executor exists, gating now means the moment that wiring
   // lands, the auth path is already in place.
-  router.post('/', authMiddleware(db), (req, res) => {
+  router.post('/', authMiddleware(db), validateBody(schemas.createRecurring), (req, res) => {
     const fromId = req.accountId!;
     const { toId, amount, pointType, schedule } = req.body.payload || req.body;
     const claimedFromId = (req.body.payload && req.body.payload.fromId) ?? req.body.fromId;

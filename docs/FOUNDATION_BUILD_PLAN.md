@@ -27,7 +27,16 @@ Last updated: July 3, 2026.
     on purpose — they are bugs, not user errors, and correctly become 500s.
     (`InheritanceError` predates `AppError` and isn't route-wired; convert it if
     inheritance ever gets an endpoint.)
-  - B2, B3: not started.
+  - B2 (schema validation): **DONE.** `api/middleware/validate.ts` adds a
+    `validateBody(schema)` gate; `api/schemas.ts` holds zod schemas for the write
+    endpoints. Applied to 18 write routes across transactions, accounts, court,
+    tags, verification, miners, recurring, and contacts. A malformed body is
+    rejected with a 400 `VALIDATION` before any business logic runs.
+    `tests/request-validation.test.ts` proves it. Schemas validate presence,
+    primitive type, and fixed-set enums; numeric-range/cross-field rules stay in
+    the business layer (which throws typed `AppError`s with specific codes that
+    tests rely on), so nothing that passed before regresses.
+  - B3: not started.
 - **Group C: not started.**
 - **Group D: tracked below.**
 

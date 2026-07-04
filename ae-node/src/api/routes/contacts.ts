@@ -3,6 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { getAccount } from '../../core/account.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import * as schemas from '../schemas.js';
 
 export function contactRoutes(db: DatabaseSync) {
   const router = Router();
@@ -43,7 +45,7 @@ export function contactRoutes(db: DatabaseSync) {
 
   // POST /contacts - add a contact. Auth-required: the signed account is
   // the owner. Body ownerId is back-compat (rejected with 403 if mismatched).
-  router.post('/', authMiddleware(db), (req, res) => {
+  router.post('/', authMiddleware(db), validateBody(schemas.createContact), (req, res) => {
     const ownerId = req.accountId!;
     const { contactAccountId, nickname } = req.body.payload || req.body;
     const claimedOwnerId = (req.body.payload && req.body.payload.ownerId) ?? req.body.ownerId;
