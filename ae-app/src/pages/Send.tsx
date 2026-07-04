@@ -54,8 +54,15 @@ export function Send() {
     try {
       const res = await api.getContacts(wallet.accountId);
       if (res.success && res.data) {
-        const list = res.data.contacts || (res.data as any) || [];
-        setContacts(Array.isArray(list) ? list : []);
+        // Map the route's snake_case rows to the camelCase shape the UI uses.
+        setContacts(
+          (res.data.contacts ?? []).map((c) => ({
+            id: c.id,
+            contactAccountId: c.contact_account_id,
+            nickname: c.nickname,
+            isFavorite: c.is_favorite === 1,
+          })),
+        );
       }
     } catch { /* ignore */ }
     setLoadingContacts(false);

@@ -129,6 +129,23 @@ export interface MinerStatus {
   miner?: MinerData;
 }
 
+/**
+ * A contacts-list row from `GET /contacts/:ownerId`. This one is snake_case —
+ * the route returns raw joined DB columns (`SELECT c.*, a.public_key, …`)
+ * rather than a camelCase serializer, so consumers must map it.
+ */
+export interface ContactData {
+  id: string;
+  owner_id: string;
+  contact_account_id: string;
+  nickname: string;
+  is_favorite: number;
+  created_at: number;
+  public_key: string;
+  percent_human: number;
+  account_type: string;
+}
+
 /** `GET /network/status`: network-wide counters (bigint pools as strings). */
 export interface NetworkStatus {
   currentDay: number;

@@ -46,8 +46,17 @@ export function Contacts() {
     try {
       const res = await api.getContacts(wallet.accountId);
       if (res.success && res.data) {
-        const list = res.data.contacts || (res.data as any) || [];
-        setContacts(Array.isArray(list) ? list : []);
+        // The route returns snake_case joined rows; map them to the camelCase
+        // shape the UI uses. (Reading c.isFavorite / c.contactAccountId off the
+        // raw rows silently returned undefined before this mapping existed.)
+        setContacts(
+          (res.data.contacts ?? []).map((c) => ({
+            id: c.id,
+            contactAccountId: c.contact_account_id,
+            nickname: c.nickname,
+            isFavorite: c.is_favorite === 1,
+          })),
+        );
       }
     } catch { /* ignore */ }
     setLoading(false);

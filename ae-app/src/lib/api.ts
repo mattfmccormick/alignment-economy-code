@@ -9,6 +9,7 @@ import type {
   MinerData,
   MinerStatus,
   NetworkStatus,
+  ContactData,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -121,7 +122,7 @@ export const api = {
 
   // Contacts
   getContacts: (ownerId: string) =>
-    request<{ contacts: any[] }>('GET', `/contacts/${ownerId}`),
+    request<{ contacts: ContactData[] }>('GET', `/contacts/${ownerId}`),
 
   // Auth-required: signed account is the contact owner.
   addContact: (envelope: { accountId: string; timestamp: number; signature: string; payload: { contactAccountId: string; nickname: string } }) =>

@@ -67,8 +67,14 @@ export function Recurring() {
         setTransfers(Array.isArray(list) ? list : []);
       }
       if (contactRes.success && contactRes.data) {
-        const list = contactRes.data.contacts || (contactRes.data as any) || [];
-        setContacts(Array.isArray(list) ? list : []);
+        // Map the route's snake_case rows to the camelCase shape the UI uses.
+        setContacts(
+          (contactRes.data.contacts ?? []).map((c) => ({
+            id: c.id,
+            contactAccountId: c.contact_account_id,
+            nickname: c.nickname,
+          })),
+        );
       }
     } catch { /* ignore */ }
     setLoading(false);

@@ -253,9 +253,14 @@ Real, not blocking. Documented so they aren't forgotten.
   (`MinerData`, `MinerStatus`, `NetworkStatus`) across `getMinerStatus`, `registerMiner`, and
   `getNetworkStatus`, and the `More` / `Wallet` / `Network` state that holds them — which caught a
   third latent bug: `More` set `miner: res.data` where `res.data` is `{ miner }`, double-nesting
-  the record (harmless today only because `minerStatus.miner` is never read). ae-app is at
-  **49 `any` (from 72)**, build + tests green. **Remaining:** the rest of the list responses
-  (contacts, vouches, tags, verification panels, evidence/vouch-requests), the two `(data: any)`
+  the record (harmless today only because `minerStatus.miner` is never read). Then typed the
+  contacts response (`ContactData`, snake_case since the route returns raw joined DB rows) — which
+  caught the biggest bug yet: **three pages** (`Contacts`, `Send`, `Recurring`) set their contact
+  state straight from the snake_case rows into a camelCase local type, so `contact.isFavorite` and
+  `contact.contactAccountId` were `undefined` at runtime (favorites filtering and contact-ID
+  display silently broken). Fixed all three with an explicit snake→camel map. ae-app is at
+  **45 `any` (from 72)**, build + tests green. **Remaining:** the rest of the list responses
+  (vouches, tags, verification panels, evidence/vouch-requests, search), the two `(data: any)`
   websocket handlers in `CaseDetail`, the ae-miner side, the real `react-hooks/purity` bug in
   `Tag.tsx` (`Date.now()` during render), then promote the rules to errors once each frontend
   reaches zero.
