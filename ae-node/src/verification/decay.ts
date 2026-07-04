@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getAccount, updatePercentHuman } from '../core/account.js';
 import { getActiveIndividuals } from '../core/account.js';
 import { transactionStore } from '../core/transaction.js';
+import { NotFoundError } from '../core/errors.js';
 import { getPolicy } from './policy.js';
 import type { SqliteTransactionStore } from '../core/stores/SqliteTransactionStore.js';
 
@@ -18,7 +19,7 @@ export function applyDecay(
   humanTagCredits: number,
 ): number {
   const acct = getAccount(db, accountId);
-  if (!acct) throw new Error(`Account not found: ${accountId}`);
+  if (!acct) throw new NotFoundError(`Account not found: ${accountId}`);
 
   const policy = getPolicy(db);
   const decay = policy.decay;

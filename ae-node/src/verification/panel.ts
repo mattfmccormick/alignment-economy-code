@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { sha256 } from '../core/crypto.js';
 import { updatePercentHuman } from '../core/account.js';
+import { NotFoundError, ValidationError } from '../core/errors.js';
 import { miningStore } from '../mining/registration.js';
 import { SqliteVerificationStore } from '../core/stores/SqliteVerificationStore.js';
 import type { IVerificationStore } from '../core/stores/IVerificationStore.js';
@@ -40,7 +41,7 @@ export function submitPanelScore(
   minerId: string,
   score: number,
 ): { recorded: boolean; panelComplete: boolean; medianScore: number | null } {
-  if (score < 0 || score > 100) throw new Error('Score must be 0-100');
+  if (score < 0 || score > 100) throw new ValidationError('Score must be 0-100', 'INVALID_SCORE');
 
   const verif = verificationStore(db);
   const now = Math.floor(Date.now() / 1000);
@@ -65,7 +66,7 @@ export function submitPanelScore(
   const scores = verif.findScoresByPanel(panelId);
   const panel = verif.findPanelById(panelId);
   if (!panel) {
-    throw new Error(`Panel not found after recording review: ${panelId}`);
+    throw new NotFoundError(`Panel not found after recording review: ${panelId}`);
   }
   const accountId = panel.accountId;
 

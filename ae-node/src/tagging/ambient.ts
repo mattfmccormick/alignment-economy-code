@@ -5,6 +5,7 @@ import { getAccount, updateBalance } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
 import { addToFeePool } from '../core/fee-pool.js';
 import { runTransaction } from '../db/connection.js';
+import { NotFoundError, ValidationError } from '../core/errors.js';
 import { getSpace, getSpaceAncestors } from './spaces.js';
 import type { AmbientTag } from './types.js';
 
@@ -34,11 +35,11 @@ export function submitAmbientTags(
   if (tags.length === 0) return [];
 
   const acct = getAccount(db, accountId);
-  if (!acct) throw new Error('Account not found');
+  if (!acct) throw new NotFoundError('Account not found');
 
   for (const tag of tags) {
-    if (!getSpace(db, tag.spaceId)) throw new Error(`Space not found: ${tag.spaceId}`);
-    if (tag.minutesOccupied <= 0) throw new Error('minutesOccupied must be positive');
+    if (!getSpace(db, tag.spaceId)) throw new NotFoundError(`Space not found: ${tag.spaceId}`);
+    if (tag.minutesOccupied <= 0) throw new ValidationError('minutesOccupied must be positive', 'INVALID_MINUTES');
   }
 
   const totalMinutes = tags.reduce((sum, t) => sum + t.minutesOccupied, 0);
@@ -48,7 +49,7 @@ export function submitAmbientTags(
   // supportive cap because a person can simultaneously occupy a space and
   // use a durable good.
   if (totalMinutes > 1440) {
-    throw new Error(`Total ambient minutes ${totalMinutes} exceeds the 1,440-minute daily cap`);
+    throw new ValidationError(`Total ambient minutes ${totalMinutes} exceeds the 1,440-minute daily cap`, 'MINUTES_CAP_EXCEEDED');
   }
 
   // Delete existing active tags for re-submission
@@ -95,7 +96,7 @@ export function distributeAmbientThroughHierarchy(
   totalPoints: bigint,
 ): HierarchyDistribution[] {
   const space = getSpace(db, spaceId);
-  if (!space) throw new Error('Space not found');
+  if (!space) throw new NotFoundError('Space not found');
 
   const distributions: HierarchyDistribution[] = [];
   const ancestors = getSpaceAncestors(db, spaceId);

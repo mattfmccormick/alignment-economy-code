@@ -5,6 +5,7 @@ import { getAccount, updateBalance } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
 import { addToFeePool } from '../core/fee-pool.js';
 import { runTransaction } from '../db/connection.js';
+import { NotFoundError, ValidationError } from '../core/errors.js';
 import { getProduct } from './products.js';
 import type { SupportiveTag } from './types.js';
 
@@ -34,12 +35,12 @@ export function submitSupportiveTags(
   if (tags.length === 0) return [];
 
   const acct = getAccount(db, accountId);
-  if (!acct) throw new Error('Account not found');
+  if (!acct) throw new NotFoundError('Account not found');
 
   // Validate all products exist
   for (const tag of tags) {
-    if (!getProduct(db, tag.productId)) throw new Error(`Product not found: ${tag.productId}`);
-    if (tag.minutesUsed <= 0) throw new Error('minutesUsed must be positive');
+    if (!getProduct(db, tag.productId)) throw new NotFoundError(`Product not found: ${tag.productId}`);
+    if (tag.minutesUsed <= 0) throw new ValidationError('minutesUsed must be positive', 'INVALID_MINUTES');
   }
 
   const totalMinutes = tags.reduce((sum, t) => sum + t.minutesUsed, 0);
@@ -50,7 +51,7 @@ export function submitSupportiveTags(
   // separately because a person can simultaneously occupy a space (ambient)
   // and use durable goods (supportive).
   if (totalMinutes > 1440) {
-    throw new Error(`Total supportive minutes ${totalMinutes} exceeds the 1,440-minute daily cap`);
+    throw new ValidationError(`Total supportive minutes ${totalMinutes} exceeds the 1,440-minute daily cap`, 'MINUTES_CAP_EXCEEDED');
   }
 
   // Delete existing active tags for this account+day (re-submission replaces)

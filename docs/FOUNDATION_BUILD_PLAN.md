@@ -15,15 +15,18 @@ Last updated: July 3, 2026.
     tracked warnings (see Group D) so their build gate is meaningful today; the
     generated `dev-dist/` service-worker files are now excluded from linting.
 - **Group B: in progress.**
-  - B1 (typed errors): started. `core/errors.ts` adds an `AppError` base with
+  - B1 (typed errors): **DONE.** `core/errors.ts` adds an `AppError` base with
     typed subclasses (Validation, InsufficientBalance, Auth, Forbidden, NotFound,
-    Conflict). `errorHandler.ts` now reads status/code off `AppError` and, crucially,
-    **no longer leaks internal error messages on unexpected 500s** (they're logged
-    server-side and the client gets a generic body). The money path
-    (`transaction.ts`, `account.ts`) is migrated to typed errors. The legacy
-    substring matcher is retained as a fallback until the remaining throw sites
-    (court, verification, mining, tagging) are migrated — that migration and the
-    removal of the fallback is the rest of B1.
+    Conflict). Every user-facing `throw` in the money path, court, verification,
+    mining, and tagging is now a typed `AppError` carrying an httpStatus and a
+    domain code. `errorHandler.ts` reads status/code off `AppError` and the
+    **legacy substring matcher is deleted** — anything that is not an `AppError`
+    is an internal fault that returns a generic 500 with **no message leak**
+    (logged server-side). Internal invariants (block genesis, fee-pool
+    distribution, follower replay, config/governance setters) stay plain `Error`
+    on purpose — they are bugs, not user errors, and correctly become 500s.
+    (`InheritanceError` predates `AppError` and isn't route-wired; convert it if
+    inheritance ever gets an endpoint.)
   - B2, B3: not started.
 - **Group C: not started.**
 - **Group D: tracked below.**
@@ -187,9 +190,9 @@ Real, not blocking. Documented so they aren't forgotten.
 - **D6. Frontend dependency conflict.** `vite-plugin-pwa@1.2.0` peers on vite <=7 but both
   frontends run vite 8, so `npm ci` needs `--legacy-peer-deps` (the CI jobs pass this). Bump
   `vite-plugin-pwa` to a vite-8-compatible release (or pin vite to 7) and drop the flag.
-- **D7. Finish B1 error migration.** Migrate the remaining `throw new Error` sites in
-  `court/`, `verification/`, `mining/`, and `tagging/` to typed `AppError`s, then delete the
-  legacy substring matcher from `errorHandler.ts`.
+- ~~**D7. Finish B1 error migration.**~~ **Done.** All user-facing throws in court,
+  verification, mining, and tagging are typed `AppError`s and the legacy substring matcher is
+  removed from `errorHandler.ts`.
 - **D8. Fix the ae-app clean build.** On a fresh checkout `ae-app` won't build: it imports the
   sibling `@alignmenteconomy/sdk` workspace package (not installed by a standalone `npm ci`) and
   `tsc` surfaces pre-existing `catch (e: unknown)` type errors that local incremental builds

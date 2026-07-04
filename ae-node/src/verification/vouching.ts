@@ -13,6 +13,7 @@ import { v4 as uuid } from 'uuid';
 import { getAccount, updateBalance } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
 import { runTransaction } from '../db/connection.js';
+import { NotFoundError, ValidationError, InsufficientBalanceError } from '../core/errors.js';
 import { getPolicy } from './policy.js';
 import { verificationStore } from './panel.js';
 import type { Vouch } from './types.js';
@@ -36,17 +37,17 @@ export function createVouch(
   stakePercent: number,
 ): Vouch {
   const voucher = getAccount(db, voucherId);
-  if (!voucher) throw new Error(`Voucher account not found: ${voucherId}`);
-  if (!voucher.isActive) throw new Error('Voucher account is inactive');
+  if (!voucher) throw new NotFoundError(`Voucher account not found: ${voucherId}`);
+  if (!voucher.isActive) throw new ValidationError('Voucher account is inactive', 'ACCOUNT_INACTIVE');
 
   const vouched = getAccount(db, vouchedId);
-  if (!vouched) throw new Error(`Vouched account not found: ${vouchedId}`);
+  if (!vouched) throw new NotFoundError(`Vouched account not found: ${vouchedId}`);
 
-  if (voucherId === vouchedId) throw new Error('Cannot vouch for yourself');
-  if (voucher.isEscrowed) throw new Error('Cannot create vouches while account is escrowed');
+  if (voucherId === vouchedId) throw new ValidationError('Cannot vouch for yourself', 'SELF_VOUCH');
+  if (voucher.isEscrowed) throw new ValidationError('Cannot create vouches while account is escrowed', 'ACCOUNT_ESCROWED');
 
   if (stakePercent <= 0 || stakePercent > 100) {
-    throw new Error(`stakePercent must be between 0 (exclusive) and 100 (inclusive), got ${stakePercent}`);
+    throw new ValidationError(`stakePercent must be between 0 (exclusive) and 100 (inclusive), got ${stakePercent}`, 'INVALID_STAKE_PERCENT');
   }
 
   const policy = getPolicy(db);
@@ -54,17 +55,17 @@ export function createVouch(
   const minStakePercent = vouchType?.minStakePercent ?? 5;
 
   if (stakePercent < minStakePercent) {
-    throw new Error(`stakePercent ${stakePercent}% below minimum ${minStakePercent}%`);
+    throw new ValidationError(`stakePercent ${stakePercent}% below minimum ${minStakePercent}%`, 'STAKE_TOO_SMALL');
   }
 
   const totalHoldings = voucher.earnedBalance + voucher.lockedBalance;
   const stakeAmount = computeStakeFromPercent(totalHoldings, stakePercent);
 
   if (stakeAmount > voucher.earnedBalance) {
-    throw new Error(`Insufficient earned balance to stake ${stakePercent}%: needs ${stakeAmount}, has ${voucher.earnedBalance}`);
+    throw new InsufficientBalanceError(`Insufficient earned balance to stake ${stakePercent}%: needs ${stakeAmount}, has ${voucher.earnedBalance}`);
   }
   if (stakeAmount === 0n) {
-    throw new Error('Stake amount rounds to zero — balance too small');
+    throw new ValidationError('Stake amount rounds to zero — balance too small', 'STAKE_ROUNDS_TO_ZERO');
   }
 
   const id = uuid();
@@ -96,10 +97,10 @@ export function createVouch(
 export function withdrawVouch(db: DatabaseSync, vouchId: string): void {
   const verif = verificationStore(db);
   const vouch = verif.findActiveVouchById(vouchId);
-  if (!vouch) throw new Error(`Active vouch not found: ${vouchId}`);
+  if (!vouch) throw new NotFoundError(`Active vouch not found: ${vouchId}`);
 
   const voucher = getAccount(db, vouch.voucherId);
-  if (!voucher) throw new Error(`Voucher account not found`);
+  if (!voucher) throw new NotFoundError(`Voucher account not found`);
 
   const now = Math.floor(Date.now() / 1000);
 
@@ -120,10 +121,10 @@ export function withdrawVouch(db: DatabaseSync, vouchId: string): void {
 export function burnVouch(db: DatabaseSync, vouchId: string): void {
   const verif = verificationStore(db);
   const vouch = verif.findActiveVouchById(vouchId);
-  if (!vouch) throw new Error(`Active vouch not found: ${vouchId}`);
+  if (!vouch) throw new NotFoundError(`Active vouch not found: ${vouchId}`);
 
   const voucher = getAccount(db, vouch.voucherId);
-  if (!voucher) throw new Error(`Voucher account not found`);
+  if (!voucher) throw new NotFoundError(`Voucher account not found`);
 
   const now = Math.floor(Date.now() / 1000);
   const burnAmount = vouch.stakeAmount;

@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { getParam } from '../config/params.js';
 import { getAccount } from '../core/account.js';
+import { NotFoundError } from '../core/errors.js';
 import { getMiner, setMinerTier, deactivateMiner, getActiveMiners } from './registration.js';
 import { calculateUptime } from './heartbeat.js';
 import { getCompositeAccuracy, getJuryAttendanceRate, getCompletedAssignments } from './accuracy.js';
@@ -27,11 +28,11 @@ export function evaluateMinerTier(
 ): TierEvaluation {
   const miner = getMiner(db, minerId);
   if (!miner || !miner.isActive) {
-    throw new Error(`Active miner not found: ${minerId}`);
+    throw new NotFoundError(`Active miner not found: ${minerId}`);
   }
 
   const acct = getAccount(db, miner.accountId);
-  if (!acct) throw new Error(`Miner account not found: ${miner.accountId}`);
+  if (!acct) throw new NotFoundError(`Miner account not found: ${miner.accountId}`);
 
   // Force-deactivate if percentHuman dropped below 50
   if (acct.percentHuman < 50) {

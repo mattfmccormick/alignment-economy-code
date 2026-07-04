@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { getAccount, updateBalance } from '../core/account.js';
 import { recordLog, calculateFee } from '../core/transaction.js';
 import { addToFeePool } from '../core/fee-pool.js';
+import { NotFoundError, ValidationError } from '../core/errors.js';
 import { runTransaction } from '../db/connection.js';
 import { submitSupportiveTags } from './supportive.js';
 import { submitAmbientTags } from './ambient.js';
@@ -40,13 +41,13 @@ export function createSmartContract(
   // earned_recurring it's repurposed as a fixed display-unit amount of
   // earned points (1..unbounded), so the validator branches on type.
   if (type === 'earned_recurring') {
-    if (allocationPercent <= 0) throw new Error('earned_recurring requires a positive amount');
+    if (allocationPercent <= 0) throw new ValidationError('earned_recurring requires a positive amount', 'INVALID_AMOUNT');
   } else {
-    if (allocationPercent <= 0 || allocationPercent > 100) throw new Error('allocationPercent must be 1-100');
+    if (allocationPercent <= 0 || allocationPercent > 100) throw new ValidationError('allocationPercent must be 1-100', 'INVALID_ALLOCATION');
   }
 
   const acct = getAccount(db, accountId);
-  if (!acct) throw new Error('Account not found');
+  if (!acct) throw new NotFoundError('Account not found');
 
   // For account-targeted contracts the recipient must exist + be active
   // at creation time. (We don't re-check on every execution; if the
@@ -54,9 +55,9 @@ export function createSmartContract(
   // skips the run with reason='recipient inactive'.)
   if (type === 'active_standing' || type === 'earned_recurring') {
     const recipient = getAccount(db, targetId);
-    if (!recipient) throw new Error(`Target account not found: ${targetId}`);
-    if (!recipient.isActive) throw new Error(`Target account is inactive: ${targetId}`);
-    if (targetId === accountId) throw new Error('Cannot target your own account');
+    if (!recipient) throw new NotFoundError(`Target account not found: ${targetId}`);
+    if (!recipient.isActive) throw new ValidationError(`Target account is inactive: ${targetId}`, 'ACCOUNT_INACTIVE');
+    if (targetId === accountId) throw new ValidationError('Cannot target your own account', 'SELF_TARGET');
   }
 
   const id = uuid();

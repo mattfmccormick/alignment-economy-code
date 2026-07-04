@@ -5,6 +5,7 @@ import { getAccount, updateBalance, deactivateAccount, setEscrowed } from '../co
 import { recordLog } from '../core/transaction.js';
 import { runTransaction } from '../db/connection.js';
 import { getParam } from '../config/params.js';
+import { NotFoundError, ValidationError, ForbiddenError, ConflictError, InsufficientBalanceError } from '../core/errors.js';
 import { getMinerByAccount, getActiveMiners, getMiner, setMinerTier, miningStore } from '../mining/registration.js';
 import { burnAllVouchesOnAccount } from '../verification/vouching.js';
 import { getCompositeAccuracy } from '../mining/accuracy.js';
@@ -66,31 +67,31 @@ export function fileChallenge(
 ): CourtCase {
   // Verify challenger is an active miner
   const miner = getMinerByAccount(db, challengerAccountId);
-  if (!miner) throw new Error('Only active miners can file challenges');
+  if (!miner) throw new ForbiddenError('Only active miners can file challenges', 'NOT_ACTIVE_MINER');
 
   const challenger = getAccount(db, challengerAccountId)!;
   const defendant = getAccount(db, defendantAccountId);
-  if (!defendant) throw new Error('Defendant account not found');
-  if (!defendant.isActive) throw new Error('Defendant account is inactive');
-  if (challengerAccountId === defendantAccountId) throw new Error('Cannot challenge yourself');
+  if (!defendant) throw new NotFoundError('Defendant account not found');
+  if (!defendant.isActive) throw new ValidationError('Defendant account is inactive', 'ACCOUNT_INACTIVE');
+  if (challengerAccountId === defendantAccountId) throw new ValidationError('Cannot challenge yourself', 'SELF_CHALLENGE');
 
   const store = courtStore(db);
 
   // Protection window
   const state = db.prepare('SELECT current_day FROM day_cycle_state WHERE id = 1').get() as { current_day: number };
   if (defendant.protectionWindowEnd && state.current_day <= defendant.protectionWindowEnd) {
-    throw new Error(`Account in protection window until day ${defendant.protectionWindowEnd}`);
+    throw new ForbiddenError(`Account in protection window until day ${defendant.protectionWindowEnd}`, 'PROTECTION_WINDOW');
   }
 
   // No active case against defendant
   if (store.findActiveCaseAgainst(defendantAccountId)) {
-    throw new Error('Active case already exists against this defendant');
+    throw new ConflictError('Active case already exists against this defendant', 'ACTIVE_CASE_EXISTS');
   }
 
-  if (stakePercent < 1) throw new Error('Minimum stake is 1%');
+  if (stakePercent < 1) throw new ValidationError('Minimum stake is 1%', 'STAKE_TOO_SMALL');
 
   const stakeAmount = (challenger.earnedBalance * BigInt(Math.round(stakePercent * 100))) / 10000n;
-  if (stakeAmount > challenger.earnedBalance) throw new Error('Insufficient balance for stake');
+  if (stakeAmount > challenger.earnedBalance) throw new InsufficientBalanceError('Insufficient balance for stake');
 
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);
@@ -170,24 +171,24 @@ export function submitArgument(
   attachmentHash?: string,
 ): CaseArgument {
   const courtCase = getCase(db, caseId);
-  if (!courtCase) throw new Error('Case not found');
+  if (!courtCase) throw new NotFoundError('Case not found');
 
   // Only the parties can post; jurors and onlookers cannot. Prevents the
   // jury pool from prejudicing the case from the bench.
   let role: ArgumentRole;
   if (submitterAccountId === courtCase.challengerId) role = 'challenger';
   else if (submitterAccountId === courtCase.defendantId) role = 'defendant';
-  else throw new Error('Only the challenger or defendant can submit arguments');
+  else throw new ForbiddenError('Only the challenger or defendant can submit arguments', 'NOT_A_PARTY');
 
   // Once the verdict is in, the case is closed for new arguments. Earlier
   // statuses (arbitration_open, court_voting, etc.) are all open for posting.
   if (courtCase.verdict !== null || courtCase.status === 'closed' || courtCase.status === 'withdrawn') {
-    throw new Error(`Case is no longer open for arguments (status: ${courtCase.status})`);
+    throw new ValidationError(`Case is no longer open for arguments (status: ${courtCase.status})`, 'CASE_NOT_OPEN');
   }
 
   const trimmed = text.trim();
-  if (!trimmed) throw new Error('Argument text is required');
-  if (trimmed.length > 5000) throw new Error('Argument text exceeds 5,000 character limit');
+  if (!trimmed) throw new ValidationError('Argument text is required', 'ARGUMENT_REQUIRED');
+  if (trimmed.length > 5000) throw new ValidationError('Argument text exceeds 5,000 character limit', 'ARGUMENT_TOO_LONG');
 
   const arg: CaseArgument = {
     id: uuid(),
@@ -226,8 +227,8 @@ export function getCase(db: DatabaseSync, caseId: string): CourtCase | null {
 
 export function escalateToFull(db: DatabaseSync, caseId: string): CourtCase {
   const courtCase = getCase(db, caseId);
-  if (!courtCase) throw new Error('Case not found');
-  if (courtCase.level !== 'arbitration') throw new Error('Can only escalate from arbitration');
+  if (!courtCase) throw new NotFoundError('Case not found');
+  if (courtCase.level !== 'arbitration') throw new ValidationError('Can only escalate from arbitration', 'NOT_ARBITRATION');
 
   courtStore(db).setLevelToCourt(caseId);
 
@@ -238,7 +239,7 @@ export function escalateToFull(db: DatabaseSync, caseId: string): CourtCase {
 
 export function selectJury(db: DatabaseSync, caseId: string, blockHash: string): string[] {
   const courtCase = getCase(db, caseId);
-  if (!courtCase) throw new Error('Case not found');
+  if (!courtCase) throw new NotFoundError('Case not found');
 
   const jurySize = getParam<number>(db, 'court.jury_size');
   const jurorStakePercent = getParam<number>(db, 'court.juror_stake_percent');
@@ -332,8 +333,8 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
 export function submitVote(db: DatabaseSync, caseId: string, minerId: string, vote: Vote): void {
   const store = courtStore(db);
   const juror = store.findJurorByMiner(caseId, minerId);
-  if (!juror) throw new Error('Miner is not a juror on this case');
-  if (juror.vote) throw new Error('Already voted');
+  if (!juror) throw new ForbiddenError('Miner is not a juror on this case', 'NOT_A_JUROR');
+  if (juror.vote) throw new ConflictError('Already voted', 'ALREADY_VOTED');
 
   store.recordVote(caseId, minerId, vote, Math.floor(Date.now() / 1000));
 }
@@ -343,12 +344,12 @@ export function submitVote(db: DatabaseSync, caseId: string, minerId: string, vo
 export function resolveVerdict(db: DatabaseSync, caseId: string): Verdict {
   const store = courtStore(db);
   const courtCase = getCase(db, caseId);
-  if (!courtCase) throw new Error('Case not found');
+  if (!courtCase) throw new NotFoundError('Case not found');
 
   const jurors = store.findJurorsByCase(caseId);
   const votes = jurors.filter((j) => j.vote !== null);
 
-  if (votes.length === 0) throw new Error('No votes cast');
+  if (votes.length === 0) throw new ValidationError('No votes cast', 'NO_VOTES');
 
   const humanVotes = votes.filter((j) => j.vote === 'human').length;
   const notHumanVotes = votes.filter((j) => j.vote === 'not_human').length;
@@ -493,12 +494,12 @@ export function getActiveCases(db: DatabaseSync): CourtCase[] {
 export function fileAppeal(db: DatabaseSync, caseId: string, blockHash: string): CourtCase {
   const store = courtStore(db);
   const original = getCase(db, caseId);
-  if (!original) throw new Error('Case not found');
-  if (!original.verdict) throw new Error('Case has no verdict to appeal');
-  if (original.level === 'appeal') throw new Error('Cannot appeal an appeal');
+  if (!original) throw new NotFoundError('Case not found');
+  if (!original.verdict) throw new ValidationError('Case has no verdict to appeal', 'NO_VERDICT');
+  if (original.level === 'appeal') throw new ValidationError('Cannot appeal an appeal', 'CANNOT_APPEAL_APPEAL');
 
   const maxAppeals = getParam<number>(db, 'court.max_appeals');
-  if (store.countAppealsOf(caseId) >= maxAppeals) throw new Error('Maximum appeals reached');
+  if (store.countAppealsOf(caseId) >= maxAppeals) throw new ValidationError('Maximum appeals reached', 'MAX_APPEALS');
 
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);
@@ -529,15 +530,15 @@ export function fileAppeal(db: DatabaseSync, caseId: string, blockHash: string):
 export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
   const store = courtStore(db);
   const appealCase = getCase(db, appealCaseId);
-  if (!appealCase) throw new Error('Appeal case not found');
-  if (appealCase.level !== 'appeal') throw new Error('Not an appeal case');
+  if (!appealCase) throw new NotFoundError('Appeal case not found');
+  if (appealCase.level !== 'appeal') throw new ValidationError('Not an appeal case', 'NOT_APPEAL');
 
   const originalCase = getCase(db, appealCase.appealOf!)!;
 
   const jurors = store.findJurorsByCase(appealCaseId);
   const votes = jurors.filter((j) => j.vote !== null);
 
-  if (votes.length === 0) throw new Error('No votes cast');
+  if (votes.length === 0) throw new ValidationError('No votes cast', 'NO_VOTES');
 
   const humanVotes = votes.filter((j) => j.vote === 'human').length;
   const notHumanVotes = votes.filter((j) => j.vote === 'not_human').length;

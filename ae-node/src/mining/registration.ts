@@ -7,6 +7,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { getAccount } from '../core/account.js';
+import { NotFoundError, ValidationError, ConflictError } from '../core/errors.js';
 import { SqliteMiningStore } from '../core/stores/SqliteMiningStore.js';
 import type { IMiningStore } from '../core/stores/IMiningStore.js';
 import type { Miner } from './types.js';
@@ -17,8 +18,8 @@ export function miningStore(db: DatabaseSync): IMiningStore {
 
 export function registerMiner(db: DatabaseSync, accountId: string): Miner {
   const acct = getAccount(db, accountId);
-  if (!acct) throw new Error(`Account not found: ${accountId}`);
-  if (acct.type !== 'individual') throw new Error('Only individual accounts can become miners');
+  if (!acct) throw new NotFoundError(`Account not found: ${accountId}`);
+  if (acct.type !== 'individual') throw new ValidationError('Only individual accounts can become miners', 'NOT_INDIVIDUAL');
 
   const store = miningStore(db);
 
@@ -26,12 +27,12 @@ export function registerMiner(db: DatabaseSync, accountId: string): Miner {
   // percentHuman floor. Without this, a fresh network is impossible — every
   // miner needs to be verified by another miner.
   if (store.countActiveMiners() > 0 && acct.percentHuman < 50) {
-    throw new Error(`percentHuman ${acct.percentHuman} below minimum 50`);
+    throw new ValidationError(`percentHuman ${acct.percentHuman} below minimum 50`, 'PERCENT_HUMAN_TOO_LOW');
   }
 
   // Check not already registered
   if (store.findMinerByAccountId(accountId)) {
-    throw new Error('Account already has an active miner');
+    throw new ConflictError('Account already has an active miner', 'MINER_EXISTS');
   }
 
   const id = uuid();
@@ -65,7 +66,7 @@ export function setMinerTier(
 ): void {
   const store = miningStore(db);
   const miner = store.findMinerById(minerId);
-  if (!miner) throw new Error(`Miner not found: ${minerId}`);
+  if (!miner) throw new NotFoundError(`Miner not found: ${minerId}`);
   if (miner.tier === newTier) return;
 
   const now = Math.floor(Date.now() / 1000);

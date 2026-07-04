@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
+import { ValidationError } from '../core/errors.js';
 import type { Space, SpaceType } from './types.js';
 
 function rowToSpace(row: Record<string, unknown>): Space {
@@ -27,7 +28,7 @@ export function registerSpace(
   const now = Math.floor(Date.now() / 1000);
 
   if (collectionRate < 0 || collectionRate > 100) {
-    throw new Error('Collection rate must be 0-100');
+    throw new ValidationError('Collection rate must be 0-100', 'INVALID_COLLECTION_RATE');
   }
 
   db.prepare(
