@@ -14,7 +14,7 @@
 // insufficient earned) doesn't leave a stale 'accepted' request.
 
 import { useEffect, useState } from 'react';
-import { api, type VouchData, type VouchRequests, type Account } from '../lib/api';
+import { api, type VouchData, type VouchRequests, type Account, type Vouch, type VouchRequest } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
 import { signPayload } from '../lib/crypto';
 import { displayPoints, truncateId, timeAgo } from '../lib/formatting';
@@ -85,10 +85,10 @@ export default function Vouch() {
   // Earned + locked = total holdings. Treat both string and {balances} shapes
   // safely — older API responses returned flat fields, newer ones nest under balances.
   const earnedRaw = BigInt(
-    (account as any)?.earnedBalance ?? account?.balances?.earned ?? '0',
+    (account as { earnedBalance?: string })?.earnedBalance ?? account?.balances?.earned ?? '0',
   );
   const lockedRaw = BigInt(
-    (account as any)?.lockedBalance ?? account?.balances?.locked ?? '0',
+    (account as { lockedBalance?: string })?.lockedBalance ?? account?.balances?.locked ?? '0',
   );
   const totalHoldings = earnedRaw + lockedRaw;
 
@@ -231,7 +231,7 @@ function SendRequestCard({ fromId, onSent }: { fromId: string; onSent: () => voi
 function IncomingRequestsCard({
   requests, myAccountId, earnedRaw, totalHoldings, onChanged,
 }: {
-  requests: any[];
+  requests: VouchRequest[];
   myAccountId: string;
   earnedRaw: bigint;
   totalHoldings: bigint;
@@ -268,7 +268,7 @@ function IncomingRequestsCard({
 function IncomingRow({
   request, myAccountId, earnedRaw, totalHoldings, onChanged,
 }: {
-  request: any;
+  request: VouchRequest;
   myAccountId: string;
   earnedRaw: bigint;
   totalHoldings: bigint;
@@ -404,7 +404,7 @@ function IncomingRow({
 
 // ---------- Outgoing requests ----------
 
-function OutgoingRequestsCard({ requests }: { requests: any[] }) {
+function OutgoingRequestsCard({ requests }: { requests: VouchRequest[] }) {
   return (
     <div className="bg-card border border-border rounded-lg p-5">
       <div className="flex items-center justify-between mb-3">
@@ -434,7 +434,7 @@ function OutgoingRequestsCard({ requests }: { requests: any[] }) {
 
 // ---------- Active vouches ----------
 
-function ActiveVouchesCard({ received, given }: { received: any[]; given: any[] }) {
+function ActiveVouchesCard({ received, given }: { received: Vouch[]; given: Vouch[] }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="bg-card border border-border rounded-lg p-5">

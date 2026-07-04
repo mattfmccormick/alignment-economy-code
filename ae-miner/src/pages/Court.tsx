@@ -1,43 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, type JuryAssignment, type ActiveCaseSummary } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 
 type Tab = 'jury' | 'cases' | 'file';
 
-interface JuryAssignment {
-  caseId: string;
-  caseType: string;
-  caseLevel: string;
-  caseStatus: string;
-  challengerId: string;
-  defendantId: string;
-  votingDeadline: number | null;
-  verdict: string | null;
-  stakeAmount: string;
-  myVote: string | null;
-  votedAt: number | null;
-}
-
-interface CourtCase {
-  id: string;
-  type: string;
-  status: string;
-  challengerId: string;
-  defendantId: string;
-  challengerStake: string;
-  verdict: string | null;
-  createdAt: number;
-}
-
 export default function Court() {
   const [tab, setTab] = useState<Tab>('jury');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [assignments, setAssignments] = useState<JuryAssignment[]>([]);
-  const [cases, setCases] = useState<CourtCase[]>([]);
+  const [cases, setCases] = useState<ActiveCaseSummary[]>([]);
   const [voting, setVoting] = useState<string | null>(null);
 
   // File-challenge form state

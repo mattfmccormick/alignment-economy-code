@@ -237,7 +237,7 @@ Real, not blocking. Documented so they aren't forgotten.
   code that wrongly assumed the ML-DSA-65 public key is the last 1952 bytes of the secret key — it
   isn't, and nothing used it. **Remaining:** component/flow tests (RTL + jsdom) for the
   send/verify/vouch pages.
-- **D5. Frontend `any` burn-down.** 🟢 **ae-app done (0 `any`, rule promoted to error); ae-miner next.** A2 demoted `no-explicit-any` and a
+- **D5. Frontend `any` burn-down.** ✅ **Done (both frontends at 0 `any`, rules promoted to error).** A2 demoted `no-explicit-any` and a
   few react-hooks advisory rules to warnings (~72 `any` in ae-app, ~25 in ae-miner), almost all on
   API-response plumbing — 51 of ae-app's are in `lib/api.ts`'s `request<…>` generics. Started the
   burn-down: added `lib/types.ts` with real `AccountData` / `AccountDetail` shapes (mirroring the
@@ -292,9 +292,16 @@ Real, not blocking. Documented so they aren't forgotten.
   `error`** — new `any` now fails the ae-app build gate. Lint (0 errors), tests (14), and build all
   green. Along the way this pass caught 8 real bugs (blank point-type labels, double-nested miner
   state, three contact-page snake/camel mismatches, a "0% human" search bug, a broken recurring
-  toggle, a purity bug, and the evidence-score shape). **Remaining:** the ae-miner side (~25 `any`),
-  after which promote its rules to errors too. (react-hooks `purity`/`immutability`/`set-state-in-effect`
-  stay warnings in ae-app until their handful of pre-existing hits are fixed.)
+  toggle, a purity bug, and the evidence-score shape). (react-hooks
+  `purity`/`immutability`/`set-state-in-effect` stay warnings in ae-app until their handful of
+  pre-existing hits are fixed.) **Then ae-miner (23 `any`):** its api.ts already kept types inline,
+  so this promoted the page-local court/panel types (`PanelAssignment`, `PanelDetail`, `CaseHeader`,
+  `CaseArgument`, `JurorRow`, `JuryAssignment`, `ActiveCaseSummary`) up into api.ts as the real
+  return shapes, de-duplicating the copies in `Verify` / `Court` / `CaseDetail`, and typed the two
+  `CaseDetail` ws handlers plus `Vouch`'s request/vouch card props and the two dual-shape account
+  balance reads (narrow casts, not `any`). **ae-miner is at 0 `any` (from 23)**, and because its
+  react-hooks advisories were already clean, **all six rules** are promoted to `error` there. Both
+  frontends lint clean (0 errors), all tests green (14 + 17), both build. D5 done.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`

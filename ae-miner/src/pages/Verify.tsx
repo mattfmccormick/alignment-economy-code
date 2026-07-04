@@ -1,41 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
-import { api } from '../lib/api';
+import { api, type PanelAssignment, type PanelDetail } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 
-interface Assignment {
-  panelId: string;
-  applicantAccountId: string;
-  panelStatus: 'pending' | 'in_progress' | 'complete';
-  panelCreatedAt: number;
-  panelCompletedAt: number | null;
-  medianScore: number | null;
-  assignedAt: number;
-  deadline: number;
-  myReviewSubmitted: boolean;
-  missed: boolean;
-}
-
-interface PanelDetail {
-  panel: {
-    id: string;
-    accountId: string;
-    status: string;
-    createdAt: number;
-    completedAt: number | null;
-    medianScore: number | null;
-  };
-  evidence: Array<{ id: string; evidenceTypeId: string; evidenceHash: string; submittedAt: number }>;
-  reviews: Array<{ id: string; minerId: string; score: number; submittedAt: number }>;
-  assignedMiners: Array<{ miner_id: string; completed: number; missed: number }>;
-  liveScore: { totalScore: number; breakdown: { tierA: number; tierB: number; tierC: number } };
-}
-
 export default function Verify() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [assignments, setAssignments] = useState<PanelAssignment[]>([]);
   const [minerRegistered, setMinerRegistered] = useState(false);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [panelDetail, setPanelDetail] = useState<PanelDetail | null>(null);

@@ -9,45 +9,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { loadMinerWallet } from '../lib/keys';
-import { api } from '../lib/api';
+import { api, type CaseHeader, type CaseArgument, type JurorRow } from '../lib/api';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { displayPoints, truncateId, timeAgo } from '../lib/formatting';
-
-interface CaseHeader {
-  id: string;
-  type: string;
-  level: string;
-  status: string;
-  challengerId: string;
-  defendantId: string;
-  challengerStake: string;
-  challengerStakePercent: number;
-  verdict: string | null;
-  appealOf: string | null;
-  arbitrationDeadline: number | null;
-  votingDeadline: number | null;
-  createdAt: number;
-  resolvedAt: number | null;
-}
-
-interface CaseArgument {
-  id: string;
-  caseId: string;
-  submitterId: string;
-  role: 'challenger' | 'defendant';
-  text: string;
-  attachmentHash: string | null;
-  createdAt: number;
-}
-
-interface JurorRow {
-  minerId: string;
-  jurorAccountId: string;
-  stakeAmount: string;
-  vote: string | null;       // 'human' | 'not_human' | 'sealed' | null
-  votedAt: number | null;
-}
 
 const CASE_OPEN_STATUSES = new Set([
   'arbitration_open', 'arbitration_response',
@@ -89,11 +54,11 @@ export default function CaseDetail() {
 
   useEffect(() => {
     load();
-    const offArg = wsClient.on('court:argument', (data: any) => {
-      if (data?.caseId === id) load();
+    const offArg = wsClient.on('court:argument', (data) => {
+      if ((data as { caseId?: string }).caseId === id) load();
     });
-    const offVerdict = wsClient.on('court:verdict', (data: any) => {
-      if (data?.caseId === id) load();
+    const offVerdict = wsClient.on('court:verdict', (data) => {
+      if ((data as { caseId?: string }).caseId === id) load();
     });
     return () => { offArg(); offVerdict(); };
   }, [id, load]);

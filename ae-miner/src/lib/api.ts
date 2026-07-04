@@ -28,7 +28,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   // Some routes return the standard { success, data } envelope; others return
   // the payload directly. Wrap the bare ones so every callsite can `.success`
   // and `.data` without per-route casing.
-  if (json && typeof json === 'object' && typeof (json as any).success === 'boolean') {
+  if (json && typeof json === 'object' && typeof (json as { success?: unknown }).success === 'boolean') {
     return json as T;
   }
   return { success: true, data: json } as T;
@@ -154,6 +154,101 @@ export interface LedgerEntry {
   timestamp: number;     // unix seconds
 }
 
+// A miner's verification-queue row (one applicant panel assigned to them).
+export interface PanelAssignment {
+  panelId: string;
+  applicantAccountId: string;
+  panelStatus: 'pending' | 'in_progress' | 'complete';
+  panelCreatedAt: number;
+  panelCompletedAt: number | null;
+  medianScore: number | null;
+  assignedAt: number;
+  deadline: number;
+  myReviewSubmitted: boolean;
+  missed: boolean;
+}
+
+// Full detail for one verification panel (evidence + prior reviews + live score).
+export interface PanelDetail {
+  panel: {
+    id: string;
+    accountId: string;
+    status: string;
+    createdAt: number;
+    completedAt: number | null;
+    medianScore: number | null;
+  };
+  evidence: Array<{ id: string; evidenceTypeId: string; evidenceHash: string; submittedAt: number }>;
+  reviews: Array<{ id: string; minerId: string; score: number; submittedAt: number }>;
+  assignedMiners: Array<{ miner_id: string; completed: number; missed: number }>;
+  liveScore: { totalScore: number; breakdown: { tierA: number; tierB: number; tierC: number } };
+}
+
+// Court — a dispute case header (serializeCase; camelCase).
+export interface CaseHeader {
+  id: string;
+  type: string;
+  level: string;
+  status: string;
+  challengerId: string;
+  defendantId: string;
+  challengerStake: string;
+  challengerStakePercent: number;
+  verdict: string | null;
+  appealOf: string | null;
+  arbitrationDeadline: number | null;
+  votingDeadline: number | null;
+  createdAt: number;
+  resolvedAt: number | null;
+}
+
+// One entry in a case's append-only argument log.
+export interface CaseArgument {
+  id: string;
+  caseId: string;
+  submitterId: string;
+  role: 'challenger' | 'defendant';
+  text: string;
+  attachmentHash: string | null;
+  createdAt: number;
+}
+
+// A juror row on a case's panel. `vote` is 'sealed' until all have voted.
+export interface JurorRow {
+  minerId: string;
+  jurorAccountId: string;
+  stakeAmount: string;
+  vote: string | null;
+  votedAt: number | null;
+}
+
+// A case assigned to this miner as a juror (jury-duty queue row).
+export interface JuryAssignment {
+  caseId: string;
+  caseType: string;
+  caseLevel: string;
+  caseStatus: string;
+  challengerId: string;
+  defendantId: string;
+  votingDeadline: number | null;
+  verdict: string | null;
+  stakeAmount: string;
+  myVote: string | null;
+  votedAt: number | null;
+}
+
+// A row in the active-cases list (a subset of the case header).
+export interface ActiveCaseSummary {
+  id: string;
+  type: string;
+  status: string;
+  challengerId: string;
+  defendantId: string;
+  challengerStake: string;
+  verdict: string | null;
+  createdAt: number;
+}
+
 // --- API functions ---
 
 export const api = {
@@ -195,11 +290,11 @@ export const api = {
   // Get the FIFO-assigned panels for a miner account. Public: the assignment
   // record is on-chain; only the score-submit action is auth-protected.
   getAssignedPanels: (minerAccountId: string) =>
-    request<ApiResponse<{ minerRegistered: boolean; assignments: any[] }>>('GET', `/verification/miners/${minerAccountId}/assignments`),
+    request<ApiResponse<{ minerRegistered: boolean; assignments: PanelAssignment[] }>>('GET', `/verification/miners/${minerAccountId}/assignments`),
 
   // Public: full panel detail with evidence, prior reviews, live auto-score.
   getPanel: (panelId: string) =>
-    request<ApiResponse<{ panel: any; evidence: any[]; reviews: any[]; assignedMiners: any[]; liveScore: any }>>('GET', `/verification/panels/${panelId}`),
+    request<ApiResponse<PanelDetail>>('GET', `/verification/panels/${panelId}`),
 
   // Submit my %Human score for an assigned panel. (Signed.)
   submitPanelScore: (panelId: string, signedBody: unknown) =>
@@ -209,23 +304,23 @@ export const api = {
 
   // Court — challenge + jury duty
   getActiveCases: () =>
-    request<ApiResponse<{ cases: any[] }>>('GET', '/court/cases'),
+    request<ApiResponse<{ cases: ActiveCaseSummary[] }>>('GET', '/court/cases'),
 
   // Get full case detail. Includes the argument log alongside the jury panel.
   getCase: (caseId: string) =>
-    request<ApiResponse<{ case: any; jury: any[]; votesRevealed: boolean; arguments: any[] }>>('GET', `/court/cases/${caseId}`),
+    request<ApiResponse<{ case: CaseHeader; jury: JurorRow[]; votesRevealed: boolean; arguments: CaseArgument[] }>>('GET', `/court/cases/${caseId}`),
 
   // Submit an argument or rebuttal on a case (signed; backend gates submitter
   // to challenger or defendant — jurors and onlookers cannot post).
   submitCaseArgument: (caseId: string, signedBody: unknown) =>
-    request<ApiResponse<{ argument: any }>>('POST', `/court/cases/${caseId}/arguments`, signedBody),
+    request<ApiResponse<{ argument: CaseArgument }>>('POST', `/court/cases/${caseId}/arguments`, signedBody),
 
   fileChallenge: (signedBody: unknown) =>
-    request<ApiResponse<{ case: any }>>('POST', '/court/challenges', signedBody),
+    request<ApiResponse<{ case: CaseHeader }>>('POST', '/court/challenges', signedBody),
 
   // Cases assigned to this miner as a juror.
   getJuryDuty: (accountId: string) =>
-    request<ApiResponse<{ assignments: any[] }>>('GET', `/court/jury-duty/${accountId}`),
+    request<ApiResponse<{ assignments: JuryAssignment[] }>>('GET', `/court/jury-duty/${accountId}`),
 
   // Submit a sealed vote on an assigned case (signed).
   submitVote: (caseId: string, signedBody: unknown) =>
