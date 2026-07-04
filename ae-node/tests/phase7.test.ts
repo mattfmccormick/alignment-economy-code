@@ -111,10 +111,11 @@ describe('Phase 7: API Layer', () => {
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = signPayload(internalPayload, timestamp, sender.privateKey);
 
-    // The API payload uses display amount, but we pass the signature that matches internal format
+    // The API payload carries the base-unit integer string — the same value
+    // that was signed above.
     const apiPayload = {
       to: receiver.account.id,
-      amount: 100,
+      amount: storageAmount.toString(),
       pointType: 'active',
       isInPerson: false,
       recipientIsHuman: false,
@@ -206,7 +207,7 @@ describe('Phase 7: API Layer', () => {
         accountId: sender.account.id,
         timestamp,
         signature,
-        payload: { to: receiver.account.id, amount: 1, pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '' },
+        payload: { to: receiver.account.id, amount: storageAmt.toString(), pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '' },
       });
 
       if (status === 429) {

@@ -14,7 +14,7 @@ import http from 'node:http';
 import { initializeSchema } from '../src/db/schema.js';
 import { seedParams } from '../src/config/params.js';
 import { createApp } from '../src/api/server.js';
-import { createAccount } from '../src/core/account.js';
+import { createAccount, updateBalance } from '../src/core/account.js';
 import { signPayload, generateKeyPair } from '../src/core/crypto.js';
 import { resetRateLimits } from '../src/api/middleware/rateLimit.js';
 
@@ -118,5 +118,77 @@ describe('B2: request-body validation on write routes', () => {
     });
     assert.equal(r.status, 400);
     assert.equal(r.data?.error?.code, 'VALIDATION');
+  });
+});
+
+// B3: transaction amounts cross the boundary as base-unit integer strings, so
+// money never round-trips through a JS float. Every non-integer-string form is
+// rejected by validation before the money math.
+describe('B3: base-unit integer-string transaction amounts', () => {
+  beforeEach(() => resetRateLimits());
+
+  for (const bad of [
+    { label: 'a JS number', amount: 100 },
+    { label: 'a float string', amount: '1.5' },
+    { label: 'zero', amount: '0' },
+    { label: 'a negative string', amount: '-5' },
+    { label: 'a leading-zero string', amount: '0100' },
+    { label: 'scientific notation', amount: '1e8' },
+  ]) {
+    it(`rejects ${bad.label} with 400 VALIDATION`, async () => {
+      const db = freshDb();
+      const app = createApp(db);
+      const r = await request(app, 'POST', '/api/v1/transactions', {
+        accountId: 'whoever',
+        timestamp: Math.floor(Date.now() / 1000),
+        signature: 'x',
+        payload: { to: 'someone', amount: bad.amount, pointType: 'active' },
+      });
+      assert.equal(r.status, 400, `expected 400 for ${bad.label}, got ${r.status}`);
+      assert.equal(r.data?.error?.code, 'VALIDATION');
+    });
+  }
+
+  it('accepts a large base-unit amount that would lose precision as a float', async () => {
+    const db = freshDb();
+    const app = createApp(db);
+    const sender = makeAccount(db);
+    const receiver = makeAccount(db);
+
+    // 10 billion points = 1e18 base units — far beyond 2^53, so the old
+    // `amount * 1e8` float path would have corrupted it. As a string it is exact.
+    const amountBaseUnits = '1000000000000000000';
+    updateBalance(db, sender.accountId, 'earned_balance', BigInt(amountBaseUnits) * 2n);
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signedPayload = {
+      from: sender.accountId,
+      to: receiver.accountId,
+      amount: amountBaseUnits,
+      pointType: 'earned',
+      isInPerson: false,
+      recipientIsHuman: false,
+      memo: '',
+    };
+    const signature = signPayload(signedPayload, timestamp, sender.privateKey);
+
+    const r = await request(app, 'POST', '/api/v1/transactions', {
+      accountId: sender.accountId,
+      timestamp,
+      signature,
+      payload: {
+        to: receiver.accountId,
+        amount: amountBaseUnits,
+        pointType: 'earned',
+        isInPerson: false,
+        recipientIsHuman: false,
+        memo: '',
+      },
+    });
+
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.data)}`);
+    // The recipient received the exact base-unit amount minus the fee — no
+    // float corruption of the large value.
+    assert.equal(r.data?.data?.transaction?.amount, amountBaseUnits);
   });
 });

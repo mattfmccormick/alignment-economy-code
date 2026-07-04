@@ -36,7 +36,20 @@ Last updated: July 3, 2026.
     primitive type, and fixed-set enums; numeric-range/cross-field rules stay in
     the business layer (which throws typed `AppError`s with specific codes that
     tests rely on), so nothing that passed before regresses.
-  - B3: not started.
+  - B3 (integer-string money): **DONE.** Transaction amounts now cross the API
+    boundary as a positive base-unit integer string (`/^[1-9]\d*$/`), parsed
+    straight to `bigint` — the `BigInt(Math.round(amount * PRECISION))` float
+    path is gone. This is the exact canonical value the client already signs, so
+    the signature contract is unchanged; the wire and the signature now carry one
+    consistent value instead of a display number plus a separately-signed
+    base-unit string. `ae-app/src/pages/Send.tsx` sends the string it already
+    computes (ae-miner sends no transactions). `tests/request-validation.test.ts`
+    proves floats, JS numbers, zero, negatives, leading-zeros, and scientific
+    notation are rejected, and that a 1e18-base-unit amount (beyond 2^53, which
+    the old float path would have corrupted) transfers exactly.
+    Follow-up: `/recurring` still accepts a number-or-string amount and persists
+    `amount.toString()`; fold it into the same integer-string contract when the
+    recurring executor is revisited.
 - **Group C: not started.**
 - **Group D: tracked below.**
 

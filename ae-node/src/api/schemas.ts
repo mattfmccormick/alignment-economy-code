@@ -12,9 +12,18 @@ import { z } from 'zod';
 
 const pointType = z.enum(['active', 'supportive', 'ambient', 'earned']);
 
+// A transaction amount, on the wire as a positive integer string in base units
+// (10^8 per point) with no leading zeros. Money never round-trips through a JS
+// float at the boundary: this is exactly the canonical value the client signs
+// over, and the server parses it straight to bigint. Rejects floats, negatives,
+// NaN/Infinity, and non-numeric strings.
+const baseUnitAmount = z
+  .string()
+  .regex(/^[1-9]\d*$/, 'amount must be a positive base-unit integer string');
+
 export const createTransaction = z.object({
   to: z.string().min(1),
-  amount: z.number(),
+  amount: baseUnitAmount,
   pointType,
   isInPerson: z.boolean().optional(),
   recipientIsHuman: z.boolean().optional(),

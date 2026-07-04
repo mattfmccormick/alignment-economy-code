@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { processTransaction, TransactionInput, transactionStore } from '../../core/transaction.js';
-import { PRECISION } from '../../core/constants.js';
 import { getAccount } from '../../core/account.js';
 import { validateBody } from '../middleware/validate.js';
 import { createTransaction } from '../schemas.js';
@@ -39,16 +38,18 @@ export function transactionRoutes(
         return;
       }
 
-      if (amount <= 0) {
+      // `amount` is a positive base-unit integer string (validated by
+      // createTransaction), so it parses straight to bigint — money never
+      // touches a JS float here. It is the same canonical value the client
+      // signed, so the signature check downstream matches byte-for-byte.
+      const storageAmount = BigInt(amount);
+      if (storageAmount <= 0n) {
         res.status(400).json({
           success: false,
           error: { code: 'INVALID_AMOUNT', message: 'Amount must be positive', details: { amount } },
         });
         return;
       }
-
-      // Convert display units to storage (bigint at 10^8 precision)
-      const storageAmount = BigInt(Math.round(amount * Number(PRECISION)));
 
       // Re-sign with storage-level payload format (processTransaction verifies this)
       // The API auth middleware already verified the user's identity.

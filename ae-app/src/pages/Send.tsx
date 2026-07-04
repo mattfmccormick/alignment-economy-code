@@ -134,11 +134,12 @@ export function Send() {
 
       const signature = signPayload(internalPayload, timestamp, wallet.privateKey);
 
-      // Send to API with display amount
+      // Send the base-unit integer string on the wire — the same canonical
+      // value we just signed. Money never crosses the boundary as a float.
       const res = await api.sendTransaction({
         payload: {
           to,
-          amount: amountNum,
+          amount: storageAmount.toString(),
           pointType,
           isInPerson: false,
           memo: memo || '',

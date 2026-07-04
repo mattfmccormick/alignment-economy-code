@@ -111,7 +111,7 @@ function buildSignedTx(db: DatabaseSync): TxSubmission {
       signature,
       payload: {
         to: receiver.account.id,
-        amount: 50,
+        amount: storageAmount.toString(),
         pointType: 'active',
         isInPerson: false,
         recipientIsHuman: false,
