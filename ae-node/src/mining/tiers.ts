@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getParam } from '../config/params.js';
 import { getAccount } from '../core/account.js';
 import { NotFoundError } from '../core/errors.js';
-import { getMiner, setMinerTier, deactivateMiner, getActiveMiners } from './registration.js';
+import { getMiner, setMinerTier, deactivateMiner } from './registration.js';
 import { calculateUptime } from './heartbeat.js';
 import { getCompositeAccuracy, getJuryAttendanceRate, getCompletedAssignments } from './accuracy.js';
 
@@ -95,9 +95,4 @@ export function evaluateMinerTier(
   }
 
   return { minerId, currentTier: miner.tier, newTier, changed, reason, metrics };
-}
-
-export function evaluateAllMiners(db: DatabaseSync, networkStartTime?: number): TierEvaluation[] {
-  const miners = getActiveMiners(db);
-  return miners.map((m) => evaluateMinerTier(db, m.id, networkStartTime));
 }

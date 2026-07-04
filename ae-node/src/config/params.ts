@@ -94,7 +94,3 @@ export function getAllParams(db: DatabaseSync): Record<string, unknown> {
   }
   return result;
 }
-
-export function invalidateCache(): void {
-  cache.clear();
-}
