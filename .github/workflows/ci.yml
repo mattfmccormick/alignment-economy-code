@@ -42,26 +42,30 @@ jobs:
         continue-on-error: true
 
   ae-app:
-    name: ae-app (lint)
+    name: ae-app (lint + build)
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: ae-app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: ae-app/package-lock.json
-      # --legacy-peer-deps: vite-plugin-pwa lags vite 8 on its peer range.
-      # Pre-existing conflict; tracked for a proper dependency bump in the plan.
-      - run: npm ci --legacy-peer-deps
-      - run: npm run lint
-      # Build is intentionally omitted: a clean checkout can't resolve the
-      # sibling @alignmenteconomy/sdk workspace package, and tsc surfaces
-      # pre-existing catch-variable type errors that local incremental builds
-      # masked. Restoring the build here is tracked as D8 in the plan.
+          cache-dependency-path: |
+            ae-app/package-lock.json
+            sdk/package-lock.json
+      # ae-app depends on @alignmenteconomy/sdk via file:../sdk, and the SDK's
+      # dist/ is gitignored — so build the SDK first or the module (and every
+      # type that flows from it) fails to resolve.
+      - name: Build the SDK
+        working-directory: sdk
+        run: npm ci && npm run build
+      # --legacy-peer-deps: vite-plugin-pwa lags vite 8 on its peer range (D6).
+      - name: Lint + build ae-app
+        working-directory: ae-app
+        run: |
+          npm ci --legacy-peer-deps
+          npm run lint
+          npm run build
 
   ae-miner:
     name: ae-miner (lint + build)

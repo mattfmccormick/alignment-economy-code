@@ -242,11 +242,15 @@ Real, not blocking. Documented so they aren't forgotten.
 - ~~**D7. Finish B1 error migration.**~~ **Done.** All user-facing throws in court,
   verification, mining, and tagging are typed `AppError`s and the legacy substring matcher is
   removed from `errorHandler.ts`.
-- **D8. Fix the ae-app clean build.** On a fresh checkout `ae-app` won't build: it imports the
-  sibling `@alignmenteconomy/sdk` workspace package (not installed by a standalone `npm ci`) and
-  `tsc` surfaces pre-existing `catch (e: unknown)` type errors that local incremental builds
-  masked. Set up workspace resolution (or build the SDK first in CI) and fix the catch typings,
-  then restore the `build` step to the ae-app CI job (currently lint-only).
+- **D8. Fix the ae-app clean build.** ✅ **Done.** Root cause: `ae-app` depends on
+  `@alignmenteconomy/sdk` via `file:../sdk`, and the SDK's `dist/` is gitignored — so on a fresh
+  checkout the module (and every type that flows from it) can't resolve until the SDK is built.
+  The `catch (e: unknown)` errors seen in CI were cascade artifacts of that unresolved module, not
+  real source bugs: once the SDK is built, `ae-app` type-checks and builds clean (verified with a
+  forced non-incremental `tsc -b --force` + full `vite build`). Fix is CI-only — the ae-app job
+  now builds the SDK first, then lints and builds ae-app; the build step is restored (job is
+  `lint + build` again). Note for local devs cloning fresh: run `npm ci && npm run build` in
+  `sdk/` before building `ae-app`.
 - **D9. Stabilize the flaky multi-runner tests.** Phase 60 (and the Phase 35/49/53/59 family)
   are timing-flaky: they use fixed `wait()` delays for validator restart/catch-up. CI retries the
   test step once to absorb this, but the real fix is event-based waits so a single run is
