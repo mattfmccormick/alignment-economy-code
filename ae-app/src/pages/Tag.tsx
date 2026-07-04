@@ -103,7 +103,7 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
     if (day !== null) {
       const ts = await api.getSupportiveTags(accountId, day);
       if (ts.success) {
-        setTagRows(ts.data.tags.map((t: any) => ({
+        setTagRows(ts.data.tags.map((t) => ({
           productId: t.productId,
           minutesUsed: t.minutesUsed,
         })));
@@ -360,7 +360,7 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
     if (day !== null) {
       const ts = await api.getAmbientTags(accountId, day);
       if (ts.success) {
-        setTagRows(ts.data.tags.map((t: any) => ({
+        setTagRows(ts.data.tags.map((t) => ({
           spaceId: t.spaceId,
           minutesOccupied: t.minutesOccupied,
         })));
@@ -626,7 +626,15 @@ function SaveBar({
   saving: boolean; overCap: boolean; savedAt: number | null;
   error: string | null; canSave: boolean; onSave: () => void;
 }) {
-  const justSaved = savedAt !== null && Date.now() - savedAt < 4000;
+  // Show the "saved" state for 4s after a save, driven by a timer rather than
+  // reading Date.now() during render (which never re-renders itself to clear).
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    if (savedAt === null) return;
+    setJustSaved(true);
+    const timer = setTimeout(() => setJustSaved(false), 4000);
+    return () => clearTimeout(timer);
+  }, [savedAt]);
   return (
     <div className="sticky bottom-20 left-0 right-0 pt-2">
       {error && <p className="text-xs text-red-400 mb-2 text-center">{error}</p>}

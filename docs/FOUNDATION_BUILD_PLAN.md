@@ -262,11 +262,14 @@ Real, not blocking. Documented so they aren't forgotten.
   vouch responses (`VouchData`, `VouchRequestData`) on `getVouches`, `getVouchRequests`,
   `createVouch`, and `createVouchRequest` — which surfaced a type inaccuracy in `Verify` (its local
   `Vouch.stakeAmount` was `number` but the API sends a string; no runtime bug since the display
-  sites already wrapped it in `String(...)`, but the type is now correct). ae-app is at
-  **39 `any` (from 72)**, build + tests green. **Remaining:** the rest of the list responses
-  (tags/products/spaces, verification panels, evidence, search, vouch-request update), the two
-  `(data: any)` websocket handlers in `CaseDetail`, the ae-miner side, the real
-  `react-hooks/purity` bug in `Tag.tsx` (`Date.now()` during render), then promote the rules to
+  sites already wrapped it in `String(...)`, but the type is now correct). Then typed the tagging
+  responses (`ProductData`, `SpaceData`, `SupportiveTagData`, `AmbientTagData`) across the
+  products/spaces/supportive/ambient endpoints, removed the two `(t: any)` maps in `Tag`, and
+  **fixed the real `react-hooks/purity` bug**: `SaveBar` computed `justSaved` from `Date.now()`
+  during render (so the "saved" state never cleared itself) — now driven by a `setTimeout` +
+  state, and the purity warning is gone. ae-app is at **28 `any` (from 72)**, build + tests green.
+  **Remaining:** verification panels, evidence, search, the vouch-request update, the two
+  `(data: any)` websocket handlers in `CaseDetail`, the ae-miner side, then promote the rules to
   errors once each frontend reaches zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly

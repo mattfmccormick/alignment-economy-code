@@ -111,6 +111,53 @@ export interface CaseArgumentData {
   createdAt: number;
 }
 
+// ─── Tagging (durable goods & spaces) ─────────────────────────────────────
+
+/** A durable-good product (camelCase; mapped from DB rows by the route). */
+export interface ProductData {
+  id: string;
+  name: string;
+  category: string;
+  manufacturerId: string | null;
+  createdBy: string;
+  isActive: boolean;
+  createdAt: number;
+}
+
+/** A physical space. */
+export interface SpaceData {
+  id: string;
+  name: string;
+  type: string;
+  parentId: string | null;
+  entityId: string | null;
+  collectionRate: number;
+  isActive: boolean;
+  createdAt: number;
+}
+
+/** A submitted supportive tag (durable-good minutes). Points as a string. */
+export interface SupportiveTagData {
+  id: string;
+  accountId: string;
+  day: number;
+  productId: string;
+  minutesUsed: number;
+  pointsAllocated: string;
+  status: string;
+}
+
+/** A submitted ambient tag (space-occupancy minutes). Points as a string. */
+export interface AmbientTagData {
+  id: string;
+  accountId: string;
+  day: number;
+  spaceId: string;
+  minutesOccupied: number;
+  pointsAllocated: string;
+  status: string;
+}
+
 // ─── Vouching ────────────────────────────────────────────────────────────
 
 /** A vouch (WP v2: percentage-based). API stringifies the bigint stake. */

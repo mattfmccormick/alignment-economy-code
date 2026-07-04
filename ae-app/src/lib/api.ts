@@ -12,6 +12,10 @@ import type {
   ContactData,
   VouchData,
   VouchRequestData,
+  ProductData,
+  SpaceData,
+  SupportiveTagData,
+  AmbientTagData,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -254,41 +258,41 @@ export const api = {
   // 4am EST cycle boundary distribute the supportive/ambient mints to
   // manufacturers and space entities by minute share.
   getProducts: () =>
-    request<{ products: any[] }>('GET', '/tags/products'),
+    request<{ products: ProductData[] }>('GET', '/tags/products'),
 
   getMyProducts: (ownerId: string) =>
-    request<{ products: any[] }>('GET', `/tags/products/mine/${ownerId}`),
+    request<{ products: ProductData[] }>('GET', `/tags/products/mine/${ownerId}`),
 
   // Auth-required: the signed account is the product creator.
   registerProduct: (envelope: { accountId: string; timestamp: number; signature: string; payload: { name: string; category: string; manufacturerId?: string } }) =>
-    request<{ product: any }>('POST', '/tags/products', envelope),
+    request<{ product: ProductData }>('POST', '/tags/products', envelope),
 
   getSpaces: () =>
-    request<{ spaces: any[] }>('GET', '/tags/spaces'),
+    request<{ spaces: SpaceData[] }>('GET', '/tags/spaces'),
 
   // Auth-required: signed account is the space creator. Spaces don't store
   // createdBy in the schema today, but the auth gate is still applied.
   registerSpace: (envelope: { accountId: string; timestamp: number; signature: string; payload: { name: string; type: string; parentId?: string; entityId?: string; collectionRate?: number } }) =>
-    request<{ space: any }>('POST', '/tags/spaces', envelope),
+    request<{ space: SpaceData }>('POST', '/tags/spaces', envelope),
 
   getSupportiveTags: (accountId: string, day: number) =>
-    request<{ tags: any[] }>('GET', `/tags/supportive/${accountId}/${day}`),
+    request<{ tags: SupportiveTagData[] }>('GET', `/tags/supportive/${accountId}/${day}`),
 
   // Auth-required: caller signs the tag payload with their private key,
   // ae-node verifies via authMiddleware, accountId is read from the
   // signature. Without this gate any third party could redirect the
   // signer's daily 144 supportive points to a product they own.
   submitSupportiveTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { day: number; tags: Array<{ productId: string; minutesUsed: number }> } }) =>
-    request<{ tags: any[] }>('POST', '/tags/supportive', envelope),
+    request<{ tags: SupportiveTagData[] }>('POST', '/tags/supportive', envelope),
 
   getAmbientTags: (accountId: string, day: number) =>
-    request<{ tags: any[] }>('GET', `/tags/ambient/${accountId}/${day}`),
+    request<{ tags: AmbientTagData[] }>('GET', `/tags/ambient/${accountId}/${day}`),
 
   // Auth-required: same auth shape as submitSupportiveTags. Without this,
   // a third party could redirect the signer's daily 14.4 ambient points
   // to a space they own.
   submitAmbientTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { day: number; tags: Array<{ spaceId: string; minutesOccupied: number }> } }) =>
-    request<{ tags: any[] }>('POST', '/tags/ambient', envelope),
+    request<{ tags: AmbientTagData[] }>('POST', '/tags/ambient', envelope),
 
   getTodayDay: () =>
     request<{ day: number; cyclePhase: string }>('GET', '/tags/today'),
