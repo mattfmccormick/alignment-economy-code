@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { countActiveParticipants, getTotalEarnedPool } from '../../core/account.js';
 import { getFeePool } from '../../core/fee-pool.js';
+import { cycleStateStore } from '../../core/stores/SqliteCycleStateStore.js';
 import { TARGET_EARNED_PER_PERSON } from '../../core/constants.js';
 
 export function networkRoutes(db: DatabaseSync): Router {
@@ -10,7 +11,7 @@ export function networkRoutes(db: DatabaseSync): Router {
   // GET /network/status
   router.get('/status', (_req, res, next) => {
     try {
-      const state = db.prepare('SELECT * FROM day_cycle_state WHERE id = 1').get() as Record<string, unknown>;
+      const currentDay = cycleStateStore(db).getCurrentDay();
       const participantCount = countActiveParticipants(db);
       const totalEarned = getTotalEarnedPool(db);
       const feePool = getFeePool(db);
@@ -26,7 +27,7 @@ export function networkRoutes(db: DatabaseSync): Router {
       res.json({
         success: true,
         data: {
-          currentDay: state.current_day,
+          currentDay,
           blockHeight: blockRow.height ?? 0,
           participantCount,
           minerCount: minerCount.cnt,

@@ -13,6 +13,7 @@ import {
   updateBalance,
 } from './account.js';
 import { recordLog, transactionStore } from './transaction.js';
+import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
 import { runTransaction } from '../db/connection.js';
 import { rebalanceVouchLocks } from '../verification/vouching.js';
 import type { CyclePhase, RebaseEvent } from './types.js';
@@ -21,27 +22,15 @@ import type { CyclePhase, RebaseEvent } from './types.js';
 
 
 export function getCycleState(db: DatabaseSync): { currentDay: number; cyclePhase: CyclePhase; phaseStartedAt: number } {
-  const row = db.prepare('SELECT current_day, cycle_phase, phase_started_at FROM day_cycle_state WHERE id = 1').get() as {
-    current_day: number;
-    cycle_phase: string;
-    phase_started_at: number;
-  };
-  return {
-    currentDay: row.current_day,
-    cyclePhase: row.cycle_phase as CyclePhase,
-    phaseStartedAt: row.phase_started_at,
-  };
+  return cycleStateStore(db).getState();
 }
 
 function setPhase(db: DatabaseSync, phase: CyclePhase): void {
-  db.prepare('UPDATE day_cycle_state SET cycle_phase = ?, phase_started_at = ? WHERE id = 1').run(
-    phase,
-    Math.floor(Date.now() / 1000),
-  );
+  cycleStateStore(db).setPhase(phase, Math.floor(Date.now() / 1000));
 }
 
 function advanceDay(db: DatabaseSync): void {
-  db.prepare('UPDATE day_cycle_state SET current_day = current_day + 1 WHERE id = 1').run();
+  cycleStateStore(db).advanceDay();
 }
 
 // --------------- STEP 1: Expire unspent daily allocations ---------------

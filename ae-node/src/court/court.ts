@@ -6,6 +6,7 @@ import { recordLog } from '../core/transaction.js';
 import { runTransaction } from '../db/connection.js';
 import { getParam } from '../config/params.js';
 import { NotFoundError, ValidationError, ForbiddenError, ConflictError, InsufficientBalanceError } from '../core/errors.js';
+import { cycleStateStore } from '../core/stores/SqliteCycleStateStore.js';
 import { getMinerByAccount, getActiveMiners, getMiner, setMinerTier, miningStore } from '../mining/registration.js';
 import { burnAllVouchesOnAccount } from '../verification/vouching.js';
 import { getCompositeAccuracy } from '../mining/accuracy.js';
@@ -78,7 +79,7 @@ export function fileChallenge(
   const store = courtStore(db);
 
   // Protection window
-  const state = db.prepare('SELECT current_day FROM day_cycle_state WHERE id = 1').get() as { current_day: number };
+  const state = { current_day: cycleStateStore(db).getCurrentDay() };
   if (defendant.protectionWindowEnd && state.current_day <= defendant.protectionWindowEnd) {
     throw new ForbiddenError(`Account in protection window until day ${defendant.protectionWindowEnd}`, 'PROTECTION_WINDOW');
   }
@@ -439,7 +440,7 @@ function applyInnocentVerdict(
   }
 
   const protectionDays = getParam<number>(db, 'court.protection_window_days');
-  const state = db.prepare('SELECT current_day FROM day_cycle_state WHERE id = 1').get() as { current_day: number };
+  const state = { current_day: cycleStateStore(db).getCurrentDay() };
   db.prepare('UPDATE accounts SET protection_window_end = ? WHERE id = ?').run(
     state.current_day + protectionDays, courtCase.defendantId,
   );
@@ -481,7 +482,7 @@ function processJurorStakes(
 export function isInProtectionWindow(db: DatabaseSync, accountId: string): boolean {
   const acct = getAccount(db, accountId);
   if (!acct || !acct.protectionWindowEnd) return false;
-  const state = db.prepare('SELECT current_day FROM day_cycle_state WHERE id = 1').get() as { current_day: number };
+  const state = { current_day: cycleStateStore(db).getCurrentDay() };
   return state.current_day <= acct.protectionWindowEnd;
 }
 
@@ -568,7 +569,7 @@ export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
 
       // Set protection window for defendant
       const protectionDays = getParam<number>(db, 'court.protection_window_days');
-      const state = db.prepare('SELECT current_day FROM day_cycle_state WHERE id = 1').get() as { current_day: number };
+      const state = { current_day: cycleStateStore(db).getCurrentDay() };
       db.prepare('UPDATE accounts SET protection_window_end = ? WHERE id = ?').run(
         state.current_day + protectionDays, appealCase.defendantId,
       );

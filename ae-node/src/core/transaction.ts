@@ -13,6 +13,7 @@ import { getAccount, updateBalance, accountStore } from './account.js';
 import { addToFeePool } from './fee-pool.js';
 import { runTransaction } from '../db/connection.js';
 import { NotFoundError, ValidationError, ForbiddenError, InsufficientBalanceError } from './errors.js';
+import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
 import { SqliteTransactionStore } from './stores/SqliteTransactionStore.js';
 import type { ITransactionStore } from './stores/ITransactionStore.js';
 import type { Transaction, PointType, ChangeType } from './types.js';
@@ -315,11 +316,8 @@ export function processTransaction(
   // i.e. between expire+rebase and advance+mint), no daily-point transactions can
   // settle because every account's daily balance is 0. Earned-point transactions
   // are unaffected — saved value keeps moving regardless of the cycle.
-  // (This still touches day_cycle_state directly. ICycleStateStore extraction
-  // is a follow-up session.)
   if (input.pointType !== 'earned') {
-    const phaseRow = db.prepare('SELECT cycle_phase FROM day_cycle_state WHERE id = 1').get() as { cycle_phase: string } | undefined;
-    const phase = phaseRow?.cycle_phase ?? 'idle';
+    const phase = cycleStateStore(db).getCyclePhase() ?? 'idle';
     if (phase !== 'idle' && phase !== 'active') {
       throw new ValidationError(`Daily-point transactions are paused during the ${phase} cycle phase`, 'CYCLE_PHASE_BLOCKED');
     }

@@ -219,9 +219,14 @@ Real, not blocking. Documented so they aren't forgotten.
 - **D2. Encrypted keystore.** Wallet private keys and mnemonics sit in plaintext `localStorage`.
   Standard for web wallets but should become a passphrase-encrypted keystore. Mark as
   "known and accepted" until then.
-- **D3. Finish the repository extraction.** `IBlockStore`/`ITransactionStore`/`IAccountStore`
-  exist, but some inline SQL remains in business logic (e.g. the cycle-phase read in
-  `transaction.ts`). Extract `ICycleStateStore` and the rest before the Postgres migration.
+- **D3. Finish the repository extraction.** ✅ **Done.** `ICycleStateStore` +
+  `SqliteCycleStateStore` (with a `cycleStateStore(db)` factory) now own every `day_cycle_state`
+  read/write; the last inline SQL in the business logic (the cycle-phase read in
+  `transaction.ts`, four `current_day` reads in the court, the day-cycle read/write helpers, and
+  the network-status read) all route through it. No business module issues raw `day_cycle_state`
+  SQL anymore. (Remaining non-store SQL elsewhere, e.g. block-height/miner counts in
+  `network.ts`, is out of scope for the day-cycle store and can be extracted alongside its own
+  store later.)
 - **D4. Frontend tests.** `ae-app` and `ae-miner` have zero tests. Add a thin layer (Vitest +
   React Testing Library) covering the send flow, verification, and vouch flow once B3 changes the
   send format.
