@@ -94,16 +94,19 @@ snapshots; `verification_evidence` / `verification_panels` /
 ## The seams a deployment team will care about
 
 1. **Database.** Business logic goes through the `I*Store` interfaces, so a
-   Postgres implementation drops in without touching economics. (Mostly
-   extracted; one `day_cycle_state` seam remains.)
+   Postgres implementation drops in without touching economics. Fully
+   extracted, including the `day_cycle_state` seam (`ICycleStateStore`).
 2. **Network transport — the #1 deployment blocker.** `peer.ts` dials peers
    with `new WebSocket('ws://host:port')` and `node.ts` listens with
    `WebSocketServer`. This assumes a **directly-reachable** address, so two
    machines behind home routers cannot peer today. **NAT traversal / a relay
-   / a tunnel inserts here.** Peering, handshake, gossip, and sync all sit on
-   top of the `ws` connection object, so a transport presenting the same
-   `send` / `on('message')` / `on('close')` surface drops in without touching
-   consensus.
+   / a tunnel inserts here.** The exact contract is codified in
+   `src/network/transport.ts` (`IPeerTransport` + `IPeerConnection`): peering,
+   handshake, gossip, and sync use only that `send` / `close` / `readyState` /
+   `on('open'|'message'|'close'|'error')` surface, so a transport implementing
+   those interfaces over any wire drops in without touching consensus. A
+   deployment team's first step is routing `connectToPeer` and the inbound
+   `WebSocketServer` path through an `IPeerTransport` implementation.
 3. **VRF.** `IVrfProvider` (Ed25519 today). Swap ECVRF (RFC 9381) for
    stricter unbiasability in adversarial settings.
 4. **Custodial host.** `platform-server` ships a Dockerfile, `fly.toml`, and
