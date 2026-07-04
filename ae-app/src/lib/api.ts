@@ -18,6 +18,7 @@ import type {
   AmbientTagData,
   AccountSearchResult,
   RecurringTransferData,
+  PanelSummary,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -203,7 +204,7 @@ export const api = {
   // Verification panels (the real proof-of-human flow)
   // Participant requests a panel for their own account (signed).
   requestPanel: (signedBody: unknown) =>
-    request<{ panel: any; assignedMinerCount: number }>('POST', '/verification/panels', signedBody),
+    request<{ panel: PanelSummary; assignedMinerCount: number }>('POST', '/verification/panels', signedBody),
 
   // Submit verification evidence on the participant's own account (signed).
   submitVerificationEvidence: (signedBody: unknown) =>
@@ -215,7 +216,7 @@ export const api = {
 
   // Public: list all panels filed for an account (history).
   getAccountPanels: (accountId: string) =>
-    request<{ panels: any[] }>('GET', `/verification/accounts/${accountId}/panels`),
+    request<{ panels: PanelSummary[] }>('GET', `/verification/accounts/${accountId}/panels`),
 
   // Court — disputes and verdicts
   // List active cases on the network (public).

@@ -273,8 +273,11 @@ Real, not blocking. Documented so they aren't forgotten.
   Then typed the recurring-transfer response (`RecurringTransferData`, snake_case) — same bug as
   contacts: `Recurring` read `t.isActive` / `t.toId` / `t.pointType` off raw snake_case rows, so
   the active/paused toggle, recipient, and point-type were all broken; fixed with a snake→camel
-  map. ae-app is at **22 `any` (from 72)**, build + tests green. **Remaining:** verification
-  panels, evidence, the vouch-request update, the two `(data: any)` websocket handlers in
+  map. Then typed the verification-panel list/request responses (`PanelSummary`, matching
+  ae-node's `VerificationPanel`) on `getAccountPanels` and `requestPanel`, replacing an unsafe
+  `res.data.panels as PanelSummary[]` cast in `Verify` and de-duplicating its local copy of the
+  type. ae-app is at **20 `any` (from 72)**, build + tests green. **Remaining:** the panel-detail
+  response and evidence, the vouch-request update, the two `(data: any)` websocket handlers in
   `CaseDetail`, a handful of mutation responses whose callers ignore the body, the ae-miner side,
   then promote the rules to errors once each frontend reaches zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both

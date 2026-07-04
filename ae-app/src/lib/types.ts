@@ -187,6 +187,16 @@ export interface AmbientTagData {
   status: string;
 }
 
+/** A verification-panel summary (ae-node's `VerificationPanel`). */
+export interface PanelSummary {
+  id: string;
+  accountId: string;
+  status: 'pending' | 'in_progress' | 'complete';
+  createdAt: number;
+  completedAt: number | null;
+  medianScore: number | null;
+}
+
 // ─── Vouching ────────────────────────────────────────────────────────────
 
 /** A vouch (WP v2: percentage-based). API stringifies the bigint stake. */

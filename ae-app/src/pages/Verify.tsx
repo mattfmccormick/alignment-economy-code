@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type ChangeEvent } from 'react';
 import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
+import type { PanelSummary } from '../lib/types';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { truncateId, displayPoints } from '../lib/formatting';
@@ -54,14 +55,6 @@ export function Verify() {
   const [vouchScore, setVouchScore] = useState<{ totalScore: number; breakdown: { tierA: number; tierB: number; tierC: number }; vouchCount: number } | null>(null);
 
   // Verification panels (the real proof-of-human flow)
-  interface PanelSummary {
-    id: string;
-    accountId: string;
-    status: 'pending' | 'in_progress' | 'complete';
-    createdAt: number;
-    completedAt: number | null;
-    medianScore: number | null;
-  }
   const [panels, setPanels] = useState<PanelSummary[]>([]);
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -70,7 +63,7 @@ export function Verify() {
     if (!wallet?.accountId) return;
     try {
       const res = await api.getAccountPanels(wallet.accountId);
-      if (res.success) setPanels(res.data.panels as PanelSummary[]);
+      if (res.success) setPanels(res.data.panels);
     } catch { /* ignore */ }
   }, [wallet?.accountId]);
 
