@@ -98,13 +98,10 @@ export function Verify() {
 
     api.getEvidenceScore(wallet.accountId).then(res => {
       if (res.success && res.data) {
-        const d = res.data as any;
-        // API returns { score: { totalScore, breakdown }, vouchCount }
-        const scoreObj = d.score || d;
         setVouchScore({
-          totalScore: scoreObj.totalScore ?? scoreObj.score ?? 0,
-          breakdown: scoreObj.breakdown || { tierA: 0, tierB: 0, tierC: 0 },
-          vouchCount: d.vouchCount ?? 0,
+          totalScore: res.data.score.totalScore,
+          breakdown: res.data.score.breakdown,
+          vouchCount: res.data.vouchCount,
         });
       }
     }).catch(() => {});

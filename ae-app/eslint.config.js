@@ -20,13 +20,14 @@ export default defineConfig([
       globals: globals.browser,
     },
     rules: {
-      // Tracked debt: these were failing on pre-existing UI code (mostly `any`
-      // on API-response plumbing). Demoted to warnings so the build gate is
-      // meaningful today; the goal is to burn them down to zero and promote
-      // back to errors. See docs/FOUNDATION_BUILD_PLAN.md (Group D).
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-empty-object-type': 'warn',
-      '@typescript-eslint/no-unsafe-function-type': 'warn',
+      // D5 complete: the `any` on API-response plumbing is fully burned down,
+      // so these are back to errors — new `any` (or the related type escapes)
+      // now fails the build gate. See docs/FOUNDATION_BUILD_PLAN.md (Group D).
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-empty-object-type': 'error',
+      '@typescript-eslint/no-unsafe-function-type': 'error',
+      // Still tracked debt (react-hooks): a handful of pre-existing purity /
+      // set-state-in-effect warnings remain. Kept as warnings until fixed.
       'react-hooks/purity': 'warn',
       'react-hooks/immutability': 'warn',
       'react-hooks/set-state-in-effect': 'warn',

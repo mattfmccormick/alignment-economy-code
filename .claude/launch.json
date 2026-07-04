@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ae-node",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "cwd": "ae-node"
+    },
+    {
+      "name": "wallet-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173,
+      "cwd": "ae-app"
+    },
+    {
+      "name": "miner-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5174,
+      "cwd": "ae-miner"
+    },
+    {
+      "name": "website",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "3001"],
+      "port": 3001,
+      "cwd": "C:\\Users\\Mattf\\OneDrive\\Documents\\Code\\alignment-economy-website"
+    }
+  ]
+}

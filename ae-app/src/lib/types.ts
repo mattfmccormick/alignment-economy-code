@@ -10,6 +10,15 @@ export interface SuccessResponse {
   success: boolean;
 }
 
+/** The percent-human score breakdown (ae-node's `ScoreBreakdown`). */
+export interface ScoreBreakdownData {
+  totalScore: number;
+  breakdown: { tierA: number; tierB: number; tierC: number };
+  evidenceDetails: Array<{ typeId: string; value: number }>;
+  decayApplied: boolean;
+  nextDecayDate: number | null;
+}
+
 export interface AccountData {
   id: string;
   type: string;

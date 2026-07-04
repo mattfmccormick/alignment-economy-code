@@ -1,7 +1,8 @@
 import { signPayload } from './crypto';
 import { loadWallet } from './keys';
 
-type EventHandler = (data: any) => void;
+// WS payloads vary per event type; handlers narrow the fields they read.
+type EventHandler = (data: Record<string, unknown>) => void;
 
 class WSClient {
   private ws: WebSocket | null = null;

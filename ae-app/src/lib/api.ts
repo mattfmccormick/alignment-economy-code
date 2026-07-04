@@ -20,6 +20,7 @@ import type {
   RecurringTransferData,
   PanelSummary,
   SuccessResponse,
+  ScoreBreakdownData,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -128,7 +129,7 @@ export const api = {
 
   // Transactions
   sendTransaction: (body: unknown) =>
-    request<any>('POST', '/transactions', body),
+    request<{ transaction: TransactionData; newBalance: string }>('POST', '/transactions', body),
 
   // Contacts
   getContacts: (ownerId: string) =>
@@ -176,10 +177,10 @@ export const api = {
 
   // Auth-required: only the account being verified can submit its own evidence.
   submitEvidence: (envelope: { accountId: string; timestamp: number; signature: string; payload: { evidenceTypeId: string; evidenceHash: string } }) =>
-    request<any>('POST', '/miners/evidence', envelope),
+    request<{ evidence: unknown; score: ScoreBreakdownData }>('POST', '/miners/evidence', envelope),
 
   getEvidenceScore: (accountId: string) =>
-    request<{ score: number; vouchCount: number }>('GET', `/miners/evidence/score/${accountId}`),
+    request<{ score: ScoreBreakdownData; vouchCount: number }>('GET', `/miners/evidence/score/${accountId}`),
 
   // Vouches (WP v2: percentage-based).
   // The voucher signs `{ vouchedId, stakePercent }` — the backend computes
@@ -200,7 +201,7 @@ export const api = {
 
   // Auth-required: only the request's recipient (toId) can respond.
   updateVouchRequest: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { status: 'accepted' | 'declined' } }) =>
-    request<any>('PUT', `/miners/vouch-requests/${id}`, envelope),
+    request<SuccessResponse>('PUT', `/miners/vouch-requests/${id}`, envelope),
 
   // Verification panels (the real proof-of-human flow)
   // Participant requests a panel for their own account (signed).
@@ -209,11 +210,12 @@ export const api = {
 
   // Submit verification evidence on the participant's own account (signed).
   submitVerificationEvidence: (signedBody: unknown) =>
-    request<{ evidence: any }>('POST', '/verification/evidence', signedBody),
+    request<{ evidence: unknown }>('POST', '/verification/evidence', signedBody),
 
   // Public: get full panel detail (evidence + reviews + assigned miners + live score).
+  // Snake_case, deeply nested join; no consumer maps it yet, so it stays loose.
   getPanel: (panelId: string) =>
-    request<any>('GET', `/verification/panels/${panelId}`),
+    request<Record<string, unknown>>('GET', `/verification/panels/${panelId}`),
 
   // Public: list all panels filed for an account (history).
   getAccountPanels: (accountId: string) =>
@@ -251,11 +253,11 @@ export const api = {
     request<NetworkStatus>('GET', '/network/status'),
 
   getFeePool: () =>
-    request<any>('GET', '/network/fee-pool'),
+    request<Record<string, unknown>>('GET', '/network/fee-pool'),
 
   // Admin
   advanceDay: () =>
-    request<any>('POST', '/admin/advance-day'),
+    request<Record<string, unknown>>('POST', '/admin/advance-day'),
 
   // Tags — the durable goods (products) and physical spaces a user occupies.
   // Submitting a tag set replaces today's set for that account; rebases at the
@@ -314,5 +316,9 @@ export const api = {
     stakeDisplay?: number;
     genesisTimestamp?: number;
   }) =>
-    request<{ spec: any; keystores: any[]; specHash: string }>('POST', '/founder/generate-genesis', body),
+    request<{
+      spec: unknown;
+      keystores: Array<{ name: string; accountId: string; publicKey: string; secretKey: string }>;
+      specHash: string;
+    }>('POST', '/founder/generate-genesis', body),
 };

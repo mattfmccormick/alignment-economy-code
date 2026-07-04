@@ -91,11 +91,11 @@ export function CaseDetail() {
 
   useEffect(() => {
     load();
-    const offArg = wsClient.on('court:argument', (data: any) => {
-      if (data?.caseId === id) load();
+    const offArg = wsClient.on('court:argument', (data) => {
+      if (data.caseId === id) load();
     });
-    const offVerdict = wsClient.on('court:verdict', (data: any) => {
-      if (data?.caseId === id) load();
+    const offVerdict = wsClient.on('court:verdict', (data) => {
+      if (data.caseId === id) load();
     });
     return () => { offArg(); offVerdict(); };
   }, [id, load]);

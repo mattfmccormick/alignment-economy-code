@@ -237,7 +237,7 @@ Real, not blocking. Documented so they aren't forgotten.
   code that wrongly assumed the ML-DSA-65 public key is the last 1952 bytes of the secret key — it
   isn't, and nothing used it. **Remaining:** component/flow tests (RTL + jsdom) for the
   send/verify/vouch pages.
-- **D5. Frontend `any` burn-down.** 🟡 **Started (ae-app).** A2 demoted `no-explicit-any` and a
+- **D5. Frontend `any` burn-down.** 🟢 **ae-app done (0 `any`, rule promoted to error); ae-miner next.** A2 demoted `no-explicit-any` and a
   few react-hooks advisory rules to warnings (~72 `any` in ae-app, ~25 in ae-miner), almost all on
   API-response plumbing — 51 of ae-app's are in `lib/api.ts`'s `request<…>` generics. Started the
   burn-down: added `lib/types.ts` with real `AccountData` / `AccountDetail` shapes (mirroring the
@@ -277,11 +277,24 @@ Real, not blocking. Documented so they aren't forgotten.
   ae-node's `VerificationPanel`) on `getAccountPanels` and `requestPanel`, replacing an unsafe
   `res.data.panels as PanelSummary[]` cast in `Verify` and de-duplicating its local copy of the
   type. Then typed the contact and recurring mutation responses (a shared `SuccessResponse` for the
-  bare-ack routes, real shapes for `addContact` / `createRecurring`). ae-app is at
-  **13 `any` (from 72)**, build + tests green. **Remaining:** `sendTransaction`, `submitEvidence`,
-  the vouch-request update, the panel-detail + verification-evidence responses, `generateGenesis`,
-  `feePool` / `advanceDay`, the two `(data: any)` websocket handlers in `CaseDetail`, `websocket.ts`,
-  then the ae-miner side — after which promote the rules to errors once each frontend reaches zero.
+  bare-ack routes, real shapes for `addContact` / `createRecurring`). **Then the final 13:**
+  `sendTransaction` (`{ transaction: TransactionData; newBalance }`), `submitEvidence` /
+  `getEvidenceScore` (a new `ScoreBreakdownData` mirroring ae-node's `ScoreBreakdown`) — which
+  **caught the eighth latent bug**: `getEvidenceScore` was typed `{ score: number }` but the route
+  returns `score` as a `ScoreBreakdown` object, so `Verify` cast the whole payload to `any` and read
+  through fallback chains (`scoreObj.totalScore ?? scoreObj.score ?? 0`); with the type corrected the
+  `any` and the fallbacks are gone. Then `updateVouchRequest` → `SuccessResponse`,
+  `submitVerificationEvidence` → `{ evidence: unknown }`, the unused `getPanel` / `getFeePool` /
+  `advanceDay` → `Record<string, unknown>`, `generateGenesis` → a concrete keystore-array shape, the
+  `websocket.ts` `EventHandler` (`(data: any)` → `(data: Record<string, unknown>)`, handlers narrow
+  the fields they read), and the two `CaseDetail` ws handlers. **ae-app is at 0 `any` (from 72)** and
+  `no-explicit-any` / `no-empty-object-type` / `no-unsafe-function-type` are **promoted back to
+  `error`** — new `any` now fails the ae-app build gate. Lint (0 errors), tests (14), and build all
+  green. Along the way this pass caught 8 real bugs (blank point-type labels, double-nested miner
+  state, three contact-page snake/camel mismatches, a "0% human" search bug, a broken recurring
+  toggle, a purity bug, and the evidence-score shape). **Remaining:** the ae-miner side (~25 `any`),
+  after which promote its rules to errors too. (react-hooks `purity`/`immutability`/`set-state-in-effect`
+  stay warnings in ae-app until their handful of pre-existing hits are fixed.)
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`
