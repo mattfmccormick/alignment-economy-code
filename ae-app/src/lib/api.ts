@@ -16,6 +16,7 @@ import type {
   SpaceData,
   SupportiveTagData,
   AmbientTagData,
+  AccountSearchResult,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -145,7 +146,7 @@ export const api = {
     request<any>('DELETE', `/contacts/${id}`, envelope),
 
   searchAccounts: (query: string) =>
-    request<{ accounts: any[] }>('GET', `/contacts/search/accounts?q=${encodeURIComponent(query)}`),
+    request<{ accounts: AccountSearchResult[] }>('GET', `/contacts/search/accounts?q=${encodeURIComponent(query)}`),
 
   // Recurring Transfers
   getRecurring: (accountId: string) =>

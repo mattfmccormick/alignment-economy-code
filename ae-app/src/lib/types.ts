@@ -111,6 +111,19 @@ export interface CaseArgumentData {
   createdAt: number;
 }
 
+/**
+ * An account-search hit from `GET /contacts/search/accounts`. Snake_case —
+ * the route returns raw DB columns.
+ */
+export interface AccountSearchResult {
+  id: string;
+  public_key: string;
+  type: string;
+  percent_human: number;
+  earned_balance: string;
+  is_active: number;
+}
+
 // ─── Tagging (durable goods & spaces) ─────────────────────────────────────
 
 /** A durable-good product (camelCase; mapped from DB rows by the route). */

@@ -4,6 +4,7 @@ import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
 import { displayPoints, truncateId, toBaseUnits } from '../lib/formatting';
+import type { AccountSearchResult } from '../lib/types';
 
 type Tab = 'contacts' | 'search' | 'recent';
 
@@ -36,7 +37,7 @@ export function Send() {
 
   // Search
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<AccountSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
   // Recent
@@ -93,8 +94,7 @@ export function Send() {
     try {
       const res = await api.searchAccounts(searchQuery);
       if (res.success && res.data) {
-        const accounts = res.data.accounts || (res.data as any) || [];
-        setSearchResults(Array.isArray(accounts) ? accounts : []);
+        setSearchResults(res.data.accounts ?? []);
       }
     } catch { /* ignore */ }
     setSearching(false);
@@ -354,7 +354,7 @@ export function Send() {
               <div className="w-6 h-6 border-2 border-teal border-t-transparent rounded-full animate-spin" />
             </div>
           )}
-          {searchResults.map((acc: any) => (
+          {searchResults.map((acc) => (
             <button
               key={acc.id}
               onClick={() => selectRecipient({ accountId: acc.id })}
@@ -365,7 +365,7 @@ export function Send() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-white font-mono truncate">{truncateId(acc.id)}</p>
-                <p className="text-xs text-gray-500">{acc.percentHuman ?? 0}% human</p>
+                <p className="text-xs text-gray-500">{acc.percent_human ?? 0}% human</p>
               </div>
               <span className="text-xs text-teal">Select</span>
             </button>
