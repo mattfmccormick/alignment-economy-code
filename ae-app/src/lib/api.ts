@@ -6,6 +6,9 @@ import type {
   MyCaseData,
   JurorData,
   CaseArgumentData,
+  MinerData,
+  MinerStatus,
+  NetworkStatus,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -155,10 +158,10 @@ export const api = {
   // Miners
   // Auth-required: only the account being registered can register itself.
   registerMiner: (envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
-    request<any>('POST', '/miners/register', envelope),
+    request<{ miner: MinerData }>('POST', '/miners/register', envelope),
 
   getMinerStatus: (accountId: string) =>
-    request<{ isMiner: boolean; miner: any }>('GET', `/miners/status/${accountId}`),
+    request<MinerStatus>('GET', `/miners/status/${accountId}`),
 
   // Auth-required: only the account being verified can submit its own evidence.
   submitEvidence: (envelope: { accountId: string; timestamp: number; signature: string; payload: { evidenceTypeId: string; evidenceHash: string } }) =>
@@ -234,7 +237,7 @@ export const api = {
 
   // Network
   getNetworkStatus: () =>
-    request<any>('GET', '/network/status'),
+    request<NetworkStatus>('GET', '/network/status'),
 
   getFeePool: () =>
     request<any>('GET', '/network/fee-pool'),

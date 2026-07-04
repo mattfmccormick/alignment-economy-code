@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { displayPoints } from '../lib/formatting';
+import type { NetworkStatus } from '../lib/types';
 
 export function Network() {
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<NetworkStatus | null>(null);
 
   useEffect(() => {
     api.getNetworkStatus().then((r) => { if (r.success) setStatus(r.data); });

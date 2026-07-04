@@ -15,6 +15,7 @@ import {
 import { truncateId } from '../lib/formatting';
 import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
+import type { MinerStatus } from '../lib/types';
 import { signPayload } from '../lib/crypto';
 import { SessionReauthModal } from '../components/SessionReauthModal';
 import { supportedLanguages, RTL_LANGUAGES } from '../lib/i18n';
@@ -30,7 +31,7 @@ const links = [
 export function More() {
   const wallet = loadWallet();
   const [currentTheme, setCurrentTheme] = useState(getTheme());
-  const [minerStatus, setMinerStatus] = useState<{ isMiner: boolean; miner: any } | null>(null);
+  const [minerStatus, setMinerStatus] = useState<MinerStatus | null>(null);
   const [registering, setRegistering] = useState(false);
   const [copied, setCopied] = useState(false);
   // Recovery phrase export. The phrase is the source of truth for the wallet,
@@ -282,7 +283,8 @@ export function More() {
         payload,
       });
       if (res.success) {
-        setMinerStatus({ isMiner: true, miner: res.data });
+        // res.data is { miner }, so unwrap it — don't nest the wrapper.
+        setMinerStatus({ isMiner: true, miner: res.data.miner });
       }
     } catch { /* ignore */ }
     setRegistering(false);

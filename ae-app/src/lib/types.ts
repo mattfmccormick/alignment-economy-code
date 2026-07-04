@@ -110,3 +110,33 @@ export interface CaseArgumentData {
   attachmentHash: string | null;
   createdAt: number;
 }
+
+// ─── Miners & network ────────────────────────────────────────────────────
+
+/** A miner record (ae-node's `Miner`). */
+export interface MinerData {
+  id: string;
+  accountId: string;
+  tier: 1 | 2;
+  isActive: boolean;
+  registeredAt: number;
+  deactivatedAt: number | null;
+}
+
+/** `GET /miners/status/:id`: whether the account is a miner, and the record. */
+export interface MinerStatus {
+  isMiner: boolean;
+  miner?: MinerData;
+}
+
+/** `GET /network/status`: network-wide counters (bigint pools as strings). */
+export interface NetworkStatus {
+  currentDay: number;
+  blockHeight: number;
+  participantCount: number;
+  minerCount: number;
+  totalEarnedPool: string;
+  targetTotal: string;
+  transactionsToday: number;
+  feePoolBalance: string;
+}
