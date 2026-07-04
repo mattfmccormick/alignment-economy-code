@@ -484,6 +484,45 @@ export function Onboarding() {
     }
   }
 
+  // Join as a brand-new member: the user has the network spec (from an invite
+  // link or genesis.json) but is NOT a pre-listed validator, so there's no
+  // keystore to upload. Generate a fresh self-custody wallet inline (same as
+  // the solo path), create the account against the joined network's node, and
+  // record which network this wallet belongs to. The wallet is persisted
+  // through the recovery-phrase backup flow, same as every other new account.
+  //
+  // Scope note: in the packaged desktop app a fresh participant runs as a
+  // non-validating follower that must sync from a bootstrap peer; that internet
+  // peering (NAT traversal / a reachable bootstrap) is the deployment team's
+  // job. This flow creates the account and records the network against whatever
+  // node the wallet talks to (localhost in dev, or a reachable bootstrap).
+  async function joinNetworkAsNewMember(): Promise<void> {
+    if (!joinSpec) return;
+    setLoading(true);
+    setJoinError(null);
+    try {
+      // Client-side keygen: the 12-word mnemonic and private key never leave
+      // this browser. Only the public key is sent to the node.
+      const mnemonic = newMnemonic();
+      const { publicKey } = mnemonicToKeypair(mnemonic);
+      const res = await api.createAccount('individual', publicKey);
+      if (res.success) {
+        // Record the network before the recovery flow persists the wallet and
+        // lands the user in the app, so loadJoinedNetwork() knows where we are.
+        saveJoinedNetwork(joinSpec);
+        persistNetworkMode('join');
+        setWallet({ accountId: res.data.account.id, publicKey, mnemonic });
+        setFlow('learn-recovery');
+      } else {
+        setJoinError(res.error?.message || 'Failed to create account');
+      }
+    } catch (e) {
+      setJoinError(e instanceof Error ? e.message : 'Network error. Is the backend running?');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function createAccount() {
     setLoading(true);
     setError(null);
@@ -763,10 +802,10 @@ export function Onboarding() {
           >
             <div className="flex items-start justify-between mb-1">
               <span className="text-white font-medium">Join an existing network</span>
-              <span className="text-[10px] text-gold bg-gold/15 px-2 py-0.5 rounded-full">Validator</span>
+              <span className="text-[10px] text-gold bg-gold/15 px-2 py-0.5 rounded-full">Invite</span>
             </div>
             <p className="text-xs text-gray-400 leading-relaxed">
-              Someone shared a network spec with you (or sent you an invite link). Join their network and become a validator on it.
+              Someone shared a network spec with you (or sent you an invite link). Join as a new member, or as a validator if you were given a keystore.
             </p>
           </button>
         </div>
@@ -1001,7 +1040,7 @@ export function Onboarding() {
         </div>
         <h2 className="text-2xl font-serif text-white mb-2 text-center">Join an existing network</h2>
         <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
-          Paste the invite link from the founder (or upload genesis.json if they sent the file). Then upload your private keystore.
+          Paste the invite link from the founder (or upload genesis.json if they sent the file). New members just create a wallet below. Validators also upload their private keystore.
         </p>
 
         <div className="w-full max-w-sm bg-navy rounded-xl p-4 border border-navy-light mb-3">
@@ -1057,6 +1096,30 @@ export function Onboarding() {
                 <span className="text-gray-500">{validatorAccounts.length} validators</span>
               </p>
             )}
+          </div>
+
+          {/* New-member path: create a wallet inline, no keystore needed.
+              Shown once the network spec is loaded (from invite or file). */}
+          {joinSpec && (
+            <div className="bg-teal/10 rounded-xl p-4 border border-teal/30">
+              <p className="text-sm text-white font-medium mb-1">New here? Join as a member</p>
+              <p className="text-[11px] text-gray-400 mb-3">
+                Creates a fresh self-custody wallet on <span className="font-mono text-white">{joinSpec.networkId}</span>. Your recovery phrase stays on this device. No keystore file needed.
+              </p>
+              <button
+                onClick={joinNetworkAsNewMember}
+                disabled={loading}
+                className="w-full py-2.5 bg-teal text-white rounded-lg text-sm font-medium hover:bg-teal-dark transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Creating your wallet...' : 'Create wallet & join'}
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 py-1">
+            <div className="flex-1 h-px bg-navy-light" />
+            <span className="text-[10px] text-gray-600 uppercase tracking-wider">or, if you&apos;re a validator</span>
+            <div className="flex-1 h-px bg-navy-light" />
           </div>
 
           <div className="bg-navy rounded-xl p-4 border border-navy-light">
