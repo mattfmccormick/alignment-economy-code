@@ -335,10 +335,24 @@ Real, not blocking. Documented so they aren't forgotten.
   now builds the SDK first, then lints and builds ae-app; the build step is restored (job is
   `lint + build` again). Note for local devs cloning fresh: run `npm ci && npm run build` in
   `sdk/` before building `ae-app`.
-- **D9. Stabilize the flaky multi-runner tests.** Phase 60 (and the Phase 35/49/53/59 family)
-  are timing-flaky: they use fixed `wait()` delays for validator restart/catch-up. CI retries the
-  test step once to absorb this, but the real fix is event-based waits so a single run is
-  deterministic. Then drop the retry.
+- **D9. Stabilize the flaky multi-runner tests.** 🟡 **Documented phase16 flake fixed at root;
+  broader sweep + retry-drop still open.** Investigating the canonical "Phase 17 sync" flake
+  root-caused it precisely: `phase16.e2e.ts` built two chains by calling `createGenesisBlock()` once
+  per node, but genesis carries a `Date.now()` timestamp, so the two genesis blocks diverge whenever
+  the calls land in different seconds — the follower then can't match block 1's parent hash and
+  wrongly bans the honest authority, aborting sync with zero blocks applied (~1 in 5 runs). Fixed by
+  sharing the authority's exact genesis with the follower, plus converting the file's fixed `wait()`
+  sleeps to poll-to-deadline and adding a wait-for-peer-advertised-height before the one-shot
+  `startSync()`. 25/25 green (was ~80%). Notably, `smoke-multiblock` and `phase60` were **already**
+  deterministic (poll-to-deadline with generous timeouts); the residual flake there is genuine
+  multi-process BFT nondeterminism under load, not a naive sleep. **Remaining:** apply the shared-
+  genesis + poll-to-deadline pattern to the other manual-PeerManager e2e tests (phase10/14/27/36),
+  then re-evaluate dropping the CI retry. **New finding (separate, real):** `ChainSync.startSync()`
+  is one-shot with no retry — a genuinely dropped `get_blocks` request or reply stalls a follower
+  forever (`isSyncing` stuck true). That's a production robustness gap, not just a test issue; it
+  wants its own careful fix (a stall watchdog that re-requests, made safe by skipping already-applied
+  blocks so a late duplicate reply can't ban an honest peer) with a dropped-message test. Logged here
+  so it isn't lost.
 
 ---
 
