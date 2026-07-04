@@ -258,12 +258,16 @@ Real, not blocking. Documented so they aren't forgotten.
   caught the biggest bug yet: **three pages** (`Contacts`, `Send`, `Recurring`) set their contact
   state straight from the snake_case rows into a camelCase local type, so `contact.isFavorite` and
   `contact.contactAccountId` were `undefined` at runtime (favorites filtering and contact-ID
-  display silently broken). Fixed all three with an explicit snake→camel map. ae-app is at
-  **45 `any` (from 72)**, build + tests green. **Remaining:** the rest of the list responses
-  (vouches, tags, verification panels, evidence/vouch-requests, search), the two `(data: any)`
-  websocket handlers in `CaseDetail`, the ae-miner side, the real `react-hooks/purity` bug in
-  `Tag.tsx` (`Date.now()` during render), then promote the rules to errors once each frontend
-  reaches zero.
+  display silently broken). Fixed all three with an explicit snake→camel map. Then typed the
+  vouch responses (`VouchData`, `VouchRequestData`) on `getVouches`, `getVouchRequests`,
+  `createVouch`, and `createVouchRequest` — which surfaced a type inaccuracy in `Verify` (its local
+  `Vouch.stakeAmount` was `number` but the API sends a string; no runtime bug since the display
+  sites already wrapped it in `String(...)`, but the type is now correct). ae-app is at
+  **39 `any` (from 72)**, build + tests green. **Remaining:** the rest of the list responses
+  (tags/products/spaces, verification panels, evidence, search, vouch-request update), the two
+  `(data: any)` websocket handlers in `CaseDetail`, the ae-miner side, the real
+  `react-hooks/purity` bug in `Tag.tsx` (`Date.now()` during render), then promote the rules to
+  errors once each frontend reaches zero.
 - **D6. Frontend dependency conflict.** ✅ **Done.** Bumped `vite-plugin-pwa` to `^1.3.0` in both
   frontends (1.3.0 adds `^8.0.0` to its vite peer range), regenerated both lockfiles cleanly
   without `--legacy-peer-deps`, and removed the flag from both CI jobs. Verified `npm install`

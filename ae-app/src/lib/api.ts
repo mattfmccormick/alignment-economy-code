@@ -10,6 +10,8 @@ import type {
   MinerStatus,
   NetworkStatus,
   ContactData,
+  VouchData,
+  VouchRequestData,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -175,18 +177,18 @@ export const api = {
   // The voucher signs `{ vouchedId, stakePercent }` — the backend computes
   // the actual locked amount from the voucher's total holdings.
   createVouch: (envelope: { accountId: string; timestamp: number; signature: string; payload: { vouchedId: string; stakePercent: number } }) =>
-    request<any>('POST', '/miners/vouches', envelope),
+    request<{ vouch: VouchData }>('POST', '/miners/vouches', envelope),
 
   getVouches: (accountId: string) =>
-    request<{ received: any[]; given: any[] }>('GET', `/miners/vouches/${accountId}`),
+    request<{ received: VouchData[]; given: VouchData[] }>('GET', `/miners/vouches/${accountId}`),
 
   // Vouch Requests
   // Auth-required: the requestor (signed account) is the fromId.
   createVouchRequest: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; message: string } }) =>
-    request<any>('POST', '/miners/vouch-requests', envelope),
+    request<{ id: string; fromId: string; toId: string; status: string }>('POST', '/miners/vouch-requests', envelope),
 
   getVouchRequests: (accountId: string) =>
-    request<{ incoming: any[]; outgoing: any[] }>('GET', `/miners/vouch-requests/${accountId}`),
+    request<{ incoming: VouchRequestData[]; outgoing: VouchRequestData[] }>('GET', `/miners/vouch-requests/${accountId}`),
 
   // Auth-required: only the request's recipient (toId) can respond.
   updateVouchRequest: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { status: 'accepted' | 'declined' } }) =>

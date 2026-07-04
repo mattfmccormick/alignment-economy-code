@@ -111,6 +111,31 @@ export interface CaseArgumentData {
   createdAt: number;
 }
 
+// ─── Vouching ────────────────────────────────────────────────────────────
+
+/** A vouch (WP v2: percentage-based). API stringifies the bigint stake. */
+export interface VouchData {
+  id: string;
+  voucherId: string;
+  vouchedId: string;
+  stakeAmount: string;
+  stakedPercentage: number;
+  isActive: boolean;
+  createdAt: number;
+  withdrawnAt: number | null;
+}
+
+/** A pending vouch request between two accounts. */
+export interface VouchRequestData {
+  id: string;
+  fromId: string;
+  toId: string;
+  status: 'pending' | 'accepted' | 'declined';
+  message: string;
+  createdAt: number;
+  respondedAt: number | null;
+}
+
 // ─── Miners & network ────────────────────────────────────────────────────
 
 /** A miner record (ae-node's `Miner`). */

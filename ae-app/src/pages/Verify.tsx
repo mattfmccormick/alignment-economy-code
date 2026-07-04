@@ -20,7 +20,7 @@ interface VouchRequest {
 interface Vouch {
   voucherId: string;
   vouchedId: string;
-  stakeAmount: number;
+  stakeAmount: string; // API serializes the bigint stake as a string
   stakedPercentage?: number;
 }
 
