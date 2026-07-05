@@ -115,8 +115,20 @@ export function Send() {
 
   const displayBalance = displayPoints(balance);
   const amountNum = Number(amount) || 0;
-  const fee = amountNum * 0.005;
-  const net = amountNum - fee;
+
+  // percentHuman discount (WP §7): daily-point (active) spends by an individual
+  // are multiplied by percentHuman/100; the remainder burns to verification.
+  // The sender is always debited the full amount they type. Earned spends and
+  // non-individual accounts pass through at full value.
+  const percentHuman = account?.percentHuman ?? 100;
+  const isDiscounted = pointType === 'active' && account?.type === 'individual' && percentHuman < 100;
+  const effective = isDiscounted ? amountNum * (percentHuman / 100) : amountNum;
+  const verificationBurn = amountNum - effective;
+  const fee = effective * 0.005;
+  const net = effective - fee;
+  // Gross-up target: the amount to type so the recipient receives what the user
+  // originally intended (before fee), i.e. amount ÷ (percentHuman/100).
+  const grossedUp = isDiscounted && percentHuman > 0 ? amountNum / (percentHuman / 100) : amountNum;
 
   async function handleSend() {
     if (!wallet || !recipient || !amount || amountNum <= 0) return;
@@ -259,9 +271,15 @@ export function Send() {
         {amountNum > 0 && (
           <div className="bg-navy rounded-xl p-3 border border-navy-light text-sm space-y-1">
             <div className="flex justify-between text-gray-400">
-              <span>Sending</span>
+              <span>You spend</span>
               <span className="tabular-nums">{amountNum.toFixed(2)} pts</span>
             </div>
+            {isDiscounted && (
+              <div className="flex justify-between text-amber-400/90">
+                <span>Verification burn ({percentHuman}% human)</span>
+                <span className="tabular-nums">-{verificationBurn.toFixed(2)} pts</span>
+              </div>
+            )}
             <div className="flex justify-between text-gray-500">
               <span>Fee (0.5%)</span>
               <span className="tabular-nums">{fee.toFixed(2)} pts</span>
@@ -271,6 +289,19 @@ export function Send() {
               <span className="tabular-nums">{net.toFixed(2)} pts</span>
             </div>
           </div>
+        )}
+
+        {/* Gross-up nudge: at <100% human, part of an active spend burns to
+            verification, so the recipient gets less than the typed amount.
+            Offer to raise the amount so they receive the full intended value. */}
+        {isDiscounted && amountNum > 0 && (
+          <button
+            onClick={() => setAmount(grossedUp.toFixed(2))}
+            className="w-full text-xs text-teal bg-teal/10 rounded-lg py-2 px-3 hover:bg-teal/20 transition-colors text-left"
+          >
+            At {percentHuman}% human, {verificationBurn.toFixed(2)} pts burn. Tap to send{' '}
+            <span className="font-medium tabular-nums">{grossedUp.toFixed(2)}</span> so they receive the full {amountNum.toFixed(2)}.
+          </button>
         )}
 
         <button

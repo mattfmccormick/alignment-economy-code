@@ -25,14 +25,20 @@ vi.mock('../lib/keys', () => ({
   loadWallet: () => ({ accountId: 'me', privateKey: 'priv', publicKey: 'pub' }),
 }));
 
-// useAccount supplies the balance shown in the form. Give plenty of active.
+// useAccount supplies the balance + percentHuman shown in the form. Held in a
+// hoisted mutable ref so individual tests can vary percentHuman/type.
+const mockAccount = vi.hoisted(() => ({
+  current: {
+    type: 'individual',
+    percentHuman: 100,
+    activeBalance: '10000000',
+    earnedBalance: '0',
+    isEscrowed: false,
+  } as Record<string, unknown>,
+}));
 vi.mock('../hooks/useAccount', () => ({
   useAccount: () => ({
-    account: {
-      activeBalance: '10000000',
-      earnedBalance: '0',
-      isEscrowed: false,
-    },
+    account: mockAccount.current,
     loading: false,
     error: null,
     refresh: () => {},
@@ -71,6 +77,11 @@ function selectRecipientAndEnterAmount(accountId: string, amount: string) {
 describe('Send flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset to a fully-verified account; the gross-up test opts into <100%.
+    mockAccount.current = {
+      type: 'individual', percentHuman: 100,
+      activeBalance: '10000000', earnedBalance: '0', isEscrowed: false,
+    };
     mockApi.getContacts.mockResolvedValue({ success: true, data: { contacts: [] } });
     mockApi.getTransactions.mockResolvedValue({
       success: true,
@@ -124,5 +135,30 @@ describe('Send flow', () => {
 
     // The user must see the failure, not a false success.
     expect(await screen.findByText('Insufficient balance')).toBeTruthy();
+  });
+
+  it('shows the verification burn and grosses up an active spend below 100% human', async () => {
+    // A 90%-human individual: an active spend of 20 delivers 20×0.9 − fee.
+    mockAccount.current = {
+      type: 'individual', percentHuman: 90,
+      activeBalance: '10000000', earnedBalance: '0', isEscrowed: false,
+    };
+    mockApi.sendTransaction.mockResolvedValue({
+      success: true,
+      data: { transaction: fakeTx, newBalance: '0' },
+    });
+
+    render(<Send />);
+    selectRecipientAndEnterAmount('recipient-xyz', '20.00');
+
+    // The preview must tell the truth: 2 pts burn to verification, recipient
+    // gets 20×0.9 − 0.5% fee = 17.91, not the old (wrong) 19.90.
+    expect(await screen.findByText('-2.00 pts')).toBeTruthy();
+    expect(screen.getByText('17.91 pts')).toBeTruthy();
+
+    // The gross-up control raises the amount to 20 ÷ 0.9 = 22.22 so the
+    // recipient receives the full intended value.
+    fireEvent.click(screen.getByText(/receive the full/));
+    expect((screen.getByPlaceholderText('0.00') as HTMLInputElement).value).toBe('22.22');
   });
 });
