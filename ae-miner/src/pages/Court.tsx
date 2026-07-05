@@ -18,6 +18,7 @@ export default function Court() {
   // File-challenge form state
   const [defendantId, setDefendantId] = useState('');
   const [caseType, setCaseType] = useState<'not_human' | 'duplicate_account'>('not_human');
+  const [counterpartId, setCounterpartId] = useState('');
   const [stakePercent, setStakePercent] = useState(5);
   const [openingArgument, setOpeningArgument] = useState('');
   const [filing, setFiling] = useState(false);
@@ -83,6 +84,10 @@ export default function Court() {
       setError('Enter the defendant account ID');
       return;
     }
+    if (caseType === 'duplicate_account' && !counterpartId.trim()) {
+      setError('Name the earlier account this one duplicates');
+      return;
+    }
     setFiling(true);
     setError('');
     try {
@@ -90,6 +95,7 @@ export default function Court() {
       const payload: Record<string, unknown> = {
         defendantAccountId: defendantId.trim(), caseType, stakePercent,
       };
+      if (caseType === 'duplicate_account') payload.counterpartAccountId = counterpartId.trim();
       const trimmedArg = openingArgument.trim();
       if (trimmedArg) payload.openingArgument = trimmedArg;
       const sig = signPayload(payload, ts, wallet.privateKey);
@@ -101,6 +107,7 @@ export default function Court() {
       });
       if (res.success) {
         setDefendantId('');
+        setCounterpartId('');
         setOpeningArgument('');
         await load();
         setTab('cases');
@@ -250,6 +257,22 @@ export default function Court() {
               <option value="duplicate_account">Duplicate Account (Sybil)</option>
             </select>
           </div>
+          {caseType === 'duplicate_account' && (
+            <div>
+              <label className="block text-xs text-muted mb-1.5">
+                Earlier account it duplicates <span className="text-muted/70">(the one that survives)</span>
+              </label>
+              <input
+                value={counterpartId}
+                onChange={(e) => setCounterpartId(e.target.value)}
+                placeholder="acc_... (must have joined before the defendant)"
+                className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-sm font-mono text-white placeholder-muted/40 focus:outline-none focus:border-teal"
+              />
+              <p className="text-[11px] text-muted mt-1">
+                On a guilty verdict the defendant closes; this account survives and disgorges 2× the double-harvested daily points.
+              </p>
+            </div>
+          )}
           <div>
             <label className="block text-xs text-muted mb-1.5">Stake: {stakePercent}% of your Earned</label>
             <input
@@ -274,7 +297,7 @@ export default function Court() {
           </div>
           <button
             onClick={fileChallenge}
-            disabled={filing || !defendantId.trim()}
+            disabled={filing || !defendantId.trim() || (caseType === 'duplicate_account' && !counterpartId.trim())}
             className="w-full py-2.5 bg-red text-white rounded-lg text-sm font-medium hover:bg-red/80 transition-colors disabled:opacity-50"
           >
             {filing ? 'Filing…' : `File Challenge with ${stakePercent}% Stake`}

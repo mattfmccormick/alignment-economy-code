@@ -43,6 +43,9 @@ export const fileChallenge = z.object({
   caseType: z.enum(['not_human', 'duplicate_account']),
   stakePercent: z.number(),
   openingArgument: z.string().optional(),
+  // Required by fileChallenge() when caseType is 'duplicate_account': the
+  // earlier account the defendant duplicates (validated server-side).
+  counterpartAccountId: z.string().optional(),
 });
 
 export const submitArgument = z.object({

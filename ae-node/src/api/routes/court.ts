@@ -30,7 +30,7 @@ export function courtRoutes(db: DatabaseSync): Router {
   router.post('/challenges', authMiddleware(db), minerAuthMiddleware(db), validateBody(schemas.fileChallenge), (req, res, next) => {
     try {
       const challengerAccountId = req.accountId!;
-      const { defendantAccountId, caseType, stakePercent, openingArgument } = req.body.payload || req.body;
+      const { defendantAccountId, caseType, stakePercent, openingArgument, counterpartAccountId } = req.body.payload || req.body;
 
       if (!defendantAccountId || !caseType || typeof stakePercent !== 'number') {
         res.status(400).json({
@@ -50,6 +50,7 @@ export function courtRoutes(db: DatabaseSync): Router {
       const courtCase = fileChallenge(
         db, challengerAccountId, defendantAccountId, caseType as CaseType, stakePercent,
         typeof openingArgument === 'string' ? openingArgument : undefined,
+        typeof counterpartAccountId === 'string' ? counterpartAccountId : undefined,
       );
 
       // Notify the defendant in real time so their wallet shows the summons.
@@ -316,6 +317,7 @@ function serializeCase(c: ReturnType<typeof getCase> & object) {
     votingDeadline: c.votingDeadline,
     verdict: c.verdict,
     appealOf: c.appealOf,
+    counterpartId: c.counterpartId,
     createdAt: c.createdAt,
     resolvedAt: c.resolvedAt,
   };

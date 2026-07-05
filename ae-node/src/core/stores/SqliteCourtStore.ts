@@ -22,6 +22,7 @@ function rowToCase(row: Record<string, unknown>): CourtCase {
     votingDeadline: row.voting_deadline as number | null,
     verdict: row.verdict as Verdict | null,
     appealOf: row.appeal_of as string | null,
+    counterpartId: (row.counterpart_id as string | null) ?? null,
     createdAt: row.created_at as number,
     resolvedAt: row.resolved_at as number | null,
   };
@@ -52,8 +53,8 @@ export class SqliteCourtStore implements ICourtStore {
       .prepare(
         `INSERT INTO court_cases (id, type, level, challenger_id, defendant_id, challenger_stake,
          challenger_stake_percent, status, arbitration_deadline, voting_deadline, verdict, appeal_of,
-         created_at, resolved_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
+         counterpart_id, created_at, resolved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)`,
       )
       .run(
         input.id,
@@ -67,6 +68,7 @@ export class SqliteCourtStore implements ICourtStore {
         input.arbitrationDeadline,
         input.votingDeadline,
         input.appealOf,
+        input.counterpartId,
         input.createdAt,
       );
   }

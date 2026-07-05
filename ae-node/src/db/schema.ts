@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -267,6 +267,7 @@ const TABLES = `
     voting_deadline INTEGER,
     verdict TEXT,
     appeal_of TEXT,
+    counterpart_id TEXT,
     created_at INTEGER NOT NULL,
     resolved_at INTEGER
   );
@@ -649,6 +650,16 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       .all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === 'is_escrowed')) {
       db.exec('ALTER TABLE accounts ADD COLUMN is_escrowed INTEGER NOT NULL DEFAULT 0');
+    }
+  }
+  if (from < 12) {
+    // WP §9.3 duplicate-account cases: the counterpart is the earlier
+    // (surviving) account the defendant duplicates. NULL for not_human cases.
+    const cols = db
+      .prepare("PRAGMA table_info(court_cases)")
+      .all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'counterpart_id')) {
+      db.exec('ALTER TABLE court_cases ADD COLUMN counterpart_id TEXT');
     }
   }
 }

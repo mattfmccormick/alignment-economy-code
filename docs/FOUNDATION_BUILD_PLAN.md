@@ -366,19 +366,27 @@ human-tags, 11-juror courts with 5% stakes and sealed votes, 20/80 bounty/burn, 
 escrow, one-case-at-a-time, conflict exclusion, appeals, 6-month protection window, ML-DSA-65, 7-year
 pruning, governance classes). These are the gaps where code and paper diverge.
 
-- **W1. Duplicate-account verdict is missing.** 🔴 **Building now.** The WP (§9.3) says a guilty
-  *duplicate_account* verdict is different from *not_human*: the earliest-created account survives,
-  all others close under the non-human outcome, and the survivor pays a penalty of **twice the
-  harvested allocations** (overlap days × 1,440) burned from its Earned balance. `resolveVerdict` in
-  `court/court.ts` never branches on `caseType` — every guilty verdict runs `applyGuiltyVerdict`
-  (close defendant, pay bounty, burn remainder). No "earliest survives," no overlap penalty. Protocol
-  correctness gap; cleanly testable.
-- **W2. Wallet doesn't gross up the percentHuman discount.** 🟡 UX gap (protocol is correct). The
-  chain multiplies a daily-point spend by `percentHuman/100` and burns the remainder (WP §7: a
-  90%-human buyer pays 22.2 to deliver 20). `transaction.ts:368` does exactly this. But the wallet
-  Send screen shows a flat fee preview and sends the typed amount as-is, so a buyer who types 20
-  delivers 18. Fix is UI-only: show "recipient receives X," and offer to gross up
-  (`amount / (percentHuman/100)`) so the intended value lands.
+- ~~**W1. Duplicate-account verdict is missing.**~~ ✅ **Done (July 5).** A `duplicate_account`
+  challenge now names a **counterpart** — the earlier account the defendant duplicates (schema v12:
+  nullable `court_cases.counterpart_id`; required + validated at filing: counterpart exists, is
+  active, differs from defendant/challenger, and joined on an earlier day so the defendant is
+  unambiguously the later duplicate). On a guilty verdict the defendant closes like any non-human
+  account (bounty + burn + deactivate), and `applyGuiltyVerdict` now burns a **2× overlap penalty**
+  from the surviving counterpart: `2 × (currentDay − defendant.joinedDay) × DAILY_ACTIVE_POINTS`,
+  capped at the counterpart's Earned (never driven negative). The counterpart is not escrowed (it's
+  presumed-legit; the penalty disgorges up to available balance) — a documented design choice.
+  `not_human` cases are unchanged. Wired through the API (`counterpartAccountId`, zod-optional,
+  serialized on the case) and the miner File Challenge form (a counterpart field appears when
+  "Duplicate Account" is selected, required to submit). Covered by `wp1-duplicate-verdict.test.ts`
+  (4/4: penalty math, cap, counterpart-required, counterpart-must-be-older).
+- ~~**W2. Wallet doesn't gross up the percentHuman discount.**~~ ✅ **Done (July 5).** The Send
+  preview now tells the truth for an active spend by a <100%-human individual: it shows a
+  **"Verification burn (N% human)"** line (`amount × (1 − percentHuman/100)`) and a corrected
+  **"Recipient gets"** (`amount × percentHuman/100 − 0.5% fee`) instead of the old figure that
+  ignored the discount. Below it, a one-tap **gross-up** control raises the amount to
+  `amount ÷ (percentHuman/100)` so the recipient receives the full intended value (WP §7's 20 → 22.22
+  at 90%). UI-only; the protocol math (`transaction.ts:368`) was already correct. Covered by a new
+  `Send.test.tsx` case (burn line, corrected delivery figure, and the gross-up click).
 - **W3. Validator selection contradicts the WP.** 🟠 **Needs Matt's decision.** WP §8.4: validators
   are selected "based on their proof-of-human verification accuracy and network participation, not on
   capital staked." `proposer-selection.ts` is explicitly **stake-weighted**

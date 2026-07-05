@@ -7,6 +7,7 @@ import { runTransaction } from '../db/connection.js';
 import { getParam } from '../config/params.js';
 import { NotFoundError, ValidationError, ForbiddenError, ConflictError, InsufficientBalanceError } from '../core/errors.js';
 import { cycleStateStore } from '../core/stores/SqliteCycleStateStore.js';
+import { DAILY_ACTIVE_POINTS } from '../core/constants.js';
 import { getMinerByAccount, getActiveMiners, getMiner, setMinerTier, miningStore } from '../mining/registration.js';
 import { burnAllVouchesOnAccount } from '../verification/vouching.js';
 import { getCompositeAccuracy } from '../mining/accuracy.js';
@@ -35,6 +36,7 @@ export function initializeCourtSchema(db: DatabaseSync): void {
       voting_deadline INTEGER,
       verdict TEXT,
       appeal_of TEXT,
+      counterpart_id TEXT,
       created_at INTEGER NOT NULL,
       resolved_at INTEGER
     );
@@ -65,6 +67,7 @@ export function fileChallenge(
   caseType: CaseType,
   stakePercent: number,
   openingArgument?: string,
+  counterpartAccountId?: string,
 ): CourtCase {
   // Verify challenger is an active miner
   const miner = getMinerByAccount(db, challengerAccountId);
@@ -75,6 +78,30 @@ export function fileChallenge(
   if (!defendant) throw new NotFoundError('Defendant account not found');
   if (!defendant.isActive) throw new ValidationError('Defendant account is inactive', 'ACCOUNT_INACTIVE');
   if (challengerAccountId === defendantAccountId) throw new ValidationError('Cannot challenge yourself', 'SELF_CHALLENGE');
+
+  // WP §9.3: a duplicate_account challenge names the counterpart — the earlier
+  // account the defendant is alleged to duplicate. You challenge the newer
+  // (duplicate) account and name the older (surviving) one, so the counterpart
+  // must be strictly older than the defendant. On a guilty verdict the
+  // defendant closes and the counterpart pays the overlap penalty.
+  let counterpartId: string | null = null;
+  if (caseType === 'duplicate_account') {
+    if (!counterpartAccountId) {
+      throw new ValidationError('A duplicate-account challenge must name the counterpart account', 'COUNTERPART_REQUIRED');
+    }
+    if (counterpartAccountId === defendantAccountId || counterpartAccountId === challengerAccountId) {
+      throw new ValidationError('Counterpart must differ from the defendant and challenger', 'INVALID_COUNTERPART');
+    }
+    const counterpart = getAccount(db, counterpartAccountId);
+    if (!counterpart) throw new NotFoundError('Counterpart account not found');
+    if (!counterpart.isActive) throw new ValidationError('Counterpart account is inactive', 'COUNTERPART_INACTIVE');
+    // "Earliest survives": the counterpart must have joined on an earlier day
+    // than the defendant, so the defendant is unambiguously the later duplicate.
+    if (counterpart.joinedDay >= defendant.joinedDay) {
+      throw new ValidationError('Counterpart must have joined before the defendant (challenge the newer duplicate)', 'COUNTERPART_NOT_OLDER');
+    }
+    counterpartId = counterpartAccountId;
+  }
 
   const store = courtStore(db);
 
@@ -124,6 +151,7 @@ export function fileChallenge(
       arbitrationDeadline: deadline,
       votingDeadline: null,
       appealOf: null,
+      counterpartId,
       createdAt: now,
     });
 
@@ -410,9 +438,48 @@ function applyGuiltyVerdict(
   // Burn voucher stakes on defendant
   burnAllVouchesOnAccount(db, courtCase.defendantId);
 
+  // WP §9.3 duplicate-account outcome: the defendant (the duplicate) closes
+  // above like any non-human account. The earlier account it duplicated (the
+  // counterpart) survives, but must disgorge a penalty of TWICE the harvested
+  // allocations — the double-dipped daily mint over the overlap period, from
+  // the duplicate's creation day to now. Burned from the counterpart's Earned
+  // balance, capped at what it holds (we never drive a balance negative).
+  if (courtCase.type === 'duplicate_account' && courtCase.counterpartId) {
+    applyDuplicateOverlapPenalty(db, courtCase, defendant.joinedDay, now);
+  }
+
   // Juror stakes: majority returned, minority burned
   const majorityVote: Vote = 'not_human'; // guilty = not_human won
   processJurorStakes(db, jurors, majorityVote, courtCase.id, now);
+}
+
+/**
+ * Burn 2 × (overlap days × daily allocation) from the surviving counterpart on
+ * a guilty duplicate-account verdict (WP §9.3). Overlap days = the number of
+ * days both accounts were alive, i.e. from the duplicate defendant's join day
+ * to the current day. The penalty is capped at the counterpart's Earned balance.
+ */
+function applyDuplicateOverlapPenalty(
+  db: DatabaseSync,
+  courtCase: CourtCase,
+  defendantJoinedDay: number,
+  now: number,
+): void {
+  const counterpart = getAccount(db, courtCase.counterpartId!);
+  // Counterpart may have been closed by an intervening case; nothing to do.
+  if (!counterpart) return;
+
+  const currentDay = cycleStateStore(db).getCurrentDay();
+  const overlapDays = Math.max(0, currentDay - defendantJoinedDay);
+  if (overlapDays === 0) return;
+
+  const rawPenalty = 2n * BigInt(overlapDays) * DAILY_ACTIVE_POINTS;
+  const penalty = rawPenalty > counterpart.earnedBalance ? counterpart.earnedBalance : rawPenalty;
+  if (penalty <= 0n) return;
+
+  const newEarned = counterpart.earnedBalance - penalty;
+  updateBalance(db, counterpart.id, 'earned_balance', newEarned);
+  recordLog(db, counterpart.id, 'court_burn', 'earned', penalty, counterpart.earnedBalance, newEarned, courtCase.id, now);
 }
 
 function applyInnocentVerdict(
@@ -518,6 +585,7 @@ export function fileAppeal(db: DatabaseSync, caseId: string, blockHash: string):
       arbitrationDeadline: null,
       votingDeadline: null,
       appealOf: caseId,
+      counterpartId: original.counterpartId,
       createdAt: now,
     });
   });

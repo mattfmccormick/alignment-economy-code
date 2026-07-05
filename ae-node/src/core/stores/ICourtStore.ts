@@ -20,6 +20,7 @@ export interface CourtCaseInsert {
   arbitrationDeadline: number | null;
   votingDeadline: number | null;
   appealOf: string | null;
+  counterpartId: string | null;
   createdAt: number;
 }
 

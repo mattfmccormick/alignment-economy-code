@@ -29,6 +29,13 @@ export interface CourtCase {
   votingDeadline: number | null;
   verdict: Verdict | null;
   appealOf: string | null;
+  /**
+   * For `duplicate_account` cases: the earlier account the defendant is
+   * alleged to duplicate. On a guilty verdict this account survives (the
+   * defendant closes) and pays the overlap penalty (WP §9.3). NULL for
+   * `not_human` cases.
+   */
+  counterpartId: string | null;
   createdAt: number;
   resolvedAt: number | null;
 }
