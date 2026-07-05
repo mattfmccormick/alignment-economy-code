@@ -356,6 +356,52 @@ Real, not blocking. Documented so they aren't forgotten.
 
 ---
 
+## Group W: White-paper alignment audit (July 5)
+
+A claim-by-claim pass over `Alignment_Economy_White_Paper_July_FV.docx` against the code. Most WP
+mechanics are implemented and match to the exact constant (1,440/144/14.4 daily, 525,600 rebase
+target, 0.5% fee, 20/80 tiers, 60/40 Tier-2 lottery/baseline, composite accuracy 80% over 30 days,
+3-miner FIFO median panels, percentage-based vouching with rebalancing locks, 10%/mo decay offset by
+human-tags, 11-juror courts with 5% stakes and sealed votes, 20/80 bounty/burn, 50/50 innocent split,
+escrow, one-case-at-a-time, conflict exclusion, appeals, 6-month protection window, ML-DSA-65, 7-year
+pruning, governance classes). These are the gaps where code and paper diverge.
+
+- **W1. Duplicate-account verdict is missing.** 🔴 **Building now.** The WP (§9.3) says a guilty
+  *duplicate_account* verdict is different from *not_human*: the earliest-created account survives,
+  all others close under the non-human outcome, and the survivor pays a penalty of **twice the
+  harvested allocations** (overlap days × 1,440) burned from its Earned balance. `resolveVerdict` in
+  `court/court.ts` never branches on `caseType` — every guilty verdict runs `applyGuiltyVerdict`
+  (close defendant, pay bounty, burn remainder). No "earliest survives," no overlap penalty. Protocol
+  correctness gap; cleanly testable.
+- **W2. Wallet doesn't gross up the percentHuman discount.** 🟡 UX gap (protocol is correct). The
+  chain multiplies a daily-point spend by `percentHuman/100` and burns the remainder (WP §7: a
+  90%-human buyer pays 22.2 to deliver 20). `transaction.ts:368` does exactly this. But the wallet
+  Send screen shows a flat fee preview and sends the typed amount as-is, so a buyer who types 20
+  delivers 18. Fix is UI-only: show "recipient receives X," and offer to gross up
+  (`amount / (percentHuman/100)`) so the intended value lands.
+- **W3. Validator selection contradicts the WP.** 🟠 **Needs Matt's decision.** WP §8.4: validators
+  are selected "based on their proof-of-human verification accuracy and network participation, not on
+  capital staked." `proposer-selection.ts` is explicitly **stake-weighted**
+  (`P(V_i) = V_i.stake / totalActiveStake`). Harmless today (genesis gives equal stake), but the
+  claim isn't implemented. Either wire Tier-2 accuracy into validator eligibility/weight, or soften
+  the WP sentence. One has to move.
+- **W4. Follower catch-up sync has no retry.** 🟡 Robustness. Same item as D9's finding: a dropped
+  sync reply leaves `isSyncing` stuck and the follower stalls until reconnect. Stall watchdog +
+  re-request, made safe by skipping already-applied blocks. Dropped-message test.
+- **W5. White-paper honesty pass.** 🟠 **Partly needs Matt.** Claims the code doesn't (yet) back:
+  (a) the ZK **nullifier** — WP §8.2 describes a zero-knowledge circuit; `verification` stores a
+  plain SHA-256 file hash, which catches "same file twice" but not forged credentials. Mark as
+  Phase-3 roadmap. (b) The **enrollment fee** ($1–5, WP §8.1.3) — the primary spam defense — is not
+  in code at all; decide: protocol points-fee, off-chain signup payment, or drop from paper.
+  (c) **Smart-contract Supportive collection** (WP §5.2) is a schema placeholder, no execution
+  engine. (d) The **eleven-miner ramp-up review** (WP §9.2: re-verify all early accounts once 11
+  miners exist) is unimplemented. None are false in spirit, but the paper reads as if they exist now.
+
+**Sequencing:** W1 first (clearest correctness delta, self-contained), then W2 (small, user-facing),
+then W4 (robustness). W3 and W5 need Matt's decisions before code moves.
+
+---
+
 ## Suggested sequencing
 
 1. **A1 + A2** together (the safety net) — ~1.5 days.
