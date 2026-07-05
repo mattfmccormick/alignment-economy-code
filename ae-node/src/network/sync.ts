@@ -56,16 +56,31 @@ export class ChainSync {
    */
   private onSyncBlockApply: ((block: Record<string, unknown>) => boolean) | null = null;
 
+  // ── Stall watchdog ──────────────────────────────────────────────────
+  // A get_blocks request that never gets answered (dropped message, a peer
+  // that went away mid-batch) would otherwise leave isSyncing=true forever,
+  // and since startSync() early-returns while syncing the follower wedges
+  // until it reconnects. The watchdog re-requests the outstanding batch a few
+  // times, then gives up and frees isSyncing so the next periodic startSync
+  // can retry — possibly against a different, healthier peer.
+  private batchTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchRetries = 0;
+  private readonly batchTimeoutMs: number;
+  private readonly maxBatchRetries: number;
+
   constructor(
     db: DatabaseSync,
     peerManager: PeerManager,
     consensus: IConsensusEngine,
     validatorSet?: IValidatorSet,
+    options?: { batchTimeoutMs?: number; maxBatchRetries?: number },
   ) {
     this.db = db;
     this.peerManager = peerManager;
     this.consensus = consensus;
     this.validatorSet = validatorSet;
+    this.batchTimeoutMs = options?.batchTimeoutMs ?? 8000;
+    this.maxBatchRetries = options?.maxBatchRetries ?? 3;
     this.setupListeners();
   }
 
@@ -132,6 +147,7 @@ export class ChainSync {
       currentHeight: localHeight,
       syncPeer: bestPeer.id,
     };
+    this.batchRetries = 0;
 
     this.requestNextBatch();
   }
@@ -146,6 +162,39 @@ export class ChainSync {
       fromHeight,
       toHeight,
     });
+    // Arm the watchdog for THIS request. If no batch advances us past
+    // fromHeight before it fires, we re-request (or give up).
+    this.armBatchTimeout(fromHeight);
+  }
+
+  private armBatchTimeout(expectedFromHeight: number): void {
+    this.clearBatchTimeout();
+    this.batchTimer = setTimeout(() => this.onBatchTimeout(expectedFromHeight), this.batchTimeoutMs);
+    // The watchdog must never keep a node's event loop alive on its own.
+    this.batchTimer.unref?.();
+  }
+
+  private clearBatchTimeout(): void {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+  }
+
+  private onBatchTimeout(expectedFromHeight: number): void {
+    if (!this.state.isSyncing) return;
+    // If the next needed height moved, a reply already landed and re-armed;
+    // this is a stale timer, ignore it.
+    if (this.state.currentHeight + 1 !== expectedFromHeight) return;
+
+    if (this.batchRetries < this.maxBatchRetries) {
+      this.batchRetries++;
+      this.requestNextBatch(); // re-request the same, unanswered batch
+    } else {
+      // Give up on this peer. Freeing isSyncing lets the next periodic
+      // startSync pick a fresh best peer and try again.
+      this.finishSync();
+    }
   }
 
   private setupListeners(): void {
@@ -161,6 +210,9 @@ export class ChainSync {
         if (!this.state.isSyncing) return;
         if (senderId !== this.state.syncPeer) return;
 
+        // A reply landed for the outstanding request — cancel the watchdog.
+        this.clearBatchTimeout();
+
         const blocks = data as Array<IncomingBlockPayload>;
         if (!Array.isArray(blocks) || blocks.length === 0) {
           this.finishSync();
@@ -168,6 +220,12 @@ export class ChainSync {
         }
 
         for (const blockData of blocks) {
+          // A retried request can bring back blocks we already applied on a
+          // previous (late) reply. Skip them: validating a stale block against
+          // our now-advanced head would fail and wrongly ban an honest peer
+          // that simply answered our retry.
+          if (blockData.number <= this.state.currentHeight) continue;
+
           const result = validateIncomingBlock(
             this.db,
             this.consensus,
@@ -207,6 +265,9 @@ export class ChainSync {
 
         // Update peer manager's block height
         this.peerManager.setBlockHeight(this.state.currentHeight);
+
+        // Progress made — reset the retry budget for the next batch.
+        this.batchRetries = 0;
 
         if (this.state.currentHeight >= this.state.targetHeight) {
           this.finishSync();
@@ -343,6 +404,7 @@ export class ChainSync {
   }
 
   private finishSync(): void {
+    this.clearBatchTimeout();
     this.state.isSyncing = false;
     this.state.syncPeer = null;
   }

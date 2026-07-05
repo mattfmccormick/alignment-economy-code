@@ -393,9 +393,16 @@ pruning, governance classes). These are the gaps where code and paper diverge.
   (`P(V_i) = V_i.stake / totalActiveStake`). Harmless today (genesis gives equal stake), but the
   claim isn't implemented. Either wire Tier-2 accuracy into validator eligibility/weight, or soften
   the WP sentence. One has to move.
-- **W4. Follower catch-up sync has no retry.** 🟡 Robustness. Same item as D9's finding: a dropped
-  sync reply leaves `isSyncing` stuck and the follower stalls until reconnect. Stall watchdog +
-  re-request, made safe by skipping already-applied blocks. Dropped-message test.
+- ~~**W4. Follower catch-up sync has no retry.**~~ ✅ **Done (July 5).** `ChainSync` now arms a
+  **stall watchdog** on every `get_blocks` request (`batchTimeoutMs`, default 8s; `maxBatchRetries`,
+  default 3, both constructor-injectable for tests). If no batch advances the follower before it
+  fires, it re-requests the outstanding batch; after the budget is spent it gives up and frees
+  `isSyncing`, so the next periodic `startSync` can retry against a fresh best peer instead of the
+  follower wedging forever. Made safe against late/duplicate replies: the batch handler now **skips
+  blocks at or below `currentHeight`** (validating a stale block against our advanced head would fail
+  and wrongly ban an honest peer that just answered a retry), clears the watchdog when a reply lands,
+  and resets the retry budget on progress. `phase16.e2e.ts` (normal sync) still 9/9; new
+  `wp4-sync-retry.test.ts` proves the stall is freed after retries and a fresh sync works afterward.
 - **W5. White-paper honesty pass.** 🟠 **Partly needs Matt.** Claims the code doesn't (yet) back:
   (a) the ZK **nullifier** — WP §8.2 describes a zero-knowledge circuit; `verification` stores a
   plain SHA-256 file hash, which catches "same file twice" but not forged credentials. Mark as
