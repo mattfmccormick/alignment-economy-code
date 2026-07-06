@@ -5,6 +5,7 @@ import { displayPoints } from '../lib/formatting';
 import TierBadge from '../components/dashboard/TierBadge';
 import UptimeGauge from '../components/dashboard/UptimeGauge';
 import IncomeCard from '../components/dashboard/IncomeCard';
+import { PassphraseProtection } from '../components/PassphraseProtection';
 
 export default function Dashboard() {
   const [minerStatus, setMinerStatus] = useState<MinerStatus | null>(null);
@@ -201,6 +202,8 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+
+      <PassphraseProtection />
     </div>
   );
 }

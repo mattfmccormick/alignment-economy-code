@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { hasMinerWallet } from './lib/keys';
+import { hasMinerWallet, isMinerWalletEncrypted, isMinerWalletUnlocked } from './lib/keys';
+import { UnlockGate } from './components/UnlockGate';
 import DashboardShell from './components/layout/DashboardShell';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -12,8 +14,12 @@ import Network from './pages/Network';
 import Vouch from './pages/Vouch';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
+  const [, force] = useState(0);
   if (!hasMinerWallet()) {
     return <Navigate to="/login" replace />;
+  }
+  if (isMinerWalletEncrypted() && !isMinerWalletUnlocked()) {
+    return <UnlockGate onUnlocked={() => force((n) => n + 1)} />;
   }
   return <>{children}</>;
 }
