@@ -30,6 +30,15 @@ export interface ValidatorInfo {
   nodePublicKey: string;
   vrfPublicKey: string;
   stake: bigint;
+  /**
+   * Proposer-selection weight derived from the validator's proof-of-human
+   * verification/jury accuracy (WP §8.4: validators are weighted by accuracy,
+   * "not on capital staked"). Populated by the live db-backed validator set
+   * from `getCompositeAccuracy`; a value in [1, 100]. When absent (a snapshot
+   * set, or a raw test fixture), proposer selection falls back to `stake`.
+   * Distinct from `stake`, which stays the locked/slashable capital.
+   */
+  proposerWeight?: bigint;
   isActive: boolean;
   registeredAt: number;
   deregisteredAt: number | null;

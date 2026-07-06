@@ -7,6 +7,8 @@ import type {
   ValidatorInfo,
   ValidatorRegistration,
 } from './IValidatorSet.js';
+import { getMinerByAccount } from '../../mining/registration.js';
+import { getCompositeAccuracy } from '../../mining/accuracy.js';
 
 function rowToValidator(row: Record<string, unknown>): ValidatorInfo {
   return {
@@ -73,7 +75,26 @@ export class SqliteValidatorSet implements IValidatorSet {
     const rows = this.db
       .prepare(`SELECT * FROM validators WHERE is_active = 1 ORDER BY account_id`)
       .all() as Array<Record<string, unknown>>;
-    return rows.map(rowToValidator);
+    return rows.map((row) => {
+      const v = rowToValidator(row);
+      return { ...v, proposerWeight: this.proposerWeightFor(v.accountId) };
+    });
+  }
+
+  /**
+   * Accuracy-derived proposer weight for a validator (WP §8.4). Reads the
+   * validator's miner accuracy from committed on-chain state, so every node
+   * computes the same weight at the same height (deterministic). A validator
+   * with no miner record yet — or a brand-new miner — gets 100 (the same
+   * benefit-of-the-doubt `getCompositeAccuracy` gives new miners), so a fresh
+   * network behaves as equal-weight round-robin until accuracy diverges.
+   * Clamped to a minimum of 1 so a validator is never fully excluded and the
+   * total weight is never zero.
+   */
+  private proposerWeightFor(accountId: string): bigint {
+    const miner = getMinerByAccount(this.db, accountId);
+    const accuracy = miner ? getCompositeAccuracy(this.db, miner.id) : 100;
+    return BigInt(Math.max(1, Math.round(accuracy)));
   }
 
   listAll(): ValidatorInfo[] {

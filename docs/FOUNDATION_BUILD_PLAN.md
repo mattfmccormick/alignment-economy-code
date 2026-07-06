@@ -387,12 +387,20 @@ pruning, governance classes). These are the gaps where code and paper diverge.
   `amount ÷ (percentHuman/100)` so the recipient receives the full intended value (WP §7's 20 → 22.22
   at 90%). UI-only; the protocol math (`transaction.ts:368`) was already correct. Covered by a new
   `Send.test.tsx` case (burn line, corrected delivery figure, and the gross-up click).
-- **W3. Validator selection contradicts the WP.** 🟠 **Needs Matt's decision.** WP §8.4: validators
-  are selected "based on their proof-of-human verification accuracy and network participation, not on
-  capital staked." `proposer-selection.ts` is explicitly **stake-weighted**
-  (`P(V_i) = V_i.stake / totalActiveStake`). Harmless today (genesis gives equal stake), but the
-  claim isn't implemented. Either wire Tier-2 accuracy into validator eligibility/weight, or soften
-  the WP sentence. One has to move.
+- ~~**W3. Validator selection contradicts the WP.**~~ ✅ **Done (July 5) — Matt's call: change the
+  code, accuracy-weighted is the goal.** Proposer selection is now weighted by proof-of-human
+  accuracy, not capital. `ValidatorInfo` gained an optional `proposerWeight`; `selectProposer`
+  weights by `proposerWeight ?? stake` (the fallback keeps raw fixtures/snapshots on stake). The
+  live `SqliteValidatorSet.listActive()` populates `proposerWeight` from `getCompositeAccuracy`
+  (clamped to [1, 100]; a new miner or no-record account gets 100 = benefit of the doubt, so a fresh
+  network is equal-weight until accuracy diverges). This was safe to do because (a) `getCompositeAccuracy`
+  is a **pure function of committed on-chain counts** — no wall-clock window — so every node computes
+  the same weight at the same height (deterministic), and (b) quorum/finality is **count-based**
+  (`⌊2N/3⌋+1`), never weight-based, and block validation checks the commit cert, not the proposer
+  identity — so weighting only affects *who proposes* (liveness), never safety, and historical blocks
+  never re-derive the proposer. Economic `stake` is untouched (still locked/slashable). Covered by
+  `wp3-accuracy-selection.test.ts` (4/4: proportional selection, stake fallback, determinism, live
+  `listActive` weight population).
 - ~~**W4. Follower catch-up sync has no retry.**~~ ✅ **Done (July 5).** `ChainSync` now arms a
   **stall watchdog** on every `get_blocks` request (`batchTimeoutMs`, default 8s; `maxBatchRetries`,
   default 3, both constructor-injectable for tests). If no batch advances the follower before it

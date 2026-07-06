@@ -30,16 +30,23 @@ import { sha256 } from '../crypto.js';
 import type { ValidatorInfo } from './IValidatorSet.js';
 
 /**
- * Deterministic stake-weighted proposer selection.
+ * Deterministic accuracy-weighted proposer selection.
  *
  * Given a list of active validators, a block height, a round number, and a
  * per-height seed (typically the previous block's hash), returns the
  * validator chosen to propose the block. Same inputs always return the
  * same validator.
  *
- * Probability of selection at any individual (height, round) is proportional
- * to a validator's stake:
- *   P(V_i) = V_i.stake / totalActiveStake
+ * The selection weight is `proposerWeight` — the validator's proof-of-human
+ * verification/jury accuracy (WP §8.4: chosen by accuracy, "not on capital
+ * staked"), populated by the live validator set. Validators without a
+ * populated `proposerWeight` (snapshot sets, raw test fixtures) fall back to
+ * `stake`, so the formula is:
+ *   P(V_i) = weight(V_i) / Σ weight,   weight(V) = V.proposerWeight ?? V.stake
+ *
+ * Weighting only affects WHICH validator proposes (a liveness/fairness
+ * property). Finality safety is unaffected: quorum is by validator COUNT
+ * (`quorumCount` = ⌊2N/3⌋+1), never by this weight.
  *
  * Why round matters: when a round NIL-times-out (proposer offline, partition,
  * etc.) the round controller advances to round+1 and re-selects. If the
@@ -60,35 +67,38 @@ export function selectProposer(
   // Sort by accountId so every node's iteration order matches.
   const sorted = [...validators].sort((a, b) => (a.accountId < b.accountId ? -1 : a.accountId > b.accountId ? 1 : 0));
 
-  let totalStake = 0n;
+  // weight = accuracy-derived proposerWeight when populated, else stake.
+  const weightOf = (v: ValidatorInfo): bigint => v.proposerWeight ?? v.stake;
+
+  let totalWeight = 0n;
   for (const v of sorted) {
-    if (v.stake < 0n) {
-      throw new Error(`Validator ${v.accountId} has negative stake; cannot select proposer`);
+    if (weightOf(v) < 0n) {
+      throw new Error(`Validator ${v.accountId} has negative weight; cannot select proposer`);
     }
-    totalStake += v.stake;
+    totalWeight += weightOf(v);
   }
-  if (totalStake === 0n) {
-    // Degenerate case: every validator has zero stake. Fall back to
+  if (totalWeight === 0n) {
+    // Degenerate case: every validator has zero weight. Fall back to
     // round-robin (rotating by round to give every NIL recovery a fresh
     // proposer).
     return sorted[(height + round) % sorted.length];
   }
 
-  // Hash (height, round, seed) → 256-bit value → modulo totalStake.
+  // Hash (height, round, seed) → 256-bit value → modulo totalWeight.
   // SHA-256 is uniform enough that mod-bias on the high bits is negligible
-  // for any realistic totalStake.
+  // for any realistic totalWeight.
   const hashHex = sha256(`${height}|${round}|${seed}`);
   const hashBig = BigInt('0x' + hashHex);
-  const target = hashBig % totalStake;
+  const target = hashBig % totalWeight;
 
-  // Walk the cumulative stake and pick the validator whose range covers
+  // Walk the cumulative weight and pick the validator whose range covers
   // `target`.
   let acc = 0n;
   for (const v of sorted) {
-    acc += v.stake;
+    acc += weightOf(v);
     if (target < acc) return v;
   }
-  // Shouldn't reach here because target < totalStake = acc-final, but
+  // Shouldn't reach here because target < totalWeight = acc-final, but
   // defensive fallback to last validator.
   return sorted[sorted.length - 1];
 }
