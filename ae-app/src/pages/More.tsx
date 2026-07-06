@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import QRCode from 'qrcode';
 import { PlatformError } from '@alignmenteconomy/sdk';
 import { loadWallet, clearWallet, saveWalletLegacy } from '../lib/keys';
+import { PassphraseProtection } from '../components/PassphraseProtection';
 import {
   clearPlatformSession,
   loadPlatformSession,
@@ -531,6 +532,9 @@ export function More() {
         )}
       </div>
       )}
+
+      {/* Passphrase protection: encrypt the self-custody keys at rest. */}
+      {wallet?.track === 'self-custody' && <PassphraseProtection />}
 
       {/* Two-factor auth. Platform-track only: self-custody users
           already have an unrecoverable 12-word phrase that is its own

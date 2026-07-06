@@ -5,9 +5,11 @@
 // catch-all and the page renders blank. HashRouter uses #/path fragments,
 // which are protocol-agnostic and work the same in dev (vite at localhost)
 // and production (Electron file://).
+import { useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { hasWallet } from './lib/keys';
+import { hasWallet, isWalletEncrypted, isWalletUnlocked } from './lib/keys';
 import { AppShell } from './components/layout/AppShell';
+import { UnlockGate } from './components/UnlockGate';
 import { Onboarding } from './pages/Onboarding';
 import { Wallet } from './pages/Wallet';
 import { Send } from './pages/Send';
@@ -23,7 +25,12 @@ import { Recurring } from './pages/Recurring';
 import { Receive } from './pages/Receive';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  // Bump on unlock so this re-renders and re-reads the (module-level) session.
+  const [, force] = useState(0);
   if (!hasWallet()) return <Navigate to="/onboarding" replace />;
+  if (isWalletEncrypted() && !isWalletUnlocked()) {
+    return <UnlockGate onUnlocked={() => force((n) => n + 1)} />;
+  }
   return <>{children}</>;
 }
 
