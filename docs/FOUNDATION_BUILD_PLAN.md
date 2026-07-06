@@ -216,9 +216,26 @@ Real, not blocking. Documented so they aren't forgotten.
 
 - **D1. Rate limiting to a shared store.** `rateLimit.ts` is in-memory: it resets on restart and
   doesn't coordinate across nodes. Move to Redis or a DB table before multi-node production.
-- **D2. Encrypted keystore.** Wallet private keys and mnemonics sit in plaintext `localStorage`.
-  Standard for web wallets but should become a passphrase-encrypted keystore. Mark as
-  "known and accepted" until then.
+- **D2. Encrypted keystore.** 🟠 **Approved to build (Matt); scoped, not yet built — wants a
+  focused session, not a marathon tail.** Wallet private keys and mnemonics sit in plaintext
+  `localStorage`. The catch is that this is not a small feature: `loadWallet()` is **synchronous and
+  called on every page render**, and WebCrypto decryption is async and needs the passphrase — so
+  encrypting-at-rest changes the wallet's session/boot model, which is the worst place to be hasty.
+  **Design for the focused build:**
+  1. `lib/keystore.ts` — `encrypt(wallet, passphrase)` / `decrypt(blob, passphrase)` with WebCrypto:
+     PBKDF2-SHA256 (≥600k iters) → AES-GCM, random 16-byte salt + 12-byte IV per encryption, versioned
+     JSON envelope `{v, kdf, salt, iv, ct}`. Fully unit-tested (round-trip, wrong-passphrase rejects,
+     tamper rejects). This is the safe, self-contained core.
+  2. In-memory session: keep `loadWallet()` synchronous by reading from a module-level `sessionWallet`
+     populated by an async `unlockWallet(passphrase)`. Plaintext (unencrypted) wallets still load
+     synchronously (back-compat) — encryption is **opt-in**.
+  3. `<UnlockGate>` at app boot: if an encrypted wallet exists and isn't unlocked, show the passphrase
+     prompt before rendering the app; wrong passphrase shows an error, never locks the user out (they
+     can still restore from recovery phrase).
+  4. A "Protect wallet with a passphrase" action in More/Settings that encrypts the existing wallet
+     in place, plus a "Remove passphrase" path. Migration is opt-in, non-destructive.
+  5. Same treatment in `ae-miner`.
+  Do it as its own build with its own tests; do NOT bolt it onto the end of a long session.
 - **D3. Finish the repository extraction.** ✅ **Done.** `ICycleStateStore` +
   `SqliteCycleStateStore` (with a `cycleStateStore(db)` factory) now own every `day_cycle_state`
   read/write; the last inline SQL in the business logic (the cycle-phase read in
