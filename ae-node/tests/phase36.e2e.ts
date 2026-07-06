@@ -27,6 +27,7 @@ import { PeerManager } from '../src/network/peer.js';
 import { generateNodeIdentity } from '../src/network/node-identity.js';
 import { signProposal, type Proposal } from '../src/core/consensus/proposal.js';
 import { signVote, type Vote } from '../src/core/consensus/votes.js';
+import { wait, waitForCondition } from './helpers/wait.js';
 
 function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port: number }> {
   return new Promise((resolve) => {
@@ -39,9 +40,8 @@ function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port:
   });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// wait / waitForCondition live in the shared helper so every e2e file polls
+// the same deterministic way instead of sleeping a fixed guess.
 
 const HASH_X = 'aa'.repeat(32);
 
@@ -116,7 +116,7 @@ describe('Phase 36: Gossip relay', () => {
     c.on('transaction:received', (data) => txReceivedAtC.push(data));
 
     a.broadcast('new_transaction', { id: 'star-tx-1', from: 'foo', to: 'bar', amount: '10' });
-    await wait(200);
+    await waitForCondition(() => txReceivedAtC.length >= 1);
 
     assert.equal(txReceivedAtC.length, 1, 'C must receive the tx via B relay');
     assert.deepEqual(txReceivedAtC[0], {
@@ -146,7 +146,7 @@ describe('Phase 36: Gossip relay', () => {
       txIds: [],
       transactions: [],
     });
-    await wait(200);
+    await waitForCondition(() => blocksAtC.length >= 1);
 
     assert.equal(blocksAtC.length, 1);
   });
@@ -167,7 +167,7 @@ describe('Phase 36: Gossip relay', () => {
       proposerSecretKey: aId.secretKey,
     });
     a.broadcast('proposal', proposal as unknown as Record<string, unknown>);
-    await wait(200);
+    await waitForCondition(() => propsAtC.length >= 1);
 
     assert.equal(propsAtC.length, 1);
     assert.equal(propsAtC[0].blockHash, HASH_X);
@@ -193,7 +193,7 @@ describe('Phase 36: Gossip relay', () => {
     };
     a.broadcast('prevote', signVote({ ...baseInputs, kind: 'prevote' }) as unknown as Record<string, unknown>);
     a.broadcast('precommit', signVote({ ...baseInputs, kind: 'precommit' }) as unknown as Record<string, unknown>);
-    await wait(200);
+    await waitForCondition(() => prevotes.length >= 1 && precommits.length >= 1);
 
     assert.equal(prevotes.length, 1);
     assert.equal(precommits.length, 1);

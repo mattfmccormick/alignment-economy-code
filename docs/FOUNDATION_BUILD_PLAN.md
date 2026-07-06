@@ -345,9 +345,17 @@ Real, not blocking. Documented so they aren't forgotten.
   sleeps to poll-to-deadline and adding a wait-for-peer-advertised-height before the one-shot
   `startSync()`. 25/25 green (was ~80%). Notably, `smoke-multiblock` and `phase60` were **already**
   deterministic (poll-to-deadline with generous timeouts); the residual flake there is genuine
-  multi-process BFT nondeterminism under load, not a naive sleep. **Remaining:** apply the shared-
-  genesis + poll-to-deadline pattern to the other manual-PeerManager e2e tests (phase10/14/27/36),
-  then re-evaluate dropping the CI retry. **New finding (separate, real):** `ChainSync.startSync()`
+  multi-process BFT nondeterminism under load, not a naive sleep. **Progress (July 5):** the
+  `wait` / `waitForCondition` helper is now extracted to `tests/helpers/wait.ts` (shared, not
+  copy-pasted per file), and `phase36.e2e.ts` — the worst offender (8 fixed sleeps) — is converted:
+  its gossip-propagation `broadcast(); wait(200); assert(received)` waits now poll the received
+  array to a deadline (`waitForCondition(() => arr.length >= n)`); the genuine settles (dedup
+  negative-checks, mesh-ack) stay as bounded `wait`. Stable 6/6 across repeated runs. Note: the CI
+  e2e step is `continue-on-error: true` (non-blocking), **not** a retry — so there's no retry to drop;
+  the goal is deterministic-enough tests to eventually move back to blocking. **Remaining:** the same
+  mechanical poll-until-observable conversion on phase10/14/15/27/32 (each fixed sleep needs its
+  specific poll condition; genuine settles stay) — identical pattern, best done as a focused pass.
+  **New finding (separate, real):** `ChainSync.startSync()`
   is one-shot with no retry — a genuinely dropped `get_blocks` request or reply stalls a follower
   forever (`isSyncing` stuck true). That's a production robustness gap, not just a test issue; it
   wants its own careful fix (a stall watchdog that re-requests, made safe by skipping already-applied
