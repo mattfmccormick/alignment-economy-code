@@ -53,6 +53,7 @@ import { registerValidator } from '../src/core/consensus/registration.js';
 import { AENode } from '../src/network/node.js';
 import { PeerManager } from '../src/network/peer.js';
 import { PRECISION } from '../src/core/constants.js';
+import { wait, waitForCondition } from './helpers/wait.js';
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -78,9 +79,7 @@ function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port:
   });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// wait / waitForCondition come from the shared helper (deterministic polling).
 
 function setupBftNodeDb(opts: {
   validatorAccountId: string;
@@ -281,8 +280,8 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       timestamp: txRow.timestamp,
     });
 
-    // Give the gossip a moment to land + apply
-    await wait(100);
+    // Wait for the gossip to land + apply (or fail).
+    await waitForCondition(() => bApplied || bApplyFailed !== null);
 
     if (bApplyFailed) throw bApplyFailed;
     assert.equal(bApplied, true, 'B should have applied the gossiped tx');
@@ -421,8 +420,10 @@ describe('Phase 32: BFT-mode transaction gossip', () => {
       timestamp: txRow.timestamp,
     };
 
+    const bSenderBefore = getAccount(setupB.db, senderId)!.activeBalance;
     nodeA.peerManager.broadcast('new_transaction', wireTx);
-    await wait(100);
+    // Wait for the first gossip to apply on B (sender balance moves).
+    await waitForCondition(() => getAccount(setupB.db, senderId)!.activeBalance !== bSenderBefore);
 
     const bSenderAfterFirst = getAccount(setupB.db, senderId)!.activeBalance;
     const bReceiverAfterFirst = getAccount(setupB.db, receiverId)!.earnedBalance;

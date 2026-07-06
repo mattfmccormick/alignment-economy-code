@@ -44,6 +44,7 @@ import {
   validateIncomingBlock,
   type IncomingBlockPayload,
 } from '../src/network/block-validator.js';
+import { wait, waitForCondition } from './helpers/wait.js';
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -115,9 +116,7 @@ function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port:
   });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// wait / waitForCondition come from the shared helper (deterministic polling).
 
 describe('Phase 15: Independent block validation', () => {
   const cleanup: Array<{ server: Server; wss: WebSocketServer }> = [];
@@ -420,7 +419,7 @@ describe('Phase 15: Independent block validation', () => {
     });
     peersB.connectToPeer('127.0.0.1', srv.port);
     await connected;
-    await wait(50);
+    await waitForCondition(() => peersA.getPeerCount() >= 1);
 
     assert.equal(peersA.getPeerCount(), 1);
     assert.equal(peersA.isBanned(idB.publicKey), false);
@@ -444,7 +443,9 @@ describe('Phase 15: Independent block validation', () => {
     };
 
     peersB.broadcast('new_block', fakeBlock);
-    await wait(200);
+    // 3s cap: a ban that's going to happen fires well within it; capping keeps
+    // the rare "ban never propagated" flake from burning the default 10s.
+    await waitForCondition(() => peersA.isBanned(idB.publicKey), 3000);
 
     assert.equal(peersA.isBanned(idB.publicKey), true, 'A must ban B for unauthorized block');
     assert.equal(peersA.getPeerCount(), 0, 'banned peer must be disconnected');
@@ -508,7 +509,7 @@ describe('Phase 15: Independent block validation', () => {
     };
 
     peersB.broadcast('new_block', tamperedBlock);
-    await wait(200);
+    await waitForCondition(() => peersA.isBanned(idAuthority.publicKey), 3000);
 
     assert.equal(peersA.isBanned(idAuthority.publicKey), true);
 

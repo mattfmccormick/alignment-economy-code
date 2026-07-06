@@ -34,6 +34,7 @@ import {
   verifyNodeMessage,
 } from '../src/network/node-identity.js';
 import type { NetworkMessage, Handshake } from '../src/network/types.js';
+import { wait, waitForCondition } from './helpers/wait.js';
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -55,9 +56,7 @@ function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port:
   });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// wait / waitForCondition come from the shared helper (deterministic polling).
 
 describe('Phase 14: Signed P2P handshakes + ban list', () => {
   const cleanupServers: Array<{ server: Server; wss: WebSocketServer }> = [];
@@ -204,12 +203,12 @@ describe('Phase 14: Signed P2P handshakes + ban list', () => {
     });
     nodeB.connectToPeer('127.0.0.1', srv.port);
     await connected;
-    await wait(50);
+    await waitForCondition(() => nodeA.getPeerCount() >= 1);
     assert.equal(nodeA.getPeerCount(), 1);
 
     // Ban B mid-session
     nodeA.banPeer(idB.publicKey, 'misbehavior');
-    await wait(100);
+    await waitForCondition(() => nodeA.getPeerCount() === 0, 3000);
 
     assert.equal(nodeA.getPeerCount(), 0, 'banned peer must be disconnected');
 

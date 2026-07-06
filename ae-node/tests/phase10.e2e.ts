@@ -11,6 +11,7 @@ import { Mempool } from '../src/network/mempool.js';
 import { AuthorityConsensus } from '../src/network/consensus.js';
 import { ChainSync } from '../src/network/sync.js';
 import { generateNodeIdentity } from '../src/network/node-identity.js';
+import { wait, waitForCondition } from './helpers/wait.js';
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -31,9 +32,7 @@ function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port:
   });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// wait / waitForCondition come from the shared helper (deterministic polling).
 
 /** Connect two PeerManagers: creates server for nodeA, nodeB connects to it */
 async function connectPair(
@@ -172,7 +171,7 @@ describe('Phase 10: P2P Networking', () => {
 
     // Trigger sync
     newSync.startSync();
-    await wait(500);
+    await waitForCondition(() => appliedBlocks.length >= 3);
 
     assert.deepEqual(appliedBlocks, [1, 2, 3]);
     assert.equal(newPeers.getBlockHeight(), 3);
@@ -203,7 +202,7 @@ describe('Phase 10: P2P Networking', () => {
     nodeC.connectToPeer('127.0.0.1', srv.port);
     await allConnected;
     // Wait for B and C to process their handshake_ack so they have A as a peer
-    await wait(100);
+    await waitForCondition(() => nodeB.getPeerCount() >= 1 && nodeC.getPeerCount() >= 1);
 
     assert.ok(nodeB.getPeerCount() >= 1, 'B should have A as peer');
     assert.ok(nodeC.getPeerCount() >= 1, 'C should have A as peer');

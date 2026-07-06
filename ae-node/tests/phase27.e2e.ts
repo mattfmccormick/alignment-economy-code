@@ -24,6 +24,7 @@ import { Ed25519VrfProvider } from '../src/core/consensus/Ed25519VrfProvider.js'
 import { PeerManagerBftTransport } from '../src/core/consensus/PeerManagerBftTransport.js';
 import { signProposal, verifyProposal, type Proposal } from '../src/core/consensus/proposal.js';
 import { signVote, verifyVote, type Vote } from '../src/core/consensus/votes.js';
+import { wait, waitForCondition } from './helpers/wait.js';
 
 function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port: number }> {
   return new Promise((resolve) => {
@@ -36,9 +37,7 @@ function createWsServer(): Promise<{ server: Server; wss: WebSocketServer; port:
   });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// wait / waitForCondition come from the shared helper (deterministic polling).
 
 const HASH_X = '11'.repeat(32);
 
@@ -104,7 +103,7 @@ describe('Phase 27: PeerManager BFT transport adapter', () => {
     });
     transportB.broadcastProposal(proposal);
 
-    await wait(100);
+    await waitForCondition(() => received.length >= 1);
     assert.equal(received.length, 1);
     assert.deepEqual(received[0], proposal);
     // Inner signature still verifies after round-trip
@@ -132,7 +131,7 @@ describe('Phase 27: PeerManager BFT transport adapter', () => {
     });
     transportB.broadcastVote(vote);
 
-    await wait(100);
+    await waitForCondition(() => received.length >= 1);
     assert.equal(received.length, 1);
     assert.equal(received[0].kind, 'prevote');
     assert.deepEqual(received[0], vote);
@@ -160,7 +159,7 @@ describe('Phase 27: PeerManager BFT transport adapter', () => {
     });
     transportB.broadcastVote(vote);
 
-    await wait(100);
+    await waitForCondition(() => received.length >= 1);
     assert.equal(received.length, 1);
     assert.equal(received[0].kind, 'precommit');
     assert.deepEqual(received[0], vote);
@@ -196,7 +195,7 @@ describe('Phase 27: PeerManager BFT transport adapter', () => {
       validatorSecretKey: bIdentity.secretKey,
     }));
 
-    await wait(150);
+    await waitForCondition(() => prevotes.length >= 1 && precommits.length >= 1);
     assert.equal(prevotes.length, 1);
     assert.equal(precommits.length, 1);
 
@@ -227,7 +226,7 @@ describe('Phase 27: PeerManager BFT transport adapter', () => {
     });
     transportB.broadcastProposal(proposal);
 
-    await wait(100);
+    await waitForCondition(() => received.length >= 1);
     assert.equal(received.length, 1);
     // Inner signature still verifies under the validator's key, not B's
     assert.equal(verifyProposal(received[0]), true);

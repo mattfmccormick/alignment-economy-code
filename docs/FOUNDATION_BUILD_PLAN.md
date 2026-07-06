@@ -359,8 +359,8 @@ Real, not blocking. Documented so they aren't forgotten.
   now builds the SDK first, then lints and builds ae-app; the build step is restored (job is
   `lint + build` again). Note for local devs cloning fresh: run `npm ci && npm run build` in
   `sdk/` before building `ae-app`.
-- **D9. Stabilize the flaky multi-runner tests.** 🟡 **Documented phase16 flake fixed at root;
-  broader sweep + retry-drop still open.** Investigating the canonical "Phase 17 sync" flake
+- **D9. Stabilize the flaky multi-runner tests.** 🟢 **Sweep done (July 5); residual flake is
+  inherent multi-process nondeterminism.** Investigating the canonical "Phase 17 sync" flake
   root-caused it precisely: `phase16.e2e.ts` built two chains by calling `createGenesisBlock()` once
   per node, but genesis carries a `Date.now()` timestamp, so the two genesis blocks diverge whenever
   the calls land in different seconds — the follower then can't match block 1's parent hash and
@@ -376,10 +376,18 @@ Real, not blocking. Documented so they aren't forgotten.
   array to a deadline (`waitForCondition(() => arr.length >= n)`); the genuine settles (dedup
   negative-checks, mesh-ack) stay as bounded `wait`. Stable 6/6 across repeated runs. Note: the CI
   e2e step is `continue-on-error: true` (non-blocking), **not** a retry — so there's no retry to drop;
-  the goal is deterministic-enough tests to eventually move back to blocking. **Remaining:** the same
-  mechanical poll-until-observable conversion on phase10/14/15/27/32 (each fixed sleep needs its
-  specific poll condition; genuine settles stay) — identical pattern, best done as a focused pass.
-  **New finding (separate, real):** `ChainSync.startSync()`
+  the goal is deterministic-enough tests to eventually move back to blocking. **Sweep complete (July
+  5):** phase10/14/15/27/32 are all converted with the same pattern — each `broadcast/action; wait;
+  assert(observable)` now polls the observable (`received.length`, `getPeerCount`, `isBanned`, an
+  `applied` flag, a balance change) to a deadline; genuine settles (dedup no-ops, "never-connected"
+  negatives, mesh-ack) stay as bounded `wait`. Reaction-to-bad-input polls (ban / disconnect) use a
+  3s cap so a genuine miss fails fast instead of burning the default 10s. All six files verified
+  passing. **What's left is NOT a sleep problem:** `phase15`'s "unauthorized-producer ban" and the
+  `smoke-multiblock`/`phase60` family are genuinely intermittently nondeterministic under load — the
+  ban / commit occasionally does not happen at all within any reasonable window (not "happens but
+  slowly"). Poll-to-deadline can't fix that; it only removes the false failures where the event *did*
+  happen just after a too-tight fixed sleep. Those tests stay `continue-on-error` (non-blocking) by
+  design. **New finding (separate, real):** `ChainSync.startSync()`
   is one-shot with no retry — a genuinely dropped `get_blocks` request or reply stalls a follower
   forever (`isSyncing` stuck true). That's a production robustness gap, not just a test issue; it
   wants its own careful fix (a stall watchdog that re-requests, made safe by skipping already-applied
