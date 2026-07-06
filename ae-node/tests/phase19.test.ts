@@ -63,9 +63,11 @@ describe('Phase 19: Block proposer selection', () => {
     }
   });
 
-  it('throws on negative stake', () => {
+  it('throws on a negative selection weight', () => {
+    // A negative stake becomes a negative weight (no proposerWeight set, so
+    // selection falls back to stake). Either way it must be rejected.
     const vs = [makeValidator('a', 100n), makeValidator('b', -1n)];
-    assert.throws(() => selectProposer(vs, 1, 'seed'), /negative stake/);
+    assert.throws(() => selectProposer(vs, 1, 'seed'), /negative weight/);
   });
 
   // ── Determinism ──────────────────────────────────────────────────────
