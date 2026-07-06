@@ -412,12 +412,17 @@ pruning, governance classes). These are the gaps where code and paper diverge.
   re-verification. This is the paper's basic duplicate defense working today with a plain content
   hash; the zero-knowledge circuit that hides the credential itself stays a Phase-3 privacy
   enhancement (documented as such in `evidence.ts`). Covered by `wp5-nullifier.test.ts` (3/3).
-  (b) The **enrollment fee** ($1–5, WP §8.1.3) — the primary spam defense — is not in code at all;
-  decide: protocol points-fee, off-chain signup payment, or drop from paper. (c) **Smart-contract
-  Supportive collection** (WP §5.2) is a schema placeholder, no execution engine. (d) The
-  **eleven-miner ramp-up review** (WP §9.2: re-verify all early accounts once 11 miners exist) is
-  unimplemented. (b)/(c)/(d) need Matt's decisions and/or paper wording; none are false in spirit,
-  but the paper reads as if they exist now.
+  (b) ✅ **Enrollment fee** — **resolved (Matt, July 5): off-protocol, miner-attested.** The fee is
+  paid however the participant likes (fiat outside the system, or points inside it); a reviewing
+  miner simply confirms "they paid" via a checkbox during verification. It is deliberately NOT a
+  protocol-enforced on-chain mechanism, so there is nothing to build at the consensus layer. (If we
+  later want the attestation recorded, it's a one-field add to the verification flow — noted, not
+  blocking.) (c) ✅ **Smart-contract Supportive collection** — **resolved (Matt): out of scope.**
+  Automated point-of-sale / usage collection happens outside this app; the in-repo `smart-contracts.ts`
+  stays a schema placeholder by design, not a gap to fill. (d) ✅ **Eleven-miner ramp-up review** —
+  **resolved (Matt): operational, nothing to build.** It's a one-time manual re-review we run once
+  the network reaches 11 active miners; no code needed now. Net: W5 is closed — the one real code gap
+  (the nullifier) is fixed, and the rest are intentionally off-protocol.
 
 **Sequencing:** W1 first (clearest correctness delta, self-contained), then W2 (small, user-facing),
 then W4 (robustness). W3 and W5 need Matt's decisions before code moves.
