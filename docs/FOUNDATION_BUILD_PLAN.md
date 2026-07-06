@@ -216,12 +216,19 @@ Real, not blocking. Documented so they aren't forgotten.
 
 - **D1. Rate limiting to a shared store.** `rateLimit.ts` is in-memory: it resets on restart and
   doesn't coordinate across nodes. Move to Redis or a DB table before multi-node production.
-- **D2. Encrypted keystore.** 🟠 **Approved to build (Matt); scoped, not yet built — wants a
-  focused session, not a marathon tail.** Wallet private keys and mnemonics sit in plaintext
-  `localStorage`. The catch is that this is not a small feature: `loadWallet()` is **synchronous and
-  called on every page render**, and WebCrypto decryption is async and needs the passphrase — so
-  encrypting-at-rest changes the wallet's session/boot model, which is the worst place to be hasty.
-  **Design for the focused build:**
+- ~~**D2. Encrypted keystore.**~~ ✅ **Done (July 5), both apps.** Wallet private keys and mnemonics
+  can now be passphrase-encrypted at rest instead of sitting in plaintext `localStorage`. Encryption
+  is **opt-in and non-destructive** — plaintext wallets keep loading exactly as before. Built exactly
+  to the design below: `lib/keystore.ts` (WebCrypto PBKDF2-SHA256 600k iters → AES-GCM, random
+  per-envelope salt + IV, versioned envelope; wrong-passphrase and tamper both fail authentication);
+  an in-memory `unlockedSecret` in `keys.ts` keeps `loadWallet()` **synchronous** (reads the decrypted
+  secret only after unlock, returns null while locked); an `UnlockGate` at boot (in `ProtectedRoute` /
+  `RequireAuth`); and a "Passphrase Protection" card (More page in the wallet, Dashboard in the miner)
+  to add/remove protection. Same code in `ae-app` and `ae-miner`. Tests: `keystore.test.ts` (6:
+  round-trip, wrong passphrase, tamper, salt/IV freshness, empty-passphrase guard, envelope
+  detection) + `keys.test.ts` (4: plaintext loads, protect-encrypts-no-leak, lock→null + unlock-only-
+  with-right-passphrase, remove-restores-plaintext) in each app. tsc + lint (0 errors) + build green
+  both sides. **Original design (kept for reference):**
   1. `lib/keystore.ts` — `encrypt(wallet, passphrase)` / `decrypt(blob, passphrase)` with WebCrypto:
      PBKDF2-SHA256 (≥600k iters) → AES-GCM, random 16-byte salt + 12-byte IV per encryption, versioned
      JSON envelope `{v, kdf, salt, iv, ct}`. Fully unit-tested (round-trip, wrong-passphrase rejects,
