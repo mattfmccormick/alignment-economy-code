@@ -86,6 +86,13 @@ export interface IVerificationStore {
 
   findEvidenceByAccount(accountId: string): Evidence[];
 
+  /**
+   * Distinct account ids that have already submitted this exact evidence hash.
+   * Backs the nullifier duplicate check: the same credential file (same hash)
+   * must not verify more than one account.
+   */
+  findAccountIdsByEvidenceHash(evidenceHash: string): string[];
+
   // ── vouches ────────────────────────────────────────────────────
 
   insertVouch(input: VouchInsert): void;

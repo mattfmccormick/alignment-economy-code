@@ -403,14 +403,21 @@ pruning, governance classes). These are the gaps where code and paper diverge.
   and wrongly ban an honest peer that just answered a retry), clears the watchdog when a reply lands,
   and resets the retry budget on progress. `phase16.e2e.ts` (normal sync) still 9/9; new
   `wp4-sync-retry.test.ts` proves the stall is freed after retries and a fresh sync works afterward.
-- **W5. White-paper honesty pass.** 🟠 **Partly needs Matt.** Claims the code doesn't (yet) back:
-  (a) the ZK **nullifier** — WP §8.2 describes a zero-knowledge circuit; `verification` stores a
-  plain SHA-256 file hash, which catches "same file twice" but not forged credentials. Mark as
-  Phase-3 roadmap. (b) The **enrollment fee** ($1–5, WP §8.1.3) — the primary spam defense — is not
-  in code at all; decide: protocol points-fee, off-chain signup payment, or drop from paper.
-  (c) **Smart-contract Supportive collection** (WP §5.2) is a schema placeholder, no execution
-  engine. (d) The **eleven-miner ramp-up review** (WP §9.2: re-verify all early accounts once 11
-  miners exist) is unimplemented. None are false in spirit, but the paper reads as if they exist now.
+- **W5. White-paper honesty pass.** 🟢 **Nullifier duplicate check built; the rest need Matt.**
+  (a) ✅ **Nullifier** — WP §8.2 says the nullifier "prevents the same document from being used to
+  create multiple accounts." The code stored the credential hash but **never checked it across
+  accounts**, so one ID could verify ten accounts — the exact attack the paper says it stops.
+  `submitEvidence` now rejects a hash already registered to a *different* account
+  (`ConflictError` / `DUPLICATE_CREDENTIAL`), while allowing the *same* account to re-submit for
+  re-verification. This is the paper's basic duplicate defense working today with a plain content
+  hash; the zero-knowledge circuit that hides the credential itself stays a Phase-3 privacy
+  enhancement (documented as such in `evidence.ts`). Covered by `wp5-nullifier.test.ts` (3/3).
+  (b) The **enrollment fee** ($1–5, WP §8.1.3) — the primary spam defense — is not in code at all;
+  decide: protocol points-fee, off-chain signup payment, or drop from paper. (c) **Smart-contract
+  Supportive collection** (WP §5.2) is a schema placeholder, no execution engine. (d) The
+  **eleven-miner ramp-up review** (WP §9.2: re-verify all early accounts once 11 miners exist) is
+  unimplemented. (b)/(c)/(d) need Matt's decisions and/or paper wording; none are false in spirit,
+  but the paper reads as if they exist now.
 
 **Sequencing:** W1 first (clearest correctness delta, self-contained), then W2 (small, user-facing),
 then W4 (robustness). W3 and W5 need Matt's decisions before code moves.

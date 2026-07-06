@@ -171,6 +171,13 @@ export class SqliteVerificationStore implements IVerificationStore {
     return rows.map(rowToEvidence);
   }
 
+  findAccountIdsByEvidenceHash(evidenceHash: string): string[] {
+    const rows = this.db
+      .prepare('SELECT DISTINCT account_id FROM verification_evidence WHERE evidence_hash = ?')
+      .all(evidenceHash) as Array<{ account_id: string }>;
+    return rows.map((r) => r.account_id);
+  }
+
   // ── vouches ────────────────────────────────────────────────────
 
   insertVouch(input: VouchInsert): void {
