@@ -32,7 +32,8 @@ const fakeAccount = {
   id: 'me',
   type: 'individual',
   percentHuman: 100,
-  balances: { active: '0', supportive: '0', ambient: '0', earned: '1000000', locked: '0' },
+  activeBalance: '0', supportiveBalance: '0', ambientBalance: '0',
+  earnedBalance: '1000000', lockedBalance: '0',
 };
 
 const incomingRequest = {

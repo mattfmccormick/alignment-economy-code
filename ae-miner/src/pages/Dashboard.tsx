@@ -98,7 +98,7 @@ export default function Dashboard() {
         <div className="bg-panel border border-border rounded-lg p-5">
           <h3 className="text-sm font-medium text-muted mb-2">Evidence Score</h3>
           <div className="text-3xl font-bold text-teal mb-1">
-            {evidenceScore ? evidenceScore.score : '--'}
+            {evidenceScore ? `${evidenceScore.score.totalScore}%` : '--'}
           </div>
           <div className="text-xs text-muted mb-4">verification confidence</div>
           <div className="space-y-2">
@@ -121,9 +121,9 @@ export default function Dashboard() {
 
         {/* Balances Card */}
         <IncomeCard
-          activeBalance={account ? displayPoints(account.balances.active) : '0'}
-          earnedBalance={account ? displayPoints(account.balances.earned) : '0'}
-          lockedBalance={account ? displayPoints(account.balances.locked) : '0'}
+          activeBalance={account ? displayPoints(account.activeBalance) : '0'}
+          earnedBalance={account ? displayPoints(account.earnedBalance) : '0'}
+          lockedBalance={account ? displayPoints(account.lockedBalance) : '0'}
           percentHuman={account?.percentHuman ?? 0}
         />
       </div>
@@ -153,19 +153,19 @@ export default function Dashboard() {
           <div className="space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Active Points</span>
-              <span className="text-sm font-mono text-teal">{account ? displayPoints(account.balances.active) : '--'}</span>
+              <span className="text-sm font-mono text-teal">{account ? displayPoints(account.activeBalance) : '--'}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Supportive Points</span>
-              <span className="text-sm font-mono">{account ? displayPoints(account.balances.supportive) : '--'}</span>
+              <span className="text-sm font-mono">{account ? displayPoints(account.supportiveBalance) : '--'}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Ambient Points</span>
-              <span className="text-sm font-mono">{account ? displayPoints(account.balances.ambient) : '--'}</span>
+              <span className="text-sm font-mono">{account ? displayPoints(account.ambientBalance) : '--'}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Earned Points</span>
-              <span className="text-sm font-mono text-gold">{account ? displayPoints(account.balances.earned) : '--'}</span>
+              <span className="text-sm font-mono text-gold">{account ? displayPoints(account.earnedBalance) : '--'}</span>
             </div>
           </div>
         </div>

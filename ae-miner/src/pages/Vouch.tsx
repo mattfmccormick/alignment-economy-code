@@ -82,14 +82,10 @@ export default function Vouch() {
     );
   }
 
-  // Earned + locked = total holdings. Treat both string and {balances} shapes
-  // safely — older API responses returned flat fields, newer ones nest under balances.
-  const earnedRaw = BigInt(
-    (account as { earnedBalance?: string })?.earnedBalance ?? account?.balances?.earned ?? '0',
-  );
-  const lockedRaw = BigInt(
-    (account as { lockedBalance?: string })?.lockedBalance ?? account?.balances?.locked ?? '0',
-  );
+  // Earned + locked = total holdings. GET /accounts/:id returns flat base-unit
+  // balance strings.
+  const earnedRaw = BigInt(account?.earnedBalance ?? '0');
+  const lockedRaw = BigInt(account?.lockedBalance ?? '0');
   const totalHoldings = earnedRaw + lockedRaw;
 
   return (

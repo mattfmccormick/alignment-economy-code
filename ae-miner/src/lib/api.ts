@@ -53,13 +53,14 @@ export interface Account {
   publicKey?: string;
   percentHuman: number;
   isEscrowed?: boolean;
-  balances: {
-    active: string;
-    supportive: string;
-    ambient: string;
-    earned: string;
-    locked: string;
-  };
+  // GET /accounts/:id returns FLAT balance fields (base-unit strings), not a
+  // nested `balances` object. The Dashboard/Income screens previously read
+  // `account.balances.active`, which is undefined here and crashed the page.
+  activeBalance: string;
+  supportiveBalance: string;
+  ambientBalance: string;
+  earnedBalance: string;
+  lockedBalance: string;
   created_at?: string;
 }
 
@@ -88,8 +89,18 @@ export interface NodeStatus {
   };
 }
 
+// The /evidence/score route returns `score` as the full breakdown object (not
+// a bare number). Rendering `score` directly crashes React ("objects are not
+// valid as a child") — read `score.totalScore`.
+export interface ScoreBreakdown {
+  totalScore: number;
+  breakdown: { tierA: number; tierB: number; tierC: number };
+  evidenceDetails?: Array<{ typeId: string; value: number }>;
+  decayApplied?: boolean;
+  nextDecayDate?: number | null;
+}
 export interface EvidenceScore {
-  score: number;
+  score: ScoreBreakdown;
   vouchCount: number;
 }
 
