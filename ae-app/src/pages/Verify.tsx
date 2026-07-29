@@ -285,32 +285,42 @@ export function Verify() {
         </div>
       )}
 
-      {/* What counts as proof */}
+      {/* What counts as proof — strength list. A miner weighs whatever you add;
+          the 4-dot meter shows how much each kind of evidence typically counts.
+          strength = filled dots out of 4 (teal = strong, gold = weaker). */}
       <div className="bg-navy rounded-xl p-4 border border-navy-light space-y-3">
         <div>
-          <h3 className="text-sm font-medium text-white">Ways to prove you&apos;re human</h3>
+          <h3 className="text-sm font-medium text-white">Prove you&apos;re human</h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            You don&apos;t have to hand over ID or biometrics. Vouches from people who are already verified can take you all the way, or mix a few of these. A miner reviews whatever you add and judges how convincingly human it is.
+            Add any of these. A miner weighs them and sets your score.
           </p>
         </div>
-        <ul className="space-y-2">
+        <ul className="space-y-2.5">
           {[
-            { label: 'Vouches from verified friends', note: 'Strongest. Real people stake their own points on you, which is hard to fake.' },
-            { label: 'A short live video call', note: 'Strong. A real-time face and voice are hard to fake.' },
-            { label: 'Government ID photo', note: 'Helps, though a miner weighs it since photos can be edited.' },
-            { label: 'Selfie or voice sample', note: 'Adds a little. AI can fake these, so they count less on their own.' },
+            { label: 'Friend vouches', strength: 4, strong: true },
+            { label: 'Live video call', strength: 3, strong: true },
+            { label: 'Government ID', strength: 2, strong: false },
+            { label: 'Selfie or voice', strength: 1, strong: false },
           ].map((it) => (
-            <li key={it.label} className="flex gap-2.5">
-              <span className="text-teal text-sm mt-0.5">✓</span>
-              <div>
-                <p className="text-sm text-white">{it.label}</p>
-                <p className="text-xs text-gray-500">{it.note}</p>
-              </div>
+            <li key={it.label} className="flex items-center gap-3">
+              <span className="flex-1 text-sm text-white">{it.label}</span>
+              <span className="flex gap-1" aria-label={`Strength ${it.strength} of 4`}>
+                {[0, 1, 2, 3].map((i) => (
+                  <span
+                    key={i}
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      i < it.strength
+                        ? it.strong ? 'bg-teal' : 'bg-gold'
+                        : 'bg-navy-light'
+                    }`}
+                  />
+                ))}
+              </span>
             </li>
           ))}
         </ul>
         <p className="text-[11px] text-gray-500">
-          You can get fully verified with vouches alone, no documents required.
+          Vouches alone can get you fully verified, no documents required.
         </p>
       </div>
 
