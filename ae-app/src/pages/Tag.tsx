@@ -7,6 +7,14 @@ import { displayPoints } from '../lib/formatting';
 const DAILY_SUPPORTIVE = '14400000000';   // 144.00 supportive points (raw units)
 const DAILY_AMBIENT = '1440000000';        // 14.40 ambient points (raw units)
 const MAX_MINUTES_PER_DAY = 1440;
+// The daily cap shown to the user, in POINTS. Internally we still track a
+// minute allocation per item (that's the granular control and what the backend
+// distributes by share); the summary bar just expresses the day's total in the
+// points the user actually earns — 144 supportive, 14.4 ambient.
+const SUPPORTIVE_POINTS = 144;
+const AMBIENT_POINTS = 14.4;
+// How long after the last edit we auto-save (no Save button anymore).
+const AUTOSAVE_MS = 800;
 
 const PRODUCT_CATEGORIES = [
   'furniture', 'electronics', 'clothing', 'footwear', 'kitchen',
@@ -96,6 +104,7 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false); // true after a user edit, drives autosave
 
   const refresh = async () => {
     const ps = await api.getProducts();
@@ -117,6 +126,7 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
   const overCap = totalMinutes > MAX_MINUTES_PER_DAY;
 
   const setMinutes = (productId: string, minutes: number) => {
+    setDirty(true);
     setTagRows((rows) => {
       const idx = rows.findIndex((r) => r.productId === productId);
       const cleanMins = Math.max(0, Math.floor(minutes || 0));
@@ -155,6 +165,7 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
       });
       if (r.success) {
         setSavedAt(Date.now());
+        setDirty(false);
         refresh();
       } else {
         setError(r.error?.message || 'Failed to save');
@@ -166,16 +177,27 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
     }
   };
 
+  // Auto-save: after the user stops editing for a beat, save silently.
+  // Guarded on `dirty` so loading/refresh never triggers a save loop, and on
+  // overCap so we never push an invalid allocation.
+  useEffect(() => {
+    if (!dirty || day === null || overCap) return;
+    const t = setTimeout(() => { save(); }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tagRows, dirty, day, overCap]);
+
   const taggedProducts = tagRows.length;
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-400">
-        Tag the durable goods you use today. Your {displayPoints(DAILY_SUPPORTIVE)} Supportive
-        points split by minute share, then flow to manufacturers at the day rebase.
+        Tag durable goods you're using &amp; see your auto-tagged durable goods
+        below. You can tag up to 144 points a day.
       </p>
 
-      <MinutesBar total={totalMinutes} cap={MAX_MINUTES_PER_DAY} overCap={overCap} />
+      <PointsBar total={totalMinutes} cap={MAX_MINUTES_PER_DAY} dailyPoints={SUPPORTIVE_POINTS} overCap={overCap} />
+      <SaveStatus saving={saving} savedAt={savedAt} error={error} />
 
       {/* Tagged items */}
       {taggedProducts > 0 && (
@@ -265,15 +287,6 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
           </div>
         )}
       </div>
-
-      <SaveBar
-        saving={saving}
-        overCap={overCap}
-        savedAt={savedAt}
-        error={error}
-        canSave={day !== null}
-        onSave={save}
-      />
     </div>
   );
 }
@@ -353,6 +366,7 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false); // true after a user edit, drives autosave
 
   const refresh = async () => {
     const ss = await api.getSpaces();
@@ -374,6 +388,7 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
   const overCap = totalMinutes > MAX_MINUTES_PER_DAY;
 
   const setMinutes = (spaceId: string, minutes: number) => {
+    setDirty(true);
     setTagRows((rows) => {
       const idx = rows.findIndex((r) => r.spaceId === spaceId);
       const cleanMins = Math.max(0, Math.floor(minutes || 0));
@@ -411,6 +426,7 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
       });
       if (r.success) {
         setSavedAt(Date.now());
+        setDirty(false);
         refresh();
       } else {
         setError(r.error?.message || 'Failed to save');
@@ -422,16 +438,25 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
     }
   };
 
+  // Auto-save: mirror the products tab — debounced, guarded on dirty + cap.
+  useEffect(() => {
+    if (!dirty || day === null || overCap) return;
+    const t = setTimeout(() => { save(); }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tagRows, dirty, day, overCap]);
+
   const tagged = tagRows.length;
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-400">
-        Tag the spaces you spend time in today. Your {displayPoints(DAILY_AMBIENT)} Ambient
-        points flow to space entities at the day rebase.
+        Tag spaces you're in &amp; see your auto-tagged spaces below. You can tag
+        up to 14.4 points a day.
       </p>
 
-      <MinutesBar total={totalMinutes} cap={MAX_MINUTES_PER_DAY} overCap={overCap} />
+      <PointsBar total={totalMinutes} cap={MAX_MINUTES_PER_DAY} dailyPoints={AMBIENT_POINTS} overCap={overCap} />
+      <SaveStatus saving={saving} savedAt={savedAt} error={error} />
 
       {tagged > 0 && (
         <div className="bg-navy rounded-xl border border-navy-light divide-y divide-navy-light">
@@ -516,15 +541,6 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
           </div>
         )}
       </div>
-
-      <SaveBar
-        saving={saving}
-        overCap={overCap}
-        savedAt={savedAt}
-        error={error}
-        canSave={day !== null}
-        onSave={save}
-      />
     </div>
   );
 }
@@ -595,14 +611,20 @@ function AddSpaceForm({ onCreated }: { onCreated: () => void }) {
 
 // ---------- Shared bits ----------
 
-function MinutesBar({ total, cap, overCap }: { total: number; cap: number; overCap: boolean }) {
+function PointsBar({
+  total, cap, dailyPoints, overCap,
+}: { total: number; cap: number; dailyPoints: number; overCap: boolean }) {
   const pct = Math.min(100, (total / cap) * 100);
+  // Express the minute allocation as the points the user earns for the day.
+  const pts = (total / cap) * dailyPoints;
+  const isWhole = Number.isInteger(dailyPoints);
+  const fmt = (n: number) => (isWhole ? Math.round(n).toString() : n.toFixed(1));
   return (
     <div>
       <div className="flex justify-between items-center text-xs mb-1">
-        <span className="text-gray-400">Tagged minutes today</span>
+        <span className="text-gray-400">Tagged today</span>
         <span className={`tabular-nums ${overCap ? 'text-red-400' : 'text-white'}`}>
-          {total} / {cap} min
+          {fmt(pts)} / {fmt(dailyPoints)} pts
         </span>
       </div>
       <div className="h-2 bg-navy-dark rounded-full overflow-hidden border border-navy-light">
@@ -613,38 +635,27 @@ function MinutesBar({ total, cap, overCap }: { total: number; cap: number; overC
       </div>
       {overCap && (
         <p className="text-xs text-red-400 mt-1">
-          Total exceeds the 1,440-minute daily cap — reduce some allocations to save.
+          Total exceeds your {fmt(dailyPoints)}-point daily cap — reduce some allocations.
         </p>
       )}
     </div>
   );
 }
 
-function SaveBar({
-  saving, overCap, savedAt, error, canSave, onSave,
-}: {
-  saving: boolean; overCap: boolean; savedAt: number | null;
-  error: string | null; canSave: boolean; onSave: () => void;
-}) {
-  // Show the "saved" state for 4s after a save, driven by a timer rather than
-  // reading Date.now() during render (which never re-renders itself to clear).
+// Quiet auto-save feedback (there is no Save button anymore). Shows "Saving…"
+// while a write is in flight, then "Saved ✓" for a few seconds, then nothing.
+function SaveStatus({
+  saving, savedAt, error,
+}: { saving: boolean; savedAt: number | null; error: string | null }) {
   const [justSaved, setJustSaved] = useState(false);
   useEffect(() => {
     if (savedAt === null) return;
     setJustSaved(true);
-    const timer = setTimeout(() => setJustSaved(false), 4000);
+    const timer = setTimeout(() => setJustSaved(false), 3000);
     return () => clearTimeout(timer);
   }, [savedAt]);
-  return (
-    <div className="sticky bottom-20 left-0 right-0 pt-2">
-      {error && <p className="text-xs text-red-400 mb-2 text-center">{error}</p>}
-      <button
-        onClick={onSave}
-        disabled={!canSave || saving || overCap}
-        className="w-full bg-gold hover:bg-gold-dark text-navy-dark font-medium text-sm py-3 rounded-xl shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {saving ? 'Saving…' : justSaved ? 'Saved ✓' : 'Save today\'s tags'}
-      </button>
-    </div>
-  );
+  if (error) return <p className="text-xs text-red-400">{error}</p>;
+  if (saving) return <p className="text-xs text-gray-500">Saving…</p>;
+  if (justSaved) return <p className="text-xs text-teal">Saved ✓</p>;
+  return <p className="text-xs text-gray-600">Changes save automatically.</p>;
 }
