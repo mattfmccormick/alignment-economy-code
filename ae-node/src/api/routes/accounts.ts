@@ -142,6 +142,103 @@ export function accountRoutes(db: DatabaseSync): Router {
     } catch (e) { next(e); }
   });
 
+  // GET /accounts/:id/share-history — the account's share of the total economy
+  // (same ratio shown on the wallet home screen) reconstructed day-by-day for
+  // the life of the account. Returns one point per protocol day from the day
+  // the account joined up to today, oldest first.
+  //
+  // How it's derived: there is no per-day snapshot table (Phase 1). Instead we
+  // start from every account's CURRENT earned+locked balance and walk the
+  // transaction_log backwards, undoing each logged change day by day. That
+  // makes today's point exactly match the live figure, and each earlier day is
+  // the balances as they stood at that day's close. The daily rebase scales
+  // everyone equally, so it cancels in the ratio and needs no special handling.
+  // A snapshot table can replace this behind the same endpoint at Phase 2.
+  router.get('/:id/share-history', (req, res, next) => {
+    try {
+      const accountId = req.params.id as string;
+      const account = getAccount(db, accountId);
+      if (!account) {
+        res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: `Account not found: ${accountId}` },
+        });
+        return;
+      }
+
+      // Protocol day boundary is 08:59 UTC (32340s past midnight). A timestamp
+      // belongs to the day that opened at the most recent 09:00 UTC mint.
+      const ANCHOR = 8 * 3600 + 59 * 60;
+      const dayKey = (tsSec: number) => Math.floor((tsSec - ANCHOR) / 86400);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const today = dayKey(nowSec);
+
+      // Live balances + join day for every account. `state` is mutated backwards.
+      const accts = db.prepare(
+        'SELECT id, earned_balance, locked_balance, created_at FROM accounts'
+      ).all() as Array<{ id: string; earned_balance: string; locked_balance: string; created_at: number }>;
+      const state = new Map<string, { e: bigint; l: bigint }>();
+      const joinDay = new Map<string, number>();
+      for (const a of accts) {
+        state.set(a.id, { e: BigInt(a.earned_balance), l: BigInt(a.locked_balance) });
+        joinDay.set(a.id, dayKey(a.created_at));
+      }
+
+      // Every earned/locked balance change, grouped by the day it landed on.
+      const rows = db.prepare(
+        `SELECT account_id, point_type, balance_before, timestamp
+           FROM transaction_log
+          WHERE point_type IN ('earned','locked')
+          ORDER BY timestamp ASC`
+      ).all() as Array<{ account_id: string; point_type: string; balance_before: string; timestamp: number }>;
+      const byDay = new Map<number, typeof rows>();
+      for (const r of rows) {
+        const d = dayKey(r.timestamp);
+        const list = byDay.get(d);
+        if (list) list.push(r); else byDay.set(d, [r]);
+      }
+
+      // Share of the economy as of the end of day k: this account's
+      // earned+locked over the sum across every account that had joined by k.
+      const shareAt = (k: number): number => {
+        let mine = 0n, total = 0n;
+        for (const [id, b] of state) {
+          if ((joinDay.get(id) ?? 0) > k) continue; // didn't exist yet
+          const v = b.e + b.l;
+          total += v;
+          if (id === accountId) mine += v;
+        }
+        return total > 0n ? Number((mine * 10000n) / total) / 100 : 0;
+      };
+
+      const startDay = Math.max(dayKey(account.createdAt), today - 364); // cap at ~1yr
+      const dateFor = (k: number) =>
+        new Date((ANCHOR + k * 86400 + 43200) * 1000).toISOString().slice(0, 10);
+
+      const points: Array<{ day: number; date: string; percentOfEconomy: number }> = [
+        { day: today, date: dateFor(today), percentOfEconomy: shareAt(today) },
+      ];
+      // Undo one day at a time: endState(k) = endState(k+1) minus day (k+1)'s rows.
+      for (let k = today - 1; k >= startDay; k--) {
+        const undo = (byDay.get(k + 1) ?? []).slice().sort((a, b) => b.timestamp - a.timestamp);
+        for (const r of undo) {
+          const b = state.get(r.account_id);
+          if (!b) continue;
+          if (r.point_type === 'earned') b.e = BigInt(r.balance_before);
+          else b.l = BigInt(r.balance_before);
+        }
+        points.push({ day: k, date: dateFor(k), percentOfEconomy: shareAt(k) });
+      }
+      points.reverse(); // oldest first
+
+      res.json({
+        success: true,
+        data: { points, currentDay: today, joinedDay: account.joinedDay },
+        meta: { timestamp: nowSec },
+      });
+    } catch (e) { next(e); }
+  });
+
   return router;
 }
 

@@ -282,3 +282,11 @@ export interface NetworkStatus {
   transactionsToday: number;
   feePoolBalance: string;
 }
+
+// One point on the "share of the economy" line chart: the account's percent of
+// the total economy at the close of a given protocol day.
+export interface SharePoint {
+  day: number;
+  date: string; // YYYY-MM-DD (UTC)
+  percentOfEconomy: number;
+}

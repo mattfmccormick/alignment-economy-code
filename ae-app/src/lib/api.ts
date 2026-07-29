@@ -21,6 +21,7 @@ import type {
   PanelSummary,
   SuccessResponse,
   ScoreBreakdownData,
+  SharePoint,
 } from './types';
 
 // Pick the right backend URL for the current runtime:
@@ -126,6 +127,9 @@ export const api = {
 
   getTransactions: (id: string, page = 1, limit = 50) =>
     request<{ transactions: TransactionData[]; total: number; page: number; limit: number }>('GET', `/accounts/${id}/transactions?page=${page}&limit=${limit}`),
+
+  getShareHistory: (id: string) =>
+    request<{ points: SharePoint[]; currentDay: number; joinedDay: number }>('GET', `/accounts/${id}/share-history`),
 
   // Transactions
   sendTransaction: (body: unknown) =>

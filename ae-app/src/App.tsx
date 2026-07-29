@@ -23,6 +23,7 @@ import { CaseDetail } from './pages/CaseDetail';
 import { Contacts } from './pages/Contacts';
 import { Recurring } from './pages/Recurring';
 import { Receive } from './pages/Receive';
+import { ShareHistory } from './pages/ShareHistory';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // Bump on unlock so this re-renders and re-reads the (module-level) session.
@@ -47,6 +48,7 @@ export default function App() {
           }
         >
           <Route path="/" element={<Wallet />} />
+          <Route path="/share" element={<ShareHistory />} />
           <Route path="/send" element={<Send />} />
           <Route path="/receive" element={<Receive />} />
           <Route path="/tag" element={<Tag />} />
