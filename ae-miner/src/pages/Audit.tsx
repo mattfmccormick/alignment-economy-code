@@ -121,7 +121,7 @@ export default function Audit() {
         <div className="bg-panel border border-border rounded-lg p-5">
           <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Evidence Score</h3>
           <div className="flex items-center gap-4 mb-4">
-            <div className="text-3xl font-bold text-teal">{evidenceScore?.score ?? '--'}</div>
+            <div className="text-3xl font-bold text-teal">{evidenceScore ? `${evidenceScore.score.totalScore}` : '--'}</div>
             <div className="text-xs text-muted">out of 100</div>
           </div>
           <div className="space-y-2">

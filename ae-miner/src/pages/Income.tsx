@@ -67,21 +67,21 @@ export default function Income() {
         <div className="bg-panel border border-border rounded-lg p-5">
           <div className="text-xs text-muted mb-1">Earned Balance</div>
           <div className="text-2xl font-bold text-gold">
-            {account ? displayPoints(account.balances.earned) : '0'}
+            {account ? displayPoints(account.earnedBalance) : '0'}
           </div>
           <div className="text-xs text-muted mt-1">saveable points</div>
         </div>
         <div className="bg-panel border border-border rounded-lg p-5">
           <div className="text-xs text-muted mb-1">Active Balance</div>
           <div className="text-2xl font-bold">
-            {account ? displayPoints(account.balances.active) : '0'}
+            {account ? displayPoints(account.activeBalance) : '0'}
           </div>
           <div className="text-xs text-muted mt-1">daily allocation (expires)</div>
         </div>
         <div className="bg-panel border border-border rounded-lg p-5">
           <div className="text-xs text-muted mb-1">Locked Balance</div>
           <div className="text-2xl font-bold text-teal">
-            {account ? displayPoints(account.balances.locked) : '0'}
+            {account ? displayPoints(account.lockedBalance) : '0'}
           </div>
           <div className="text-xs text-muted mt-1">staked in vouches/challenges</div>
         </div>
