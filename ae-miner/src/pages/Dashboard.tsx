@@ -90,7 +90,7 @@ export default function Dashboard() {
         <div className="bg-panel border border-border rounded-lg p-5 flex flex-col items-center justify-center relative">
           <h3 className="text-sm font-medium text-muted mb-2 self-start">Uptime</h3>
           <div className="relative">
-            <UptimeGauge percent={minerStatus?.miner?.is_active ? 100 : 0} />
+            <UptimeGauge percent={minerStatus?.miner?.isActive ? 100 : 0} />
           </div>
         </div>
 
@@ -112,8 +112,8 @@ export default function Dashboard() {
             </div>
             <div className="flex justify-between text-xs">
               <span className="text-muted">Status</span>
-              <span className={minerStatus?.miner?.is_active ? 'text-teal' : 'text-red'}>
-                {minerStatus?.miner?.is_active ? 'Active' : 'Inactive'}
+              <span className={minerStatus?.miner?.isActive ? 'text-teal' : 'text-red'}>
+                {minerStatus?.miner?.isActive ? 'Active' : 'Inactive'}
               </span>
             </div>
           </div>
@@ -179,7 +179,7 @@ export default function Dashboard() {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Registered</span>
-              <span className="text-sm">{minerStatus?.miner?.registered_at ? new Date(minerStatus.miner.registered_at).toLocaleDateString() : '--'}</span>
+              <span className="text-sm">{minerStatus?.miner?.registeredAt ? new Date(minerStatus.miner.registeredAt * 1000).toLocaleDateString() : '--'}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">% Human</span>

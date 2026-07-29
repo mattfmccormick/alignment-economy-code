@@ -1,0 +1,69 @@
+# Release pipeline: build installers for both Electron apps on every version
+# tag and publish them to GitHub Releases. That feed is what electron-updater
+# in ae-app/ae-miner polls (their package.json `publish` config points at this
+# repo), so installed clients auto-update once a release exists.
+#
+# Trigger:  git tag v0.2.0 && git push origin v0.2.0
+# Manual:   workflow_dispatch (builds without needing a new tag; publishes as
+#           a draft against the most recent tag).
+#
+# Notes:
+# - Each app bundles ae-node via electron-builder extraResources
+#   (../ae-node/dist + node_modules), so ae-node builds first on every runner.
+# - Windows/mac builds are UNSIGNED until the org has certs (SmartScreen /
+#   Gatekeeper will warn). CSC_IDENTITY_AUTO_DISCOVERY=false stops
+#   electron-builder from failing while no mac cert is configured.
+# - electron-builder auto-targets the runner's OS: nsis on Windows, dmg on
+#   macOS, AppImage on Linux.
+
+name: Release installers
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub Release + upload installer assets
+
+jobs:
+  build:
+    name: ${{ matrix.app }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-24.04]
+        app: [ae-app, ae-miner]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            ae-node/package-lock.json
+            ${{ matrix.app }}/package-lock.json
+
+      # The bundled protocol node ships inside both installers.
+      - name: Build ae-node
+        working-directory: ae-node
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install ${{ matrix.app }}
+        working-directory: ${{ matrix.app }}
+        run: npm ci
+
+      - name: Build + publish installer
+        working-directory: ${{ matrix.app }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm run icons:build
+          npm run build
+          npm run build:verify
+          npx electron-builder --publish always

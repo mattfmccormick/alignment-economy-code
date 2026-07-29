@@ -1,9 +1,14 @@
-// Default port 3001 because the miner's bundled ae-node lives there (the
-// wallet's bundled node uses 3000; both apps installed = two independent
-// nodes, no port collision). Override with VITE_API_URL when running
-// against an external ae-node (e.g. `VITE_API_URL=http://localhost:3000/api/v1
-// npm run dev` to hit a manually-started node).
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
+// Resolution order (mirrors src/lib/websocket.ts):
+//   1. VITE_API_URL — explicit override, wins everywhere.
+//   2. file:// origin (packaged Electron) — the miner's bundled ae-node on
+//      3001 (the wallet's bundled node uses 3000; both installed = two
+//      independent nodes, no port collision).
+//   3. Browser dev — same-origin '/api/v1' so Vite's proxy forwards to the
+//      dev node on 3000. (Hardcoding 3001 here made every dev API call
+//      connection-refused and left the proxy config dead.)
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (window.location.protocol === 'file:' ? 'http://localhost:3001/api/v1' : '/api/v1');
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -38,12 +43,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export interface MinerStatus {
   isMiner: boolean;
+  // Backend sends the Miner row camelCase; registeredAt is unix SECONDS.
+  // (This was once declared snake_case, which silently rendered every miner
+  // as "Inactive / Registered --" — the shape is now pinned by ae-node's
+  // api-shape-contract.test.ts.)
   miner: {
     id: string;
-    account_id: string;
+    accountId: string;
     tier: number;
-    is_active: boolean;
-    registered_at: string;
+    isActive: boolean;
+    registeredAt: number;
+    deactivatedAt: number | null;
   } | null;
 }
 

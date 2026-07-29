@@ -207,9 +207,9 @@ export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean;
         </div>
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${minerStatus?.miner?.is_active ? 'bg-teal animate-pulse' : 'bg-red'}`} />
-            <span className={`text-[10px] ${minerStatus?.miner?.is_active ? 'text-teal' : 'text-red'}`}>
-              {minerStatus?.miner?.is_active ? 'Online' : 'Offline'}
+            <span className={`w-2 h-2 rounded-full ${minerStatus?.miner?.isActive ? 'bg-teal animate-pulse' : 'bg-red'}`} />
+            <span className={`text-[10px] ${minerStatus?.miner?.isActive ? 'text-teal' : 'text-red'}`}>
+              {minerStatus?.miner?.isActive ? 'Online' : 'Offline'}
             </span>
           </div>
           <button

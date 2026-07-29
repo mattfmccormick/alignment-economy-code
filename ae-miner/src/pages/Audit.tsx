@@ -102,15 +102,15 @@ export default function Audit() {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Active</span>
-              <span className={minerStatus?.miner?.is_active ? 'text-teal text-xs' : 'text-red text-xs'}>
-                {minerStatus?.miner?.is_active ? 'Yes' : 'No'}
+              <span className={minerStatus?.miner?.isActive ? 'text-teal text-xs' : 'text-red text-xs'}>
+                {minerStatus?.miner?.isActive ? 'Yes' : 'No'}
               </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Registered</span>
               <span className="text-xs">
-                {minerStatus?.miner?.registered_at
-                  ? new Date(minerStatus.miner.registered_at).toLocaleDateString()
+                {minerStatus?.miner?.registeredAt
+                  ? new Date(minerStatus.miner.registeredAt * 1000).toLocaleDateString()
                   : '--'
                 }
               </span>
