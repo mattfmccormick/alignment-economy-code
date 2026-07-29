@@ -667,11 +667,11 @@ export function Onboarding() {
           </svg>
         </div>
         <h1 className="text-3xl font-serif text-white mb-3">Alignment Economy</h1>
-        <p className="text-gray-400 mb-10 max-w-sm leading-relaxed text-sm">
-          A digital currency that works: Money that holds its value, that you
-          spend instead of hoard, and that finally counts the work no paycheck
-          ever did.
+        <p className="text-gray-400 mb-3 max-w-sm leading-relaxed text-sm">
+          A new economic scoreboard: A Usable Peer-to-Peer Electronic Cash and
+          UBI System.
         </p>
+        <p className="text-teal font-medium mb-10 text-base">Make Money Human!</p>
 
         <button
           onClick={() => { setPlatformError(null); setFlow('platform-signup'); }}
