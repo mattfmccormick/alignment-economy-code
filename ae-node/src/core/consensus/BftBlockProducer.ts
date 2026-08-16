@@ -374,34 +374,44 @@ export class BftBlockProducer {
     );
     if (!timestampCheck.valid) return timestampCheck;
 
-    // State-root agreement, checked before the dry run because it is a cheap
-    // hash comparison and because a mismatch explains a dry-run failure that
-    // would otherwise look like a bad block rather than a diverged node.
+    // State-root agreement. DIAGNOSTIC ONLY — this deliberately does not
+    // affect the vote.
     //
-    // The proposer publishes its view of state as of the parent block; we hold
-    // that state too, so the digests must match. When they do not, one of us
-    // has drifted — an account only one node knows about, a direct SQL write,
-    // a percentHuman set locally — and voting for the block would bake that
-    // disagreement into the chain.
+    // It is tempting to vote NIL on a mismatch, and the first version of this
+    // did. That is a liveness bug, and a nasty one. Account rows legitimately
+    // appear on different nodes at different moments: gossip delivers a new
+    // account to peers that are online, and the on-chain registration reaches
+    // everyone else only when a block carrying it commits. So a node that
+    // missed the gossip has a genuinely different parent state root through no
+    // fault of anyone's — and if it voted NIL on that basis it would reject
+    // every block, including the very block carrying the registration that
+    // would fix it. The chain deadlocks precisely in the situation the
+    // replication work exists to handle.
     //
-    // Absent field means an older proposer that makes no claim. Vote normally
-    // rather than rejecting: refusing would partition the network on a version
-    // difference, which is worse than the drift this is meant to surface.
+    // Enforcement belongs to the dry run below, which asks the only question
+    // that actually matters: can this node apply this block? A block whose
+    // transactions reference an account we have never heard of fails there and
+    // gets a NIL, while a harmless "we have not caught up on registrations
+    // yet" difference does not.
+    //
+    // So the root's job is to make silent drift audible. Balance drift used to
+    // surface only as an incidental replay throw; percentHuman drift produced
+    // no signal at any point, ever. Now it produces a log line naming the
+    // likely cause, which is what an operator needs and what nothing else
+    // provides.
     if (typeof payload.parentStateRoot === 'string') {
       const localRoot = computeStateRoot(this.db);
       if (localRoot !== payload.parentStateRoot) {
-        const result = {
-          valid: false,
-          error:
-            `state divergence at height ${payload.number}: proposer's parent state root ` +
-            `${payload.parentStateRoot.slice(0, 16)}… does not match local ` +
-            `${localRoot.slice(0, 16)}…. This node's balances or percentHuman values ` +
-            `disagree with the proposer's. Common causes: an account that exists only on ` +
-            `one node, or scripts/dev-bump-ph.mjs run on some nodes but not all.`,
-        };
-        logger.error('bft', `Voting NIL: ${result.error}`);
-        this.dryRunCache.set(blockHash, result);
-        return result;
+        logger.warn(
+          'bft',
+          `State root differs from the proposer at height ${payload.number}: theirs ` +
+            `${payload.parentStateRoot.slice(0, 16)}…, ours ${localRoot.slice(0, 16)}…. ` +
+            `Expected transiently while a new account propagates. If it persists across ` +
+            `many blocks this node has drifted — the usual causes are a direct SQL write ` +
+            `such as scripts/dev-bump-ph.mjs run on some nodes but not all, or an account ` +
+            `whose registration never reached a block. Not blocking the vote; the dry run ` +
+            `below decides whether this block is actually applicable here.`,
+        );
       }
     }
 

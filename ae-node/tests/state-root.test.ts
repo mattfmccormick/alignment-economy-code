@@ -174,6 +174,29 @@ describe('state root', () => {
     assert.equal(computeStateRoot(a), computeStateRoot(b));
   });
 
+  it('two honest nodes legitimately differ while a new account propagates', () => {
+    // This is why the state root must stay diagnostic and must NOT gate a vote.
+    //
+    // Node A creates an account. It exists on A immediately. B learns about it
+    // either by gossip (whenever that lands) or by the block carrying its
+    // on-chain registration. In between, both nodes are perfectly honest and
+    // their roots differ.
+    //
+    // An earlier version voted NIL on exactly this and deadlocked the chain: B
+    // would reject every block including the one carrying the registration
+    // that would have fixed it. If someone later makes the root gate a vote or
+    // folds it into the block hash, this test is the reason not to — see the
+    // header of src/core/state-root.ts.
+    const kp = generateKeyPair();
+    createAccount(a, 'individual', 1, 0, kp.publicKey);
+
+    assert.notEqual(
+      computeStateRoot(a),
+      computeStateRoot(b),
+      'a normal, transient, blameless disagreement — never grounds to reject a block',
+    );
+  });
+
   it('does not lose precision on balances above 2^53', () => {
     // Balances are stored as TEXT and hashed as TEXT. Routing them through
     // Number would collapse distinct large values onto the same digest, which

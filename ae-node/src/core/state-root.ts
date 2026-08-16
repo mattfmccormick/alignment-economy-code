@@ -19,21 +19,40 @@
 //
 // Scope, deliberately
 // -------------------
-// This root is carried in the gossiped block payload and checked by receivers.
-// It is NOT yet folded into the block hash. That ordering is intentional:
+// The root is carried in the gossiped block payload and compared by receivers,
+// and it is DIAGNOSTIC ONLY. It does not affect a vote and it is not folded
+// into the block hash.
 //
-//   - as a payload field it needs no schema migration, no change to block
-//     hashing, and no change to how historical blocks verify during sync, so it
-//     can land without putting a working chain at risk;
-//   - it already solves the actual problem, which is accidental divergence
-//     going unnoticed (a direct SQL write on one node, an account that only
-//     exists on its creator) — the failures that were silent are now loud.
+// That is not laziness, it is a correctness requirement. Account rows
+// legitimately appear on different nodes at different moments: gossip delivers
+// a new account to peers that are online, and the on-chain registration
+// reaches everyone else only when a block carrying it commits. Two honest
+// nodes therefore hold different state roots for a while, through nobody's
+// fault.
 //
-// What it does not yet do is make divergence unforgeable: a malicious proposer
-// could publish a root that does not match its own state, because nothing
-// signs over it. Folding `stateRootHash` into computeBlockHash the way
-// `validatorChangesHash` already is closes that, and is backward compatible
-// because the optional parts hash as '' when absent. That is the follow-up.
+// An earlier version of this voted NIL on a mismatch. That deadlocks the
+// chain: a node that missed the gossip would reject every block, including the
+// very block carrying the registration that would fix it — failing precisely
+// in the situation the replication work exists to handle. Enforcing a state
+// root requires the state to be a deterministic function of the chain alone,
+// and account creation is not yet fully that.
+//
+// Enforcement belongs to the pre-vote dry run (see
+// BftBlockProducer.dryRunTransactions), which asks the question that actually
+// matters — can this node apply this block? — and correctly distinguishes "the
+// proposer references an account I have never heard of" from "I am a few
+// seconds behind on registrations".
+//
+// What this root does provide is audibility. Balance drift used to surface
+// only as an incidental `Replay: insufficient <type> balance` throw, and
+// percentHuman drift produced no signal at any point, ever. Now both produce a
+// log line naming the likely cause.
+//
+// Making it enforceable is a real follow-up, and the order matters: first make
+// account state a pure function of the chain (registrations are on-chain as of
+// schema v13, but gossip still front-runs them), then fold a stateRootHash
+// into computeBlockHash the way validatorChangesHash already is. Folding it in
+// first would just move the deadlock into hash verification.
 
 import { DatabaseSync } from 'node:sqlite';
 import { sha256 } from './crypto.js';

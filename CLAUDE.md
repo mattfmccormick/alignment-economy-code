@@ -197,10 +197,14 @@ alongside the fixes above.
   five balances, ordered by id, reading balances as the TEXT they are stored as
   so precision above 2^53 survives. The proposer publishes its root for the
   PARENT block in the gossip payload; receivers compare against their own
-  before voting and vote NIL on mismatch with a message naming the likely
-  cause. Parent state rather than post-apply state, because every receiver
-  already holds it, so no prediction of fee distribution or day-cycle side
-  effects is needed.
+  before voting and log the divergence with a message naming the likely cause.
+  Parent state rather than post-apply state, because every receiver already
+  holds it, so no prediction of fee distribution or day-cycle side effects is
+  needed.
+  **Diagnostic only, deliberately** — see the open-items note below. The first
+  version voted NIL on a mismatch, which deadlocks the chain whenever an
+  account has reached one node and not another. Corrected before it reached a
+  real network.
   **Scope, deliberately:** the root rides the payload, it is not yet folded
   into the block hash. That needs no schema migration and no change to how
   historical blocks verify during sync, so it lands without risking a working
@@ -294,11 +298,28 @@ New suite: `tests/account-registration-onchain.test.ts` (11 tests).
 
 ### Open blockers (not fixed, ordered by severity)
 
-1. **The state root is advisory, not enforced.** It travels in the gossip
-   payload and receivers check it, but it is not folded into
-   `computeBlockHash`, so nothing signs over it and a dishonest proposer could
-   publish a root that does not match its own state. Detects accidents, not
-   attacks. See `core/state-root.ts` for the follow-up.
+1. **The state root is diagnostic, and must stay that way for now.** It travels
+   in the gossip payload and receivers compare it, but it does not gate a vote
+   and is not folded into `computeBlockHash`.
+   That is a correctness requirement, not a shortcut, and the first version of
+   it got this wrong. Account rows legitimately appear on different nodes at
+   different moments: gossip reaches peers that are online, and the on-chain
+   registration reaches everyone else only when a block carrying it commits, so
+   two honest nodes hold different roots for a while. Voting NIL on that
+   deadlocks the chain — a node that missed the gossip rejects every block,
+   including the one carrying the registration that would fix it, failing
+   exactly where the replication work is supposed to help. Caught before it
+   reached a real network; pinned by "two honest nodes legitimately differ
+   while a new account propagates" in `tests/state-root.test.ts`.
+   Enforcement lives in the pre-vote dry run, which asks the question that
+   actually matters (can this node apply this block?) and distinguishes "you
+   reference an account I have never heard of" from "I am seconds behind on
+   registrations".
+   Making the root enforceable is a genuine follow-up, in this order: first
+   make account state a pure function of the chain (registrations are on-chain
+   as of v13, but gossip still front-runs them), then fold a `stateRootHash`
+   into `computeBlockHash`. Doing it in the other order just moves the deadlock
+   into hash verification.
 2. **Platform-server is not shipped with the app.** The explainer now points
    users at self-custody, which is a fix for the confusion, not for the missing
    service. Either bundle it in `extraResources` and spawn it from
