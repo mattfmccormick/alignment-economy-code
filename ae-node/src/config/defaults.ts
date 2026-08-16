@@ -40,6 +40,14 @@ export const DEFAULT_PARAMS: Record<string, unknown> = {
   'mining.tier2_jury_attendance_required': 1.00,
   'mining.rolling_window_days': 30,
   'mining.min_miners_for_jury': 11,
+  // How many miners a network may seat before the percentHuman >= 50 floor
+  // starts applying. Raising a score needs a completed verification panel, a
+  // panel needs an assigned miner, and a miner needed a score — so with the
+  // floor applying from miner #2 onward, a new network could never grow past
+  // one miner. Defaults to the panel size, so a network can seat exactly
+  // enough reviewers to run its first real panel and the floor takes over
+  // from there.
+  'mining.bootstrap_miner_count': 3,
   'mining.panel_size': 3,
   'mining.heartbeat_interval_seconds': 60,
   'mining.verification_deadline_hours': 72,

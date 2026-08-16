@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { getAccount } from '../core/account.js';
 import { NotFoundError, ValidationError, ConflictError } from '../core/errors.js';
+import { getParam } from '../config/params.js';
 import { SqliteMiningStore } from '../core/stores/SqliteMiningStore.js';
 import type { IMiningStore } from '../core/stores/IMiningStore.js';
 import type { Miner } from './types.js';
@@ -23,11 +24,28 @@ export function registerMiner(db: DatabaseSync, accountId: string): Miner {
 
   const store = miningStore(db);
 
-  // Bootstrap exemption: if no miners exist yet, the first one bypasses the
-  // percentHuman floor. Without this, a fresh network is impossible — every
-  // miner needs to be verified by another miner.
-  if (store.countActiveMiners() > 0 && acct.percentHuman < 50) {
-    throw new ValidationError(`percentHuman ${acct.percentHuman} below minimum 50`, 'PERCENT_HUMAN_TOO_LOW');
+  // Bootstrap window: the first `mining.bootstrap_miner_count` miners bypass
+  // the percentHuman floor.
+  //
+  // This used to exempt only the very first miner, which left the network with
+  // no way to grow: raising a score requires a completed verification panel, a
+  // panel requires an assigned miner, and a miner required a score. Person two
+  // onward was permanently locked out, so a real network could never have more
+  // than one verifier and every applicant after the first had nobody
+  // independent to review them.
+  //
+  // Exempting a small window instead lets a network seat enough reviewers to
+  // run its first genuine panel, after which the floor applies normally. The
+  // count is a governed parameter so an operator can tighten it.
+  const bootstrapCount = getParam<number>(db, 'mining.bootstrap_miner_count');
+  if (store.countActiveMiners() >= bootstrapCount && acct.percentHuman < 50) {
+    throw new ValidationError(
+      `percentHuman ${acct.percentHuman} is below the minimum of 50. ` +
+        `This network already has ${store.countActiveMiners()} miner(s), so the ` +
+        `bootstrap exemption no longer applies. Request a verification panel and ` +
+        `get reviewed before registering as a miner.`,
+      'PERCENT_HUMAN_TOO_LOW',
+    );
   }
 
   // Check not already registered

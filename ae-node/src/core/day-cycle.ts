@@ -16,6 +16,9 @@ import { recordLog, transactionStore } from './transaction.js';
 import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
 import { runTransaction } from '../db/connection.js';
 import { rebalanceVouchLocks } from '../verification/vouching.js';
+import { finalizeSupportiveTags } from '../tagging/supportive.js';
+import { finalizeAmbientTags } from '../tagging/ambient.js';
+import { logger } from '../node/logger.js';
 import type { CyclePhase, RebaseEvent } from './types.js';
 
 // --------------- Day cycle state ---------------
@@ -40,6 +43,83 @@ function advanceDay(db: DatabaseSync): void {
 // those buckets — iterating over them and zeroing-zero is wasted work that
 // scales with account count. We pre-filter at the SQL level to only touch
 // rows that actually have non-zero daily balances.
+
+/**
+ * Pay out every account's supportive and ambient tags for the current day.
+ *
+ * Two of the white paper's four point types run through here. Supportive points
+ * flow to the makers of the durable goods a person actually used; ambient
+ * points flow to the owners of the spaces they actually occupied. Both are
+ * "the economy noticing where you spent your day."
+ *
+ * `finalizeSupportiveTags` and `finalizeAmbientTags` existed, were correct, and
+ * were covered by tests — but nothing in `ae-node/src` ever called them. The
+ * only callers were the tests themselves, so on a live network a user could tag
+ * their chair and their office all day and the points simply expired at 03:59
+ * along with everything else. Two of the four point types never reached anyone.
+ *
+ * This runs at the top of the cycle, BEFORE expireDaily, because finalization
+ * debits the very supportive/ambient balances that expiry zeroes. Reverse the
+ * order and every tag silently pays out nothing.
+ *
+ * Per-account failures are contained: one malformed tag row must not stop the
+ * whole network's day from rolling over. The account is logged and skipped, its
+ * balance then expires normally like an untagged one.
+ */
+export function finalizeDailyTags(db: DatabaseSync): {
+  accounts: number;
+  transferred: bigint;
+  burned: bigint;
+  fees: bigint;
+  failed: number;
+} {
+  const day = getCycleState(db).currentDay;
+
+  // Union of everyone with at least one active tag of either kind today. Most
+  // accounts on a young network have none, so this is far cheaper than walking
+  // the whole account table.
+  const rows = db
+    .prepare(
+      `SELECT account_id FROM supportive_tags WHERE day = ? AND status = 'active'
+       UNION
+       SELECT account_id FROM ambient_tags WHERE day = ? AND status = 'active'`,
+    )
+    .all(day, day) as Array<{ account_id: string }>;
+
+  let transferred = 0n;
+  let burned = 0n;
+  let fees = 0n;
+  let failed = 0;
+
+  for (const { account_id: accountId } of rows) {
+    try {
+      const s = finalizeSupportiveTags(db, accountId, day);
+      const a = finalizeAmbientTags(db, accountId, day);
+      transferred += s.transferred + a.transferred;
+      burned += s.burned + a.burned;
+      fees += s.fees + a.fees;
+    } catch (err) {
+      failed++;
+      logger.error(
+        'cycle',
+        `Tag finalization failed for account ${accountId} on day ${day}; ` +
+          `its balances will expire unpaid. ${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+    }
+  }
+
+  if (rows.length > 0) {
+    logger.info(
+      'cycle',
+      `Finalized tags for ${rows.length} account(s) on day ${day}: ` +
+        `${transferred} transferred, ${burned} burned, ${fees} to fee pool` +
+        (failed > 0 ? `, ${failed} failed` : ''),
+    );
+  }
+
+  return { accounts: rows.length, transferred, burned, fees, failed };
+}
 
 export function expireDaily(db: DatabaseSync): void {
   setPhase(db, 'expiring');
@@ -289,6 +369,7 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
 // processTransaction enforces this.
 
 export function runExpireAndRebase(db: DatabaseSync): RebaseEvent | null {
+  finalizeDailyTags(db);            // pay supportive/ambient BEFORE expiry zeroes them
   expireDaily(db);                  // phase: expiring
   const event = rebase(db);         // phase: rebasing
   rebalanceVouchLocks(db);          // WP v2: percentage-based locks scale with balance

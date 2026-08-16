@@ -3,7 +3,8 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { initializeSchema } from '../db/schema.js';
 import { seedParams } from '../config/params.js';
-import { createGenesisBlock, getLatestBlock, getBlock, createBlock } from '../core/block.js';
+import { createGenesisBlock, getLatestBlock, getBlock, createBlock, computeBlockHash } from '../core/block.js';
+import { sha256 } from '../core/crypto.js';
 import { loadGenesisSpec, applyGenesisSpec, genesisSpecHash } from './genesis-config.js';
 import {
   runExpireAndRebase,
@@ -181,6 +182,46 @@ export class AENodeRunner {
       // is a no-op when the genesis block already exists.)
       const spec = loadGenesisSpec(this.config.genesisConfigPath);
       this.networkId = spec.networkId;
+
+      // Guard the sticky-legacy-genesis trap.
+      //
+      // The genesis branch above is gated on an empty DB. A node that booted
+      // once WITHOUT a spec wrote a random-timestamp genesis block; pointing it
+      // at a spec afterwards does not retro-apply anything, it only sets
+      // networkId. The result is a node advertising the real network over a
+      // legacy genesis hash, with none of the genesis accounts or validators.
+      // It then fails every peer handshake on genesisHash and sits alone
+      // forever, and the only message an operator sees is a generic mismatch
+      // from the far end.
+      //
+      // Genesis is fully determined by the spec (timestamp and day are the
+      // only variable inputs to its hash), so recomputing it here is exact.
+      // Refuse to start rather than run a node that can never peer.
+      const block0 = getBlock(this.db, 0);
+      if (block0) {
+        const expectedHash = computeBlockHash(
+          0,
+          '0'.repeat(64),
+          spec.genesisTimestamp,
+          sha256('genesis'),
+          spec.genesisDay,
+        );
+        if (block0.hash !== expectedHash) {
+          throw new Error(
+            `Genesis mismatch: this database was created under a different genesis than ` +
+              `${this.config.genesisConfigPath}.\n` +
+              `  on disk:  ${block0.hash}\n` +
+              `  expected: ${expectedHash}\n` +
+              `The usual cause is booting once without AE_GENESIS_CONFIG_PATH, which writes a ` +
+              `random-timestamp genesis. Setting the path afterwards does NOT retro-apply the ` +
+              `spec's accounts or validators, and this node would fail every peer handshake on ` +
+              `genesisHash while appearing healthy locally.\n` +
+              `Fix: stop the node, delete ${this.config.dbPath} (and its -wal/-shm files), and ` +
+              `start again with AE_GENESIS_CONFIG_PATH set. There is nothing worth keeping in a ` +
+              `database on the wrong genesis.`,
+          );
+        }
+      }
     }
 
     const latest = getLatestBlock(this.db)!;

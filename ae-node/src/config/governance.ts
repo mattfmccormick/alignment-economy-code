@@ -57,6 +57,7 @@ export const PARAM_GOVERNANCE: Record<string, ParamSpec> = {
   'mining.tier2_jury_attendance_required': { class: 'constitutional', description: '100% jury attendance required for Tier 2' },
   'mining.rolling_window_days':       { class: 'bounded', low: 7, high: 90, description: 'Tier evaluation rolling window (days)' },
   'mining.min_miners_for_jury':       { class: 'open', description: 'Minimum miners to seat a jury' },
+  'mining.bootstrap_miner_count':     { class: 'open', description: 'Miners a new network may seat before the percentHuman floor applies' },
   'mining.panel_size':                { class: 'bounded', low: 3, high: 7, description: 'Verification panel size (odd, median rule)' },
   'mining.heartbeat_interval_seconds': { class: 'open', description: 'Miner heartbeat interval' },
   'mining.verification_deadline_hours': { class: 'open', description: 'Hours to complete assigned verification' },

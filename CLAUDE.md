@@ -137,6 +137,52 @@ creation consensus-ordered, forgery-resistant, and available to any node that
 can sync. That is the right next step and is deliberately not rushed in
 alongside the fixes above.
 
+### Third pass, same day: four more closed
+
+- **Validators no longer vote for blocks they cannot apply.** Content
+  validation was stash-presence plus a timestamp check, and the comment in
+  `BftBlockProducer` said so outright: "a stash-presence check IS the content
+  check for now". A follower would prevote and precommit a block guaranteed to
+  throw on its own apply, and only find out after a commit certificate already
+  existed — the worst possible ordering, because then every affected validator
+  has to fail-stop. `validateStashedBlock` now dry-runs the block's
+  transactions against local state and votes NIL if they do not apply, so the
+  round fails cleanly and retries instead. Extracted as
+  `dryRunBlockTransactions` so it is directly testable; rollback is via a
+  sentinel thrown through the depth-aware `runTransaction`, and the tests pin
+  that neither a passing nor a failing dry run leaves any trace.
+  New suite: `tests/block-dry-run.test.ts` (8 tests).
+- **Supportive and ambient points actually pay out now.**
+  `finalizeSupportiveTags` and `finalizeAmbientTags` were correct and tested,
+  but nothing in `ae-node/src` ever called them — the only callers were the
+  tests. On a live network you could tag your chair and your office all day and
+  the points expired at 03:59 with everything else. Two of the white paper's
+  four point types never reached a single balance. New `finalizeDailyTags` runs
+  at the top of `runExpireAndRebase`, before `expireDaily`, because
+  finalization debits the very balances expiry zeroes (reverse the order and
+  every tag silently pays nothing). Per-account failures are contained and
+  counted so one bad row cannot stop the network's day rolling over.
+  New suite: `tests/tag-payout-cycle.test.ts` (6 tests), which drives the
+  cycle rather than the finalizers — the gap the old unit tests could not see.
+- **A second person can become a miner.** The bootstrap exemption covered only
+  the very first miner, so from person two onward the `percentHuman >= 50`
+  floor applied — and raising a score needs a panel, a panel needs a miner, and
+  a miner needed a score. A network could never have more than one verifier,
+  and every applicant after the first had nobody independent to review them.
+  New governed parameter `mining.bootstrap_miner_count` (default 3, matching
+  panel size) exempts a small window instead, so a network can seat exactly
+  enough reviewers to run its first genuine panel before the floor takes over.
+  The rejection message now explains what to do instead of quoting a number.
+- **The sticky legacy-genesis trap fails loudly at boot.** A node that booted
+  once without `AE_GENESIS_CONFIG_PATH` wrote a random-timestamp genesis;
+  pointing it at a spec afterwards only set `networkId`, leaving it advertising
+  the real network over a legacy genesis hash with none of the genesis accounts
+  or validators. It then failed every peer handshake while looking healthy
+  locally. Genesis is fully determined by the spec, so the runner now
+  recomputes the expected block-0 hash, compares, and refuses to start with an
+  explicit "delete the DB and restart" message rather than running a node that
+  can never peer.
+
 ### Open blockers (not fixed, ordered by severity)
 
 1. **Blocks carry no state root.** `computeBlockHash` covers number, previous
@@ -147,14 +193,7 @@ alongside the fixes above.
    account spends. `percentHuman` divergence produces no error at all, ever,
    because `replayTransaction` takes `netAmount` off the wire verbatim and never
    re-derives the spend multiplier locally.
-2. **Followers vote on blocks they cannot apply.** `validateStashedBlock` checks
-   stash presence and timestamp only, never dry-runs the transactions. Its own
-   comment concedes "a stash-presence check IS the content check for now". A
-   follower will prevote and precommit a block that is guaranteed to throw on
-   its own apply. That now costs a clean fail-stop rather than a dead process,
-   but the right fix is to vote NIL on a block that fails a dry-run instead of
-   discovering it at apply time.
-3. **The default "Create Account" needs a platform server nothing starts.**
+2. **The default "Create Account" needs a platform server nothing starts.**
    `ae-app/src/lib/platform.ts` falls back to `http://localhost:3500/api/v1`.
    Electron's `main.cjs` spawns only `ae-node`, and `extraResources` copies only
    `ae-node`, so a packaged install does not even contain platform-server. The
@@ -162,7 +201,7 @@ alongside the fixes above.
    rejection, which means the friendly "Is the platform server running?" string
    at `Onboarding.tsx:226` is unreachable on the exact failure it was written
    for. Workaround today: the "Expert: I'll hold my own keys instead" link.
-4. **Genesis validator accounts cannot sign into either app.** Genesis keystores
+3. **Genesis validator accounts cannot sign into either app.** Genesis keystores
    hold a raw ML-DSA keypair generated by `generateKeyPair()`, with no BIP39
    mnemonic. Both apps' sign-in requires accountId plus a 12-word phrase and
    checks the derived public key matches, so no phrase can ever reproduce a
@@ -171,27 +210,16 @@ alongside the fixes above.
    above); `ae-miner` still has no keystore path at all, though
    `saveMinerWallet` exists unused and the Electron bridge is wired but never
    called from the UI.
-5. **Vouching never moves `percentHuman`.** `createVouch` locks real stake and
+4. **Vouching never moves `percentHuman`.** `createVouch` locks real stake and
    inserts a row but never calls `updatePercentHuman`. The only writers are
    panel completion and decay. A tester watches the secondary "Evidence Score"
    tile climb while the large %Human gauge and the wallet's spend multiplier
    both stay pinned at 0, and nothing tells them a miner panel is still
    required. Miner-in-the-loop is the intended design; the gap is that the UI
-   never says so.
-6. **The second person cannot become a miner.** `registerMiner` exempts only the
-   first miner from the `percentHuman >= 50` floor, and raising a score requires
-   a panel, which requires a miner. The register failure is also rendered as a
-   raw API string in the miner UI.
-7. **Supportive and ambient points never pay out.** `finalizeSupportiveTags` and
-   `finalizeAmbientTags` have no production caller anywhere in `ae-node/src`;
-   they are referenced only from tests (phase6, phase12, phase61). Two of the
-   four point types in the white paper do not currently reach anyone's balance.
-8. **The legacy genesis path is sticky.** The genesis branch is gated on
-   `if (!getLatestBlock(db))`. A node that boots once without
-   `AE_GENESIS_CONFIG_PATH` writes a random-timestamp genesis; setting the path
-   afterwards does not retro-apply accounts, it only sets `networkId`. The node
-   then advertises the real network over a legacy genesis hash and fails the
-   peer handshake on `genesisHash`. The only fix is deleting the DB.
+   never says so. Now reachable in practice, since a network can seat more than
+   one miner.
+5. **The miner's register failure is a raw API string.** Cosmetic, but it is
+   the first thing a second person sees if they hit the floor.
 
 ### Note on the operator docs
 

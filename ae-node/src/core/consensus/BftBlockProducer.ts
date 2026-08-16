@@ -42,6 +42,76 @@
 import { DatabaseSync } from 'node:sqlite';
 import { runTransaction } from '../../db/connection.js';
 import { logger } from '../../node/logger.js';
+
+/**
+ * Sentinel thrown to unwind a successful dry run so runTransaction rolls it
+ * back. A unique object rather than an Error subclass so it can never be
+ * confused with a genuine replay failure, however that failure is constructed.
+ */
+const DRY_RUN_ROLLBACK = Symbol('bft.dryRunRollback');
+
+/**
+ * Replay a candidate block's transactions against local state, then roll the
+ * whole thing back. Returns whether this node could actually apply the block.
+ *
+ * Exported so it can be tested directly: the interesting cases (a sender with
+ * no local account row, a balance local state says is too low) are cheap to
+ * construct against a bare DB and expensive to stage through a whole consensus
+ * round.
+ *
+ * Rollback works by throwing a sentinel once the replays succeed, which makes
+ * `runTransaction` unwind everything. That helper is depth-aware, so this must
+ * NOT be called from inside an existing DB transaction — otherwise the rollback
+ * is deferred to the outer scope and dry-run state leaks into it. The consensus
+ * caller satisfies this: validation runs from message handling, not from within
+ * an apply.
+ */
+export function dryRunBlockTransactions(
+  db: DatabaseSync,
+  txs: WireTransaction[],
+  height: number,
+): { valid: boolean; error?: string } {
+  if (txs.length === 0) return { valid: true };
+
+  try {
+    runTransaction(db, () => {
+      for (const wireTx of txs) {
+        replayTransaction(
+          db,
+          {
+            id: wireTx.id,
+            from: wireTx.from,
+            to: wireTx.to,
+            amount: BigInt(wireTx.amount),
+            fee: BigInt(wireTx.fee),
+            netAmount: BigInt(wireTx.netAmount),
+            pointType: wireTx.pointType,
+            isInPerson: wireTx.isInPerson,
+            recipientIsHuman: wireTx.recipientIsHuman ?? false,
+            memo: wireTx.memo,
+            signature: wireTx.signature,
+            receiverSignature: wireTx.receiverSignature ?? null,
+            timestamp: wireTx.timestamp,
+          },
+          height,
+        );
+      }
+      // Everything applied cleanly. Throw to roll it all back — this is a
+      // rehearsal, not the performance.
+      throw DRY_RUN_ROLLBACK;
+    });
+    /* c8 ignore next */
+    return { valid: true }; // unreachable: the sentinel always throws
+  } catch (err) {
+    if (err === DRY_RUN_ROLLBACK) return { valid: true };
+    return {
+      valid: false,
+      error: `does not apply against local state: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+}
 import {
   blockStore,
   computeBlockHash,
@@ -144,6 +214,13 @@ export class BftBlockProducer {
   private readonly db: DatabaseSync;
   private readonly peerManager: PeerManager;
   private readonly stash = new Map<string, IncomingBlockPayload>();
+  /**
+   * Memoised dry-run verdicts, keyed by block hash. The round controller
+   * validates a candidate twice per round (once before prevote, once before
+   * precommit) and replaying a whole block for each is pure waste. Cleared
+   * with the stash.
+   */
+  private readonly dryRunCache = new Map<string, { valid: boolean; error?: string }>();
   private readonly runtime: BftRuntime;
   private readonly onBlockCommitted: ((block: Block, cert: CommitCertificate) => void) | undefined;
   private readonly day: number;
@@ -237,6 +314,7 @@ export class BftBlockProducer {
       this.incomingBlockHandler = null;
     }
     this.stash.clear();
+    this.dryRunCache.clear();
   }
 
   /** Number of stashed candidate blocks. Useful for tests / metrics. */
@@ -265,11 +343,61 @@ export class BftBlockProducer {
     if (typeof payload.timestamp !== 'number') {
       return { valid: false, error: 'stashed payload has no timestamp' };
     }
-    return validateBlockTimestamp(
+    const timestampCheck = validateBlockTimestamp(
       payload.timestamp,
       Math.floor(Date.now() / 1000),
       DEFAULT_MAX_TIMESTAMP_DRIFT_SEC,
     );
+    if (!timestampCheck.valid) return timestampCheck;
+
+    return this.dryRunTransactions(blockHash, payload);
+  }
+
+  /**
+   * Replay a candidate block's transactions against local state and roll the
+   * whole thing back, so a validator only ever votes for a block it could
+   * actually apply.
+   *
+   * Until this existed, content validation was stash-presence plus timestamp —
+   * the old comment here conceded "a stash-presence check IS the content check
+   * for now". That meant a follower would happily prevote and precommit a block
+   * guaranteed to throw on its own apply (a sender it has no account row for, a
+   * balance its local state says is too low). The block then reached a valid
+   * commit certificate and blew up at apply time, which is precisely the
+   * situation the fail-stop in BftDriver now contains. Voting NIL up front is
+   * better: the round fails cleanly, the network retries, and no certificate is
+   * ever produced for a block that half the validators cannot apply.
+   *
+   * Rolled back via runTransaction, which is depth-aware, by throwing a
+   * sentinel after the replays succeed. That forces ROLLBACK of everything the
+   * dry run touched while still using the same nesting-safe helper the real
+   * apply path uses. This requires that validation is NOT already inside a DB
+   * transaction — it isn't; the round controller calls it from message
+   * handling — because runTransaction would then defer the rollback to the
+   * outer scope and leak dry-run state.
+   *
+   * Cached per block hash: the controller validates once before prevoting and
+   * again before precommitting, and re-running a whole block twice per round is
+   * wasted work. The cache is cleared with the stash.
+   */
+  private dryRunTransactions(
+    blockHash: string,
+    payload: IncomingBlockPayload,
+  ): { valid: boolean; error?: string } {
+    const cached = this.dryRunCache.get(blockHash);
+    if (cached) return cached;
+
+    const height = typeof payload.number === 'number' ? payload.number : 0;
+    const outcome = dryRunBlockTransactions(this.db, payload.transactions ?? [], height);
+    const result = outcome.valid
+      ? outcome
+      : { valid: false, error: `block ${blockHash.slice(0, 12)}… ${outcome.error}` };
+
+    if (!result.valid) {
+      logger.warn('bft', `Voting NIL: ${result.error}`);
+    }
+    this.dryRunCache.set(blockHash, result);
+    return result;
   }
 
   // ── Internals ────────────────────────────────────────────────────────
