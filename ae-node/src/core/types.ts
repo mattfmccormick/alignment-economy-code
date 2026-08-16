@@ -3,6 +3,7 @@
 
 // Type-only import to avoid runtime circular deps with consensus modules.
 import type { ValidatorChange } from './consensus/validator-change.js';
+import type { AccountRegistration } from './account-registration.js';
 
 export type AccountType = 'individual' | 'company' | 'government' | 'ai_bot';
 export type PointType = 'active' | 'supportive' | 'ambient' | 'earned';
@@ -152,6 +153,26 @@ export interface Block {
    * signature was verified by validateIncomingBlock at receive time.
    */
   validatorChanges: ValidatorChange[] | null;
+  /**
+   * Accounts that joined the ledger in this block (schema v13). Persisted for
+   * the same reason validatorChanges are: a node syncing past blocks has to
+   * arrive at the correct CURRENT account set.
+   *
+   * Without this, accounts existed only on the node whose API created them.
+   * Gossip covers every node that is online at the time; carrying them in the
+   * block is what covers a node that was offline then and catches up later,
+   * which otherwise fail-stops on the first block referencing an account it
+   * has never heard of.
+   *
+   * Applied BEFORE this block's transactions: a newly registered account
+   * starts empty, so within this block it can only receive, and receiving
+   * requires its row to already exist.
+   *
+   * `null` rather than `[]` on the overwhelming majority of blocks, which
+   * carry no registrations — and null hashes as empty, so those blocks keep
+   * exactly the digest they always had.
+   */
+  accountRegistrations: AccountRegistration[] | null;
 }
 
 export interface RebaseEvent {

@@ -1,4 +1,4 @@
-// Genesis configuration — the canonical specification of a chain's
+﻿// Genesis configuration â€” the canonical specification of a chain's
 // starting state.
 //
 // Why this exists:
@@ -42,7 +42,7 @@ export interface GenesisAccountSpec {
   publicKey: string;
   /** Account category. Only 'individual' accounts get daily allocations. */
   type: AccountType;
-  /** 0–100 verification score. Set 100 for testnet bootstrap accounts. */
+  /** 0â€“100 verification score. Set 100 for testnet bootstrap accounts. */
   percentHuman: number;
   /**
    * Initial earned balance, fixed-precision bigint as a base-10 string.
@@ -70,7 +70,7 @@ export interface GenesisSpec {
   /** Schema version. Bump when the format changes incompatibly. */
   version: 2;
   /**
-   * Human-readable network identifier — e.g. "ae-mainnet-1", "ae-testnet-1",
+   * Human-readable network identifier â€” e.g. "ae-mainnet-1", "ae-testnet-1",
    * "ae-devnet-matt". Allows operators to confirm which network they're on
    * without computing a hash, and surfaces a clear error message ("you're on
    * mainnet, this peer is on testnet") at handshake time. Folded into the
@@ -97,7 +97,7 @@ export const NETWORK_ID_REGEX = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
  * Stable, single-line digest of a GenesisSpec. Two operators can compare
  * these out-of-band ("text me your genesis hash") to confirm they're on
  * the same network before they try to peer. Independent of computation
- * order — the digest is computed over a canonicalized representation.
+ * order â€” the digest is computed over a canonicalized representation.
  */
 export function genesisSpecHash(spec: GenesisSpec): string {
   // Canonical form: sort accounts by publicKey so the digest doesn't
@@ -130,7 +130,7 @@ export function genesisSpecHash(spec: GenesisSpec): string {
   return sha256(JSON.stringify(canonical));
 }
 
-// ─── Loading ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const HEX_64 = /^[0-9a-fA-F]{64}$/;
 const VALID_TYPES: ReadonlySet<AccountType> = new Set([
@@ -191,7 +191,7 @@ export function validateGenesisSpec(parsed: unknown): GenesisSpec {
       throw new Error(`accounts[${i}].publicKey must be a non-empty string`);
     }
     if (seenPublicKeys.has(a.publicKey)) {
-      throw new Error(`duplicate publicKey in accounts: ${a.publicKey.slice(0, 16)}…`);
+      throw new Error(`duplicate publicKey in accounts: ${a.publicKey.slice(0, 16)}â€¦`);
     }
     seenPublicKeys.add(a.publicKey);
     if (typeof a.type !== 'string' || !VALID_TYPES.has(a.type as AccountType)) {
@@ -220,14 +220,14 @@ export function validateGenesisSpec(parsed: unknown): GenesisSpec {
         throw new Error(`accounts[${i}].validator.nodePublicKey must be 64 hex chars`);
       }
       if (seenNodeKeys.has(v.nodePublicKey)) {
-        throw new Error(`duplicate nodePublicKey in validators: ${v.nodePublicKey.slice(0, 16)}…`);
+        throw new Error(`duplicate nodePublicKey in validators: ${v.nodePublicKey.slice(0, 16)}â€¦`);
       }
       seenNodeKeys.add(v.nodePublicKey);
       if (typeof v.vrfPublicKey !== 'string' || !HEX_64.test(v.vrfPublicKey)) {
         throw new Error(`accounts[${i}].validator.vrfPublicKey must be 64 hex chars`);
       }
       if (seenVrfKeys.has(v.vrfPublicKey)) {
-        throw new Error(`duplicate vrfPublicKey in validators: ${v.vrfPublicKey.slice(0, 16)}…`);
+        throw new Error(`duplicate vrfPublicKey in validators: ${v.vrfPublicKey.slice(0, 16)}â€¦`);
       }
       seenVrfKeys.add(v.vrfPublicKey);
       if (typeof v.stake !== 'string') {
@@ -274,7 +274,7 @@ export function validateGenesisSpec(parsed: unknown): GenesisSpec {
   };
 }
 
-// ─── Application ────────────────────────────────────────────────────────
+// â”€â”€â”€ Application â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Apply a GenesisSpec to a fresh database. Idempotent: if the genesis
@@ -282,7 +282,7 @@ export function validateGenesisSpec(parsed: unknown): GenesisSpec {
  * existing block is returned.
  *
  * Application order:
- *   1. Insert the deterministic genesis block (timestamp from spec → hash
+ *   1. Insert the deterministic genesis block (timestamp from spec â†’ hash
  *      is reproducible across operators).
  *   2. Insert every account row directly via the store, using the spec's
  *      genesisTimestamp as createdAt so two operators get byte-identical
@@ -292,7 +292,7 @@ export function validateGenesisSpec(parsed: unknown): GenesisSpec {
  *      column also stay deterministic.
  *
  * The schema's `day_cycle_state` row is left at its default (current_day=1,
- * cycle_phase='idle') — initializeSchema already inserts that. Operators
+ * cycle_phase='idle') â€” initializeSchema already inserts that. Operators
  * who want a different starting day should call `setNextCycleAt` after
  * apply, which is a separate concern from genesis.
  */
@@ -318,6 +318,11 @@ export function applyGenesisSpec(db: DatabaseSync, spec: GenesisSpec): Block {
     rebaseEvent: null,
     prevCommitCertHash: null,
     validatorChanges: null,
+    // Genesis accounts come from the spec's `accounts` list, applied below,
+    // not from block-carried registrations. Null keeps genesis hashing
+    // exactly as it always did, which matters because the genesis hash is the
+    // network's identity in the P2P handshake.
+    accountRegistrations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,

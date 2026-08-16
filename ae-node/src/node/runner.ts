@@ -29,6 +29,13 @@ import { BftBlockProducer } from '../core/consensus/BftBlockProducer.js';
 import {
   drainValidatorChanges,
   removeAppliedValidatorChanges,
+} from '../core/consensus/validator-change.js';
+import {
+  drainAccountRegistrations,
+  removeAppliedAccountRegistrations,
+  applyAccountRegistration,
+} from '../core/account-registration.js';
+import {
   applyValidatorChange,
 } from '../core/consensus/validator-change.js';
 import type { IValidatorSet } from '../core/consensus/IValidatorSet.js';
@@ -367,7 +374,18 @@ export class AENodeRunner {
           // block reflects the pre-change set — matching what
           // BftBlockProducer.onCommit does on the live path.
           const validatorChanges = payload.validatorChanges ?? [];
+          // Accounts that joined in this block. This is the whole point of
+          // putting registrations on-chain: a node catching up has no other
+          // way to learn about an account created while it was offline, and
+          // without the row the very next transaction replay throws.
+          const accountRegistrations = payload.accountRegistrations ?? [];
           runTransaction(this.db, () => {
+            // Before the transactions, for the same reason as on the live
+            // commit path: a newly registered account can be paid inside the
+            // block that creates it, and the credit needs somewhere to land.
+            for (const reg of accountRegistrations) {
+              applyAccountRegistration(this.db, reg, block.timestamp);
+            }
             for (const wireTx of txs) {
               replayTransaction(
                 this.db,
@@ -598,6 +616,21 @@ export class AENodeRunner {
           logger.info(
             'validators',
             `Drained ${removed} validator change(s) from pending queue`,
+          );
+        }
+      },
+      // Accounts created locally via POST /accounts, waiting to go on-chain.
+      // Gossip already told every peer that is online; putting them in a block
+      // is what lets a node that was offline at the time learn about them by
+      // syncing, instead of fail-stopping on the first block that references
+      // an account it has never heard of.
+      pendingAccountRegistrations: () => drainAccountRegistrations(this.db),
+      onAccountRegistrationsApplied: (regs) => {
+        const removed = removeAppliedAccountRegistrations(this.db, regs);
+        if (removed > 0) {
+          logger.info(
+            'accounts',
+            `${removed} account registration(s) committed on-chain and drained from the queue`,
           );
         }
       },

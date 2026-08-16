@@ -11,6 +11,7 @@ import type { IBlockStore } from './IBlockStore.js';
 import type { CommitCertificate } from '../consensus/commit-certificate.js';
 import type { ValidatorInfo } from '../consensus/IValidatorSet.js';
 import type { ValidatorChange } from '../consensus/validator-change.js';
+import type { AccountRegistration } from '../account-registration.js';
 
 /**
  * JSON encoder/decoder for ValidatorInfo[] that survives the bigint stake.
@@ -36,6 +37,7 @@ function decodeValidatorSnapshot(json: string): ValidatorInfo[] {
 
 function rowToBlock(row: Record<string, unknown>): Block {
   const rawChanges = row.validator_changes as string | null | undefined;
+  const rawRegistrations = row.account_registrations as string | null | undefined;
   return {
     number: row.number as number,
     day: row.day as number,
@@ -47,12 +49,23 @@ function rowToBlock(row: Record<string, unknown>): Block {
     rebaseEvent: row.rebase_event ? JSON.parse(row.rebase_event as string) : null,
     prevCommitCertHash: (row.prev_commit_cert_hash as string | null | undefined) ?? null,
     validatorChanges: rawChanges ? (JSON.parse(rawChanges) as ValidatorChange[]) : null,
+    accountRegistrations: rawRegistrations
+      ? (JSON.parse(rawRegistrations) as AccountRegistration[])
+      : null,
   };
 }
 
 function validatorChangesToColumn(block: Block): string | null {
   if (!block.validatorChanges || block.validatorChanges.length === 0) return null;
   return JSON.stringify(block.validatorChanges);
+}
+
+// Null rather than '[]' for the empty case, matching validator changes: the
+// vast majority of blocks carry no registrations, and null is what the hash
+// treats as absent.
+function accountRegistrationsToColumn(block: Block): string | null {
+  if (!block.accountRegistrations || block.accountRegistrations.length === 0) return null;
+  return JSON.stringify(block.accountRegistrations);
 }
 
 function rebaseEventToColumn(block: Block): string | null {
@@ -86,11 +99,12 @@ export class SqliteBlockStore implements IBlockStore {
   }
 
   insert(block: Block, isGenesis: boolean): void {
+    const cols =
+      'number, day, timestamp, previous_hash, hash, merkle_root, transaction_count, ' +
+      'rebase_event, prev_commit_cert_hash, validator_changes, account_registrations';
     const sql = isGenesis
-      ? `INSERT OR IGNORE INTO blocks (number, day, timestamp, previous_hash, hash, merkle_root, transaction_count, rebase_event, prev_commit_cert_hash, validator_changes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      : `INSERT INTO blocks (number, day, timestamp, previous_hash, hash, merkle_root, transaction_count, rebase_event, prev_commit_cert_hash, validator_changes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      ? `INSERT OR IGNORE INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      : `INSERT INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     this.db
       .prepare(sql)
       .run(
@@ -104,6 +118,7 @@ export class SqliteBlockStore implements IBlockStore {
         rebaseEventToColumn(block),
         block.prevCommitCertHash,
         validatorChangesToColumn(block),
+        accountRegistrationsToColumn(block),
       );
   }
 

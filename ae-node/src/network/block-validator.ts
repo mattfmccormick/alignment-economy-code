@@ -57,6 +57,10 @@ import {
   type ValidatorChange,
 } from '../core/consensus/validator-change.js';
 import { accountStore } from '../core/account.js';
+import {
+  computeAccountRegistrationsHash,
+  type AccountRegistration,
+} from '../core/account-registration.js';
 
 /**
  * Wire shape of a single transaction inside a block payload. bigint fields
@@ -126,6 +130,17 @@ export interface IncomingBlockPayload {
    * so payloads from older nodes and hand-built test fixtures still validate.
    */
   parentStateRoot?: string;
+  /**
+   * Accounts joining the ledger in this block (schema v13). Folded into the
+   * block hash via computeAccountRegistrationsHash, so dropping an entry or
+   * substituting one whose id does not match its public key breaks hash
+   * verification on every receiver.
+   *
+   * Absent on the vast majority of blocks and on payloads from nodes that
+   * predate the feature; absent hashes as empty, so those blocks verify
+   * exactly as they always did.
+   */
+  accountRegistrations?: AccountRegistration[];
   /**
    * BFT commit certificate proving this block's PARENT (block N-1) was
    * committed by 2/3+ of the validator set. Required for blocks N >= 2
@@ -326,10 +341,20 @@ export function validateIncomingBlock(
   // changes into the hash. We re-derive it from payload.validatorChanges
   // so the producer can't lie about which changes were committed —
   // any swap, drop, or reorder breaks the hash and rejects the block.
+  //
+  // accountRegistrationsHash does the same for the accounts joining in this
+  // block. Re-derived from the payload for the same reason: without it a
+  // producer could drop a registration from the list it ships while keeping
+  // the hash, and receivers would commit a block whose transactions later
+  // reference an account they were never told about.
   const claimedCertHash = payload.prevCommitCertHash ?? null;
   const validatorChangesHash =
     payload.validatorChanges && payload.validatorChanges.length > 0
       ? computeValidatorChangesHash(payload.validatorChanges)
+      : null;
+  const accountRegistrationsHash =
+    payload.accountRegistrations && payload.accountRegistrations.length > 0
+      ? computeAccountRegistrationsHash(payload.accountRegistrations)
       : null;
   const expectedHash = computeBlockHash(
     payload.number,
@@ -339,6 +364,7 @@ export function validateIncomingBlock(
     payload.day,
     claimedCertHash,
     validatorChangesHash,
+    accountRegistrationsHash,
   );
   if (payload.hash !== expectedHash) {
     return {
@@ -551,6 +577,13 @@ export function payloadToBlock(payload: IncomingBlockPayload): Block {
     validatorChanges:
       payload.validatorChanges && payload.validatorChanges.length > 0
         ? payload.validatorChanges
+        : null,
+    // Same normalisation for on-chain account registrations, and for the same
+    // reason: a node catching up months later has to replay them to arrive at
+    // the correct current account set, so they must survive into storage.
+    accountRegistrations:
+      payload.accountRegistrations && payload.accountRegistrations.length > 0
+        ? payload.accountRegistrations
         : null,
   };
 }

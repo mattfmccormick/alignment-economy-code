@@ -43,6 +43,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { runTransaction } from '../../db/connection.js';
 import { logger } from '../../node/logger.js';
 import { computeStateRoot } from '../state-root.js';
+import {
+  applyAccountRegistration,
+  computeAccountRegistrationsHash,
+  type AccountRegistration,
+} from '../account-registration.js';
 
 /**
  * Sentinel thrown to unwind a successful dry run so runTransaction rolls it
@@ -196,6 +201,18 @@ export interface BftBlockProducerConfig {
    */
   onValidatorChangesApplied?: (changes: ValidatorChange[]) => void;
   /**
+   * Pull account registrations to include in the next block this node
+   * proposes. Same contract as pendingValidatorChanges: the proposer reads its
+   * own local queue; receivers take whatever arrives in the payload.
+   */
+  pendingAccountRegistrations?: () => AccountRegistration[];
+  /**
+   * Fired after a block's account registrations have been applied locally.
+   * Used to drain the proposer's queue. Every node calls this, including ones
+   * that never queued the entries, so implementations must be idempotent.
+   */
+  onAccountRegistrationsApplied?: (regs: AccountRegistration[]) => void;
+  /**
    * Fired when a committed block cannot be applied locally. Consensus has
    * already fail-stopped at the previous height by the time this runs, so an
    * implementation should treat it as "this node is out of the network until
@@ -230,6 +247,10 @@ export class BftBlockProducer {
   private readonly onValidatorChangesApplied:
     | ((changes: ValidatorChange[]) => void)
     | undefined;
+  private readonly pendingAccountRegistrations: (() => AccountRegistration[]) | undefined;
+  private readonly onAccountRegistrationsApplied:
+    | ((regs: AccountRegistration[]) => void)
+    | undefined;
   private incomingBlockHandler: ((data: unknown) => void) | null = null;
 
   constructor(config: BftBlockProducerConfig) {
@@ -240,6 +261,8 @@ export class BftBlockProducer {
     this.validatorSet = config.validatorSet;
     this.pendingValidatorChanges = config.pendingValidatorChanges;
     this.onValidatorChangesApplied = config.onValidatorChangesApplied;
+    this.pendingAccountRegistrations = config.pendingAccountRegistrations;
+    this.onAccountRegistrationsApplied = config.onAccountRegistrationsApplied;
 
     const latest = getLatestBlock(this.db);
     const initialHeight = (latest?.number ?? 0) + 1;
@@ -475,6 +498,18 @@ export class BftBlockProducer {
     const validatorChangesHash =
       validatorChanges.length > 0 ? computeValidatorChangesHash(validatorChanges) : null;
 
+    // Accounts created locally since the last block we proposed. Same shape as
+    // the validator-change queue: only our own queue feeds a block, but every
+    // node applies the result from the payload, so all nodes converge without
+    // reading anyone else's queue.
+    const accountRegistrations: AccountRegistration[] = this.pendingAccountRegistrations
+      ? this.pendingAccountRegistrations()
+      : [];
+    const accountRegistrationsHash =
+      accountRegistrations.length > 0
+        ? computeAccountRegistrationsHash(accountRegistrations)
+        : null;
+
     const hash = computeBlockHash(
       height,
       previousHash,
@@ -483,6 +518,7 @@ export class BftBlockProducer {
       this.day,
       prevCommitCertHash,
       validatorChangesHash,
+      accountRegistrationsHash,
     );
 
     // Session 53 fix: include parentCertificate + parentValidatorSnapshot
@@ -529,6 +565,7 @@ export class BftBlockProducer {
       // caught one block later than a post-state root would catch it, which
       // costs nothing when the alternative was never catching it at all.
       parentStateRoot: computeStateRoot(this.db),
+      ...(accountRegistrations.length > 0 ? { accountRegistrations } : {}),
       ...(validatorChanges.length > 0 ? { validatorChanges } : {}),
       ...(parentCert ? { parentCertificate: parentCert } : {}),
       ...(parentSnapshot ? { parentValidatorSnapshot: parentSnapshot } : {}),
@@ -576,8 +613,18 @@ export class BftBlockProducer {
     // treats a throw here as fail-stop, halting consensus at this height
     // instead of advancing past a block it could not apply. See
     // BftDriverConfig.onApplyFailed for why halting beats both alternatives.
+    const accountRegistrations: AccountRegistration[] = payload.accountRegistrations ?? [];
+
     try {
       runTransaction(this.db, () => {
+        // Registrations FIRST. An account registered in this block starts
+        // empty, so within this block it can only receive — and receiving
+        // requires its row to exist before the transaction replays. Applying
+        // these after the transactions would make a block that legitimately
+        // onboards someone and pays them in one go fail on every node.
+        for (const reg of accountRegistrations) {
+          applyAccountRegistration(this.db, reg, block.timestamp);
+        }
         for (const wireTx of txs) {
           replayTransaction(
             this.db,
@@ -655,6 +702,17 @@ export class BftBlockProducer {
         this.onValidatorChangesApplied(validatorChanges);
       } catch (err) {
         // Telemetry only; consensus continues regardless.
+        void err;
+      }
+    }
+
+    // Same for account registrations: drain the proposer's queue now the
+    // entries are on-chain. Queue bookkeeping, never consensus-critical, so a
+    // failure here must not disturb the chain.
+    if (accountRegistrations.length > 0 && this.onAccountRegistrationsApplied) {
+      try {
+        this.onAccountRegistrationsApplied(accountRegistrations);
+      } catch (err) {
         void err;
       }
     }

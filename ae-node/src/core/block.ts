@@ -1,4 +1,4 @@
-// Block business logic.
+﻿// Block business logic.
 //
 // All persistence goes through IBlockStore (./stores/IBlockStore.ts). The
 // functions exported here keep their original DatabaseSync-taking signatures
@@ -20,7 +20,7 @@ export function blockStore(db: DatabaseSync): IBlockStore {
   return new SqliteBlockStore(db);
 }
 
-// ─── Hashing primitives (pure, no storage) ──────────────────────────────
+// â”€â”€â”€ Hashing primitives (pure, no storage) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Merkle root over a block's transaction set.
@@ -29,7 +29,7 @@ export function blockStore(db: DatabaseSync): IBlockStore {
  * makes the merkleRoot a function of the SET of transactions, not the order
  * they happened to be inserted into the mempool. That matters for sync: a
  * follower can fetch txIds from storage in any order and still recompute
- * the same root. It also matches the AE protocol's actual semantics — every
+ * the same root. It also matches the AE protocol's actual semantics â€” every
  * transaction's state effect is applied at API-receipt time by
  * processTransaction, so the in-block ordering carries no execution meaning.
  *
@@ -67,14 +67,21 @@ export function computeMerkleRoot(txIds: string[]): string {
  *     (Session 39). Tampering with the parent cert breaks this hash.
  *
  *   - validatorChangesHash: hash of THIS block's validatorChanges
- *     (Session 52). Tampering with the changes list — swapping a
- *     register for a deregister, dropping an entry, reordering — breaks
+ *     (Session 52). Tampering with the changes list â€” swapping a
+ *     register for a deregister, dropping an entry, reordering â€” breaks
  *     this hash. Mirrors the cert-hash pattern.
  *
+ *   - accountRegistrationsHash: hash of THIS block's accountRegistrations
+ *     (schema v13). Same protection for the accounts joining in this
+ *     block: dropping a registration, or swapping in one whose id does
+ *     not match its public key, breaks the hash on every receiver.
+ *
  * For backward compatibility with AuthorityConsensus, genesis, and the
- * many blocks that carry no certs / no validator changes, both args
- * default to null. Empty-string concatenation produces an identical
- * hash to the no-arg form, so existing blocks need no migration.
+ * many blocks that carry no certs / no validator changes / no account
+ * registrations, all three args default to null. Empty-string
+ * concatenation produces an identical hash to the no-arg form, so
+ * existing blocks need no migration and keep verifying unchanged. New
+ * parts are always appended, never inserted, for exactly that reason.
  */
 export function computeBlockHash(
   number: number,
@@ -84,13 +91,17 @@ export function computeBlockHash(
   day: number,
   prevCommitCertHash: string | null = null,
   validatorChangesHash: string | null = null,
+  accountRegistrationsHash: string | null = null,
 ): string {
   const certPart = prevCommitCertHash ?? '';
   const changesPart = validatorChangesHash ?? '';
-  return sha256(`${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}`);
+  const registrationsPart = accountRegistrationsHash ?? '';
+  return sha256(
+    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}`,
+  );
 }
 
-// ─── Block construction (pure logic + store I/O) ────────────────────────
+// â”€â”€â”€ Block construction (pure logic + store I/O) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function createGenesisBlockWithStore(store: IBlockStore): Block {
   const genesis: Block = {
@@ -104,6 +115,7 @@ export function createGenesisBlockWithStore(store: IBlockStore): Block {
     rebaseEvent: null,
     prevCommitCertHash: null,
     validatorChanges: null,
+    accountRegistrations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,
@@ -144,6 +156,11 @@ export function createBlockWithStore(
     rebaseEvent,
     prevCommitCertHash,
     validatorChanges: null,
+    // The Authority-mode block builder never carries registrations; on-chain
+    // account registration is a BFT-path feature (BftBlockProducer drains the
+    // pending queue). Authority networks are single-node dev setups where the
+    // account already exists locally.
+    accountRegistrations: null,
   };
 
   store.insert(block, /* isGenesis */ false);
@@ -199,7 +216,7 @@ export function validateChainWithStore(store: IBlockStore): { valid: boolean; er
   return { valid: true };
 }
 
-// ─── Back-compat (db, ...) shims ────────────────────────────────────────
+// â”€â”€â”€ Back-compat (db, ...) shims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function createGenesisBlock(db: DatabaseSync): Block {
   return createGenesisBlockWithStore(blockStore(db));
@@ -229,7 +246,7 @@ export function createBlock(
     prevCommitCertHash,
   );
   // Distribute the block's fees per the WP economics (20% Tier 1, 80% Tier 2
-  // with a 60/40 lottery/baseline split). Idempotent — safe to re-call.
+  // with a 60/40 lottery/baseline split). Idempotent â€” safe to re-call.
   commitBlockSideEffects(db, block.number, block.hash);
   return block;
 }
@@ -242,7 +259,7 @@ export function validateChain(db: DatabaseSync): { valid: boolean; error?: strin
   return validateChainWithStore(blockStore(db));
 }
 
-// ─── Chain pruning (WP v2 §7: 7-year rolling window) ─────────────────
+// â”€â”€â”€ Chain pruning (WP v2 Â§7: 7-year rolling window) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface PruneResult {
   prunedBlocks: number;

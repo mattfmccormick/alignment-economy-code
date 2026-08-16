@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -111,7 +111,18 @@ const TABLES = `
     -- that include register/deregister activity. Persisted so a node
     -- syncing past blocks can re-apply the changes and arrive at the
     -- correct CURRENT validator set.
-    validator_changes TEXT
+    validator_changes TEXT,
+    -- Accounts that joined the ledger in THIS block (schema v13). JSON-
+    -- encoded AccountRegistration[]. NULL when none rode the block.
+    --
+    -- Before this existed, accounts were a purely local INSERT with no
+    -- gossip and no transaction type, so an account lived only on the node
+    -- whose API created it, and every other validator threw
+    -- "Replay: sender account not found" on the first block referencing it.
+    -- Gossip fixed the live case; persisting registrations in the block
+    -- fixes the offline one, because a node syncing months later replays
+    -- them from the chain like any other state change.
+    account_registrations TEXT
   );
 
   CREATE TABLE IF NOT EXISTS rebase_events (
@@ -465,6 +476,18 @@ const TABLES = `
     change_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+
+  -- Accounts created locally via POST /accounts and awaiting inclusion in a
+  -- block this node proposes (schema v13). Same shape and lifecycle as
+  -- pending_validator_changes: only the proposer's own queue feeds a block,
+  -- but every node applies the result from the block payload, so all nodes
+  -- converge without anyone reading anyone else's queue.
+  CREATE TABLE IF NOT EXISTS pending_account_registrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL UNIQUE,
+    registration_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `;
 
 const INDEXES = `
@@ -501,6 +524,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_human_tags_recipient ON human_tags(recipient_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_validators_active ON validators(is_active);
   CREATE INDEX IF NOT EXISTS idx_pending_changes_created ON pending_validator_changes(created_at);
+  CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created ON pending_account_registrations(created_at);
 `;
 
 export function initializeSchema(db: DatabaseSync): void {
@@ -661,5 +685,29 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
     if (!cols.some((c) => c.name === 'counterpart_id')) {
       db.exec('ALTER TABLE court_cases ADD COLUMN counterpart_id TEXT');
     }
+  }
+  if (from < 13) {
+    // On-chain account registrations. Two parts: a column on blocks holding
+    // the accounts that joined in that block, and the proposer's pending
+    // queue feeding it.
+    //
+    // Existing block rows get NULL, which is the correct historical value —
+    // those blocks were hashed without a registrations hash, and null
+    // produces the same digest as the previous form via empty-string concat,
+    // so every already-committed block still verifies unchanged.
+    const cols = db.prepare('PRAGMA table_info(blocks)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'account_registrations')) {
+      db.exec('ALTER TABLE blocks ADD COLUMN account_registrations TEXT');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_account_registrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT NOT NULL UNIQUE,
+        registration_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
+        ON pending_account_registrations(created_at);
+    `);
   }
 }

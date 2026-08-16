@@ -248,24 +248,71 @@ alongside the fixes above.
   empty mnemonic wrote a record `parseStoredWallet` cannot read back, locking
   them out right after a successful registration.
 
+### Fifth pass: account registrations go on-chain (schema v13)
+
+Gossip closed the live half of account replication. This closes the other half.
+
+A node that was offline when an account was created and later caught up by
+syncing had no way to learn about it — `ChainSync` ships blocks and certs only,
+so an account that never rode a block was invisible to it forever, and the
+first block referencing that account fail-stopped it.
+
+Registrations now ride the block exactly the way `validatorChanges` do, which
+is the pattern the codebase already had:
+
+- `core/account-registration.ts`: the `AccountRegistration` shape (accountId,
+  publicKey, type, joinedDay — deliberately no balance, no percentHuman, and no
+  createdAt, which comes from the block timestamp so every node writes the same
+  value), the canonical hash, the apply function, and the proposer's queue.
+- `computeAccountRegistrationsHash` is folded into `computeBlockHash`, so
+  dropping an entry or substituting one whose id does not match its public key
+  breaks hash verification on every receiver. `block-validator.ts` re-derives
+  it from the payload rather than trusting the producer's claim.
+- Schema v13 adds `blocks.account_registrations` and
+  `pending_account_registrations`, mirroring `pending_validator_changes`.
+- `BftBlockProducer` drains the queue into each candidate block and applies
+  registrations on commit; `runner.ts` does the same on the sync-replay path.
+- `POST /accounts` queues alongside the existing gossip, so a new account is
+  available to peers immediately AND lands on-chain in the next block.
+
+**Ordering:** registrations apply BEFORE the block's transactions, on both the
+live commit path and the sync path. A newly registered account starts empty, so
+within its own block it can only receive, and the credit needs somewhere to
+land. Get this backwards and a block that onboards someone and pays them in one
+go fails on every node.
+
+**Backward compatibility, which is the risky part and is tested explicitly:**
+`computeBlockHash` appends the new part and treats absent as `''`, so every
+block ever committed keeps exactly the digest it had. Verified end to end by
+constructing a genuine v12 database with real rows, rewinding the schema, and
+running the upgrade: column and queue table appear, `schema_version` goes to
+13, existing accounts keep their `percentHuman`, and the genesis hash is
+unchanged — which matters because the genesis hash is the network's identity in
+the P2P handshake. New hash parts must always be appended, never inserted.
+
+New suite: `tests/account-registration-onchain.test.ts` (11 tests).
+
 ### Open blockers (not fixed, ordered by severity)
 
-1. **Account replication does not cover the offline case.** Gossip reaches every
-   node that is online when an account is created, which is the live path. A
-   node that is down at that moment and later catches up by syncing blocks still
-   has no row for it, because `ChainSync` ships blocks and certs only. It
-   fail-stops cleanly rather than crashing, and the state root now names the
-   disagreement, but it is still a halt. Closing it means putting registrations
-   in the block the way `validatorChanges` already ride one.
-2. **The state root is advisory, not enforced.** It travels in the gossip
+1. **The state root is advisory, not enforced.** It travels in the gossip
    payload and receivers check it, but it is not folded into
    `computeBlockHash`, so nothing signs over it and a dishonest proposer could
    publish a root that does not match its own state. Detects accidents, not
    attacks. See `core/state-root.ts` for the follow-up.
-3. **Platform-server is not shipped with the app.** The explainer now points
+2. **Platform-server is not shipped with the app.** The explainer now points
    users at self-custody, which is a fix for the confusion, not for the missing
    service. Either bundle it in `extraResources` and spawn it from
    `main.cjs`, or drop the hosted track from onboarding until it is real.
+### Real multi-node check
+
+`node scripts/test-lan-multi-validator.mjs` was run after all of the above and
+passes: three real ae-node processes, peered over WebSocket, ran BFT to height
+20 and converged on byte-identical block hashes
+(`16ce6c9e56a805dc…` on all three). That exercises the fail-stop, the pre-vote
+dry run, the state-root check and the on-chain registration path together, in
+separate processes, rather than in-process fixtures. Worth re-running after any
+further consensus change — it is ~80 seconds and it is the only check that
+covers the seams between nodes.
 
 ### Note on the operator docs
 

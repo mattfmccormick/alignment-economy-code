@@ -7,6 +7,7 @@ import {
   type PeerAccountRegistration,
 } from '../../core/account.js';
 import { deriveAccountId } from '../../core/crypto.js';
+import { queueAccountRegistration } from '../../core/account-registration.js';
 import { transactionStore } from '../../core/transaction.js';
 import { getCycleState } from '../../core/day-cycle.js';
 import { validateBody } from '../middleware/validate.js';
@@ -105,6 +106,26 @@ export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroa
           });
         } catch {
           // Intentionally swallowed. See above.
+        }
+
+        // Gossip reaches peers that are online right now. Queueing the
+        // registration for the next block we propose is what reaches a peer
+        // that is offline at this moment and catches up later by syncing:
+        // ChainSync ships blocks and certs only, so an account that never
+        // rode a block is invisible to it forever. The presence of a
+        // broadcaster is the BFT-mode signal — in Authority/single-node mode
+        // there is nobody to tell and no queue to drain.
+        try {
+          queueAccountRegistration(db, {
+            accountId: result.account.id,
+            publicKey: result.account.publicKey,
+            type: result.account.type,
+            joinedDay: result.account.joinedDay,
+          });
+        } catch {
+          // Already queued, or queued by a concurrent request. The account is
+          // committed locally and already gossiped either way, so this must
+          // not fail the user's request.
         }
       }
 
