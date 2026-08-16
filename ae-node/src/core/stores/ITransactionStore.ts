@@ -65,8 +65,31 @@ export interface TransactionLogRow {
 export interface ITransactionStore {
   // ── transactions table ─────────────────────────────────────────
 
-  /** Persist a signed transaction. Idempotent on id (PK). */
-  insertTransaction(tx: Omit<TransactionRow, 'blockNumber'>): void;
+  /**
+   * Persist a signed transaction. Idempotent on id (PK).
+   *
+   * `applied` records whether the balance effect has already been made.
+   * Receipt-time execution passes true (state moved as part of accepting it);
+   * commit-time execution passes false and the row stays inert until its block
+   * commits. Defaults to true so existing callers keep their behaviour.
+   */
+  insertTransaction(tx: Omit<TransactionRow, 'blockNumber'>, applied?: boolean): void;
+
+  /**
+   * Has this transaction's balance effect been applied? Distinct from
+   * hasTransaction: under commit-time execution a row is known long before it
+   * is applied.
+   */
+  isApplied(id: string): boolean;
+
+  /** Mark a transaction's balance effect as done. */
+  markApplied(id: string): void;
+
+  /**
+   * Sum of still-unapplied outgoing amounts for a sender in one point type,
+   * so a pending spend cannot be authorised twice against the same balance.
+   */
+  pendingOutgoingTotal(from: string, pointType: string): bigint;
 
   /** Look up a single transaction by id. */
   findTransactionById(id: string): TransactionRow | null;

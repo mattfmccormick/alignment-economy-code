@@ -287,6 +287,7 @@ export class AENodeRunner {
     this.apiServer = startServer(this.db, this.config.apiPort, {
       txBroadcaster,
       accountBroadcaster,
+      executionMode: this.config.executionMode,
     });
     logger.info('api', `API server listening on ${this.config.apiHost}:${this.config.apiPort}`);
   }
@@ -319,6 +320,7 @@ export class AENodeRunner {
       maxPeers: this.config.maxPeers,
       identity: this.nodeIdentity,
       consensusMode: this.config.consensusMode,
+      executionMode: this.config.executionMode,
       bftValidatorSet: this.bftValidatorSet ?? undefined,
       bftLocalAccountId: this.config.bftLocalAccountId,
     });
@@ -624,6 +626,21 @@ export class AENodeRunner {
       // is what lets a node that was offline at the time learn about them by
       // syncing, instead of fail-stopping on the first block that references
       // an account it has never heard of.
+      // Under commit-time execution the balance moves when the block commits,
+      // not when the API accepted the transaction. The API-time
+      // balance:updated event therefore fires before anything has moved and
+      // shows the user their old number. This is the moment that is actually
+      // true, so re-emit here for both parties.
+      onTransactionsApplied: (txs) => {
+        for (const tx of txs) {
+          for (const [accountId, reason] of [
+            [tx.from, 'transaction:sent'],
+            [tx.to, 'transaction:received'],
+          ] as const) {
+            eventBus.emit('balance:updated', { accountId, reason, transactionId: tx.id });
+          }
+        }
+      },
       pendingAccountRegistrations: () => drainAccountRegistrations(this.db),
       onAccountRegistrationsApplied: (regs) => {
         const removed = removeAppliedAccountRegistrations(this.db, regs);

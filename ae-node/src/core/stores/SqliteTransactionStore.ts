@@ -35,11 +35,11 @@ export class SqliteTransactionStore implements ITransactionStore {
 
   // ── transactions table ──────────────────────────────────────────
 
-  insertTransaction(tx: Omit<TransactionRow, 'blockNumber'>): void {
+  insertTransaction(tx: Omit<TransactionRow, 'blockNumber'>, applied: boolean = true): void {
     this.db
       .prepare(
-        `INSERT INTO transactions (id, "from", "to", amount, fee, net_amount, point_type, is_in_person, recipient_is_human, receiver_signature, memo, signature, timestamp, block_number)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO transactions (id, "from", "to", amount, fee, net_amount, point_type, is_in_person, recipient_is_human, receiver_signature, memo, signature, timestamp, block_number, applied)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
       )
       .run(
         tx.id,
@@ -55,7 +55,47 @@ export class SqliteTransactionStore implements ITransactionStore {
         tx.memo,
         tx.signature,
         tx.timestamp,
+        applied ? 1 : 0,
       );
+  }
+
+  /**
+   * Has this transaction's balance effect been applied?
+   *
+   * Deliberately distinct from hasTransaction, which only asks whether the row
+   * exists. Under commit-time execution a row exists from the moment the
+   * transaction is accepted but moves no balances until its block commits, so
+   * "known" and "applied" become different questions — and replayTransaction
+   * has to ask the second one or it will skip work it still needs to do.
+   */
+  isApplied(id: string): boolean {
+    const row = this.db
+      .prepare('SELECT applied FROM transactions WHERE id = ? LIMIT 1')
+      .get(id) as { applied: number } | undefined;
+    return row?.applied === 1;
+  }
+
+  markApplied(id: string): void {
+    this.db.prepare('UPDATE transactions SET applied = 1 WHERE id = ?').run(id);
+  }
+
+  /**
+   * Total still-unapplied outgoing amount for a sender in one point type.
+   *
+   * Under commit-time execution a pending transaction has not touched the
+   * balance yet, so validating a new one against the raw balance would happily
+   * accept the same points twice. Receipt-time execution got this for free by
+   * mutating immediately; deferring means the check has to net off what is
+   * already in flight.
+   */
+  pendingOutgoingTotal(from: string, pointType: string): bigint {
+    const rows = this.db
+      .prepare(
+        `SELECT amount FROM transactions
+          WHERE applied = 0 AND "from" = ? AND point_type = ?`,
+      )
+      .all(from, pointType) as Array<{ amount: string }>;
+    return rows.reduce((sum, r) => sum + BigInt(r.amount), 0n);
   }
 
   findTransactionById(id: string): TransactionRow | null {

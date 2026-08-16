@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -52,6 +52,17 @@ const TABLES = `
     signature TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
     block_number INTEGER,
+    -- Has this transaction's effect on balances been applied? (schema v14)
+    --
+    -- Under receipt-time execution (the historical default) every accepted
+    -- transaction moves balances the moment the API or gossip sees it, so
+    -- every row is applied=1 and this column is inert.
+    --
+    -- Under commit-time execution the row is written applied=0 and no balance
+    -- moves until the block carrying it commits. That is what makes state a
+    -- function of the chain rather than of message arrival order — see
+    -- AE_EXECUTION_MODE in node/config.ts for why that matters.
+    applied INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY ("from") REFERENCES accounts(id),
     FOREIGN KEY ("to") REFERENCES accounts(id)
   );
@@ -709,5 +720,21 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
     `);
+  }
+  if (from < 14) {
+    // transactions.applied, for commit-time execution.
+    //
+    // DEFAULT 1 is the correct historical value: every existing row was
+    // applied to balances the moment it was accepted, because receipt-time
+    // execution was the only mode. Defaulting to 0 would make the node think
+    // the entire chain's history was unapplied and re-apply it on the next
+    // block, doubling every balance.
+    const cols = db.prepare('PRAGMA table_info(transactions)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'applied')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN applied INTEGER NOT NULL DEFAULT 1');
+    }
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_transactions_pending ON transactions(applied, "from")',
+    );
   }
 }

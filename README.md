@@ -111,6 +111,23 @@ with matching hashes." Set `LAN_TEST_VERBOSE=1` to see all node logs.
 |---|---|---|---|
 | `AE_ADMIN_SECRET` | `ae-node` | Optional | If set, exposes `POST /admin/*` endpoints (e.g. `advance-day` for testing) gated behind an `X-Admin-Secret` header that must match this value. If unset, all admin endpoints return `403 ADMIN_DISABLED`. **Set this in production only on operator-run nodes you trust to advance the day cycle manually.** Use a long random value (`openssl rand -hex 32`). |
 | `VITE_WS_URL` | `ae-app`, `ae-miner` | Optional | Override the WebSocket URL the client connects to. Defaults to `ws://localhost:3000/ws` for Electron / `file://` builds, otherwise the same host as the page. |
+| `AE_EXECUTION_MODE` | `ae-node` | Optional | `commit` (default) or `receipt`. When a transaction's effect on balances happens. **Must be identical on every node of a network.** See below. |
+
+### Execution mode
+
+`commit` (the default) applies a transaction's balance effect when the block
+carrying it commits. `receipt` applies it the moment the API or gossip accepts
+it, which is the legacy behaviour and is kept only for comparison.
+
+`receipt` has a double-spend vector. Submit two conflicting spends to two
+different validators at the same moment and each accepts the one it saw first,
+because each is individually valid against the state that node holds. The two
+nodes then disagree about the sender's balance, and the first block containing
+both is unappliable on both of them. State ends up a function of message
+arrival order rather than of the chain.
+
+Mixing modes across a network is worse than either: half the validators will
+have applied a transaction the other half have not.
 
 ### Admin endpoint usage
 

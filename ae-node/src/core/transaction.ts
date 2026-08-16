@@ -131,6 +131,12 @@ function applyTransactionInternal(
     netAmount: bigint;
     burnedUnverified: bigint;
     senderPercentHuman: number;
+    /**
+     * The transaction row is already on disk (accepted earlier, unapplied)
+     * and only its balance effect is being made now. Inserting again would
+     * violate the primary key.
+     */
+    skipInsert?: boolean;
   },
 ): void {
   const txStore = transactionStore(db);
@@ -141,21 +147,23 @@ function applyTransactionInternal(
     addToFeePool(db, opts.fee);
     accountStore(db).setLastActivity(opts.from, opts.timestamp);
 
-    txStore.insertTransaction({
-      id: opts.txId,
-      from: opts.from,
-      to: opts.to,
-      amount: opts.amount.toString(),
-      fee: opts.fee.toString(),
-      netAmount: opts.netAmount.toString(),
-      pointType: opts.pointType,
-      isInPerson: opts.isInPerson,
-      recipientIsHuman: opts.recipientIsHuman,
-      memo: opts.memo,
-      signature: opts.signature,
-      receiverSignature: opts.receiverSignature,
-      timestamp: opts.timestamp,
-    });
+    if (!opts.skipInsert) {
+      txStore.insertTransaction({
+        id: opts.txId,
+        from: opts.from,
+        to: opts.to,
+        amount: opts.amount.toString(),
+        fee: opts.fee.toString(),
+        netAmount: opts.netAmount.toString(),
+        pointType: opts.pointType,
+        isInPerson: opts.isInPerson,
+        recipientIsHuman: opts.recipientIsHuman,
+        memo: opts.memo,
+        signature: opts.signature,
+        receiverSignature: opts.receiverSignature,
+        timestamp: opts.timestamp,
+      });
+    }
 
     if (opts.recipientIsHuman) {
       const credit = 2.5 * (opts.senderPercentHuman / 100);
@@ -208,14 +216,83 @@ export interface ReplayInput {
   timestamp: number;
 }
 
+/**
+ * Record a gossiped transaction as pending, without applying it.
+ *
+ * The commit-time counterpart of the gossip path. Under receipt-time execution
+ * a peer applied a gossiped transaction on the spot; here it is only filed, so
+ * that whichever validator becomes proposer can include it in a block and every
+ * node applies it in the same order when that block commits.
+ *
+ * Signature and account existence are verified now rather than at apply time,
+ * so garbage never reaches the pending set and cannot be proposed into a block
+ * that no honest node can apply. The balance is deliberately NOT checked: at
+ * this point it is a candidate, and whether it fits is a question about the
+ * ordering that does not exist yet. Block building answers that.
+ *
+ * Idempotent — gossip is at-least-once and relayed.
+ */
+export function acceptPendingTransaction(db: DatabaseSync, input: ReplayInput): void {
+  const txStore = transactionStore(db);
+  if (txStore.hasTransaction(input.id)) return;
+
+  const sender = getAccount(db, input.from);
+  if (!sender) throw new Error(`Pending: sender account not found: ${input.from}`);
+  const recipient = getAccount(db, input.to);
+  if (!recipient) throw new Error(`Pending: recipient account not found: ${input.to}`);
+
+  const payload = {
+    from: input.from,
+    to: input.to,
+    amount: input.amount.toString(),
+    pointType: input.pointType,
+    isInPerson: input.isInPerson,
+    recipientIsHuman: input.recipientIsHuman,
+    memo: input.memo,
+  };
+  if (!verifyPayload(payload, input.timestamp, input.signature, sender.publicKey)) {
+    throw new Error(`Pending: invalid signature on tx ${input.id}`);
+  }
+  if (input.isInPerson) {
+    if (!input.receiverSignature) {
+      throw new Error(`Pending: in-person tx ${input.id} missing receiver countersignature`);
+    }
+    if (!verifyPayload(payload, input.timestamp, input.receiverSignature, recipient.publicKey)) {
+      throw new Error(`Pending: invalid receiver countersignature on tx ${input.id}`);
+    }
+  }
+  if (input.amount - input.fee - input.netAmount < 0n) {
+    throw new Error(`Pending: malformed tx ${input.id}: fee + netAmount > amount`);
+  }
+
+  txStore.insertTransaction(
+    {
+      id: input.id,
+      from: input.from,
+      to: input.to,
+      amount: input.amount.toString(),
+      fee: input.fee.toString(),
+      netAmount: input.netAmount.toString(),
+      pointType: input.pointType,
+      isInPerson: input.isInPerson,
+      recipientIsHuman: input.recipientIsHuman,
+      memo: input.memo,
+      signature: input.signature,
+      receiverSignature: input.receiverSignature ?? null,
+      timestamp: input.timestamp,
+    },
+    /* applied */ false,
+  );
+}
+
 export function replayTransaction(
   db: DatabaseSync,
   input: ReplayInput,
   blockNumber: number | null = null,
 ): void {
   const txStore = transactionStore(db);
-  if (txStore.hasTransaction(input.id)) {
-    // Already applied locally. Three cases:
+  if (txStore.isApplied(input.id)) {
+    // Balance effect already made. Three cases:
     //   - block-replay arriving after gossip already applied state →
     //     link to the block so historical sync stays correct
     //   - gossip arriving twice (echo, retry, multi-path) → no-op
@@ -226,6 +303,12 @@ export function replayTransaction(
     }
     return;
   }
+
+  // Gate on `applied`, not on row existence. Under commit-time execution the
+  // row is written the moment the transaction is accepted and sits there
+  // unapplied until its block commits, so an existence check would skip the
+  // very work this call exists to do and the money would never move.
+  const alreadyKnown = txStore.hasTransaction(input.id);
 
   const sender = getAccount(db, input.from);
   if (!sender) throw new Error(`Replay: sender account not found: ${input.from}`);
@@ -289,13 +372,43 @@ export function replayTransaction(
     netAmount: input.netAmount,
     burnedUnverified,
     senderPercentHuman: sender.percentHuman,
+    // The row may already be on disk in an unapplied state (commit-time
+    // execution), in which case insert would violate the primary key.
+    skipInsert: alreadyKnown,
   });
+  if (alreadyKnown) {
+    txStore.markApplied(input.id);
+    if (blockNumber !== null) txStore.linkTransactionsToBlock(blockNumber, [input.id]);
+  }
 }
 
+/**
+ * Validate and accept a transaction.
+ *
+ * Two execution models, selected by `opts.defer`:
+ *
+ * RECEIPT-TIME (defer: false, the historical behaviour). Balances move here,
+ * the instant the transaction is accepted. The block that later contains it
+ * merely records that it happened.
+ *
+ * COMMIT-TIME (defer: true). The transaction is validated and persisted
+ * unapplied; no balance moves until its block commits.
+ *
+ * Why the second mode exists: receipt-time execution makes state a function of
+ * message ARRIVAL ORDER rather than of the chain, which is a double-spend
+ * vector. Submit two conflicting spends to two different validators at the same
+ * moment and each accepts the one it saw first — both are individually valid
+ * against the state that node held. Now the two nodes hold different balances,
+ * and the first block containing both is unappliable on both of them. Ordering
+ * is exactly what a blockchain is for; doing the work before the ordering
+ * exists gives it away.
+ */
 export function processTransaction(
   db: DatabaseSync,
   input: TransactionInput,
+  opts: { defer?: boolean } = {},
 ): TransactionResult {
+  const defer = opts.defer === true;
   const sender = getAccount(db, input.from);
   if (!sender) throw new NotFoundError(`Sender account not found: ${input.from}`);
   if (!sender.isActive) throw new ValidationError(`Sender account is inactive: ${input.from}`, 'ACCOUNT_INACTIVE');
@@ -349,11 +462,25 @@ export function processTransaction(
     if (!validCounter) throw new ValidationError('Invalid receiver countersignature on in-person transaction', 'INVALID_COUNTERSIGNATURE');
   }
 
-  // Check balance
+  // Check balance.
+  //
+  // Under commit-time execution, previously accepted transactions have not
+  // moved the balance yet, so the raw figure overstates what is actually
+  // spendable. Netting off what is already in flight is what stops the same
+  // points being promised twice — receipt-time execution got that for free by
+  // mutating on the spot.
   const senderBalance = getBalanceForType(sender, input.pointType);
-  if (senderBalance < input.amount) {
+  const inFlight = defer
+    ? transactionStore(db).pendingOutgoingTotal(input.from, input.pointType)
+    : 0n;
+  const spendable = senderBalance - inFlight;
+  if (spendable < input.amount) {
     throw new InsufficientBalanceError(
-      `Insufficient ${input.pointType} balance: has ${senderBalance}, needs ${input.amount}`,
+      inFlight > 0n
+        ? `Insufficient ${input.pointType} balance: has ${senderBalance}, ` +
+          `${inFlight} already pending in unconfirmed transactions, ` +
+          `${spendable} spendable, needs ${input.amount}`
+        : `Insufficient ${input.pointType} balance: has ${senderBalance}, needs ${input.amount}`,
     );
   }
 
@@ -378,29 +505,58 @@ export function processTransaction(
   const recipientEarnedBefore = recipient.earnedBalance;
   const newRecipientEarned = recipientEarnedBefore + netAmount;
 
-  applyTransactionInternal(db, {
-    txId,
-    from: input.from,
-    to: input.to,
-    amount: input.amount,
-    pointType: input.pointType,
-    isInPerson: input.isInPerson ?? false,
-    recipientIsHuman: input.recipientIsHuman ?? false,
-    memo: input.memo ?? '',
-    signature: input.signature,
-    receiverSignature: input.isInPerson ? (input.receiverSignature ?? null) : null,
-    timestamp: now,
-    blockNumber: null,
-    senderBalance,
-    newSenderBalance,
-    senderField,
-    recipientEarnedBefore,
-    newRecipientEarned,
-    fee,
-    netAmount,
-    burnedUnverified,
-    senderPercentHuman: sender.percentHuman,
-  });
+  if (defer) {
+    // Persist only. No balance moves, no fee-pool credit, no audit log — all
+    // of that happens when the block carrying this transaction commits, on
+    // every node, in the order the chain fixed.
+    //
+    // The fee/netAmount/burn computed above still ride the row and the wire,
+    // because replayTransaction applies them verbatim so that every node
+    // reaches identical numbers rather than each recomputing against its own
+    // view of the sender's percentHuman.
+    transactionStore(db).insertTransaction(
+      {
+        id: txId,
+        from: input.from,
+        to: input.to,
+        amount: input.amount.toString(),
+        fee: fee.toString(),
+        netAmount: netAmount.toString(),
+        pointType: input.pointType,
+        isInPerson: input.isInPerson ?? false,
+        recipientIsHuman: input.recipientIsHuman ?? false,
+        memo: input.memo ?? '',
+        signature: input.signature,
+        receiverSignature: input.isInPerson ? (input.receiverSignature ?? null) : null,
+        timestamp: now,
+      },
+      /* applied */ false,
+    );
+  } else {
+    applyTransactionInternal(db, {
+      txId,
+      from: input.from,
+      to: input.to,
+      amount: input.amount,
+      pointType: input.pointType,
+      isInPerson: input.isInPerson ?? false,
+      recipientIsHuman: input.recipientIsHuman ?? false,
+      memo: input.memo ?? '',
+      signature: input.signature,
+      receiverSignature: input.isInPerson ? (input.receiverSignature ?? null) : null,
+      timestamp: now,
+      blockNumber: null,
+      senderBalance,
+      newSenderBalance,
+      senderField,
+      recipientEarnedBefore,
+      newRecipientEarned,
+      fee,
+      netAmount,
+      burnedUnverified,
+      senderPercentHuman: sender.percentHuman,
+    });
+  }
 
   const transaction: Transaction = {
     id: txId,

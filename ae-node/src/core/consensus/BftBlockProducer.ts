@@ -72,6 +72,72 @@ const DRY_RUN_ROLLBACK = Symbol('bft.dryRunRollback');
  * caller satisfies this: validation runs from message handling, not from within
  * an apply.
  */
+/**
+ * Filter a candidate transaction set down to the ones that actually apply, in
+ * order, against current state — then roll the rehearsal back.
+ *
+ * Under commit-time execution nothing has moved balances yet, so the pending
+ * set can legitimately contain transactions that conflict with each other: the
+ * same account spending the same points twice, submitted to two validators at
+ * once. That is not misbehaviour, it is the ordering question the chain exists
+ * to answer.
+ *
+ * A proposer must answer it here rather than ship both. A block containing two
+ * conflicting spends is unappliable on every node including its author, so it
+ * would either be voted down or, worse, commit and fail-stop the network. First
+ * in deterministic order wins; the loser stays pending and gets rejected on its
+ * own merits next round.
+ *
+ * Iteration order comes from findUnblockedTransactions (ORDER BY id), so every
+ * proposer would make the same selection from the same pending set.
+ */
+export function selectApplicableTransactions(
+  db: DatabaseSync,
+  txs: WireTransaction[],
+  height: number,
+): WireTransaction[] {
+  if (txs.length === 0) return [];
+  const kept: WireTransaction[] = [];
+
+  try {
+    runTransaction(db, () => {
+      for (const wireTx of txs) {
+        try {
+          replayTransaction(
+            db,
+            {
+              id: wireTx.id,
+              from: wireTx.from,
+              to: wireTx.to,
+              amount: BigInt(wireTx.amount),
+              fee: BigInt(wireTx.fee),
+              netAmount: BigInt(wireTx.netAmount),
+              pointType: wireTx.pointType,
+              isInPerson: wireTx.isInPerson,
+              recipientIsHuman: wireTx.recipientIsHuman ?? false,
+              memo: wireTx.memo,
+              signature: wireTx.signature,
+              receiverSignature: wireTx.receiverSignature ?? null,
+              timestamp: wireTx.timestamp,
+            },
+            height,
+          );
+          kept.push(wireTx);
+        } catch {
+          // Does not fit after its predecessors. Leave it pending; it is a
+          // candidate for a later block, or it is a double-spend that will
+          // never fit and will age out.
+        }
+      }
+      throw DRY_RUN_ROLLBACK;
+    });
+  } catch (err) {
+    if (err !== DRY_RUN_ROLLBACK) throw err;
+  }
+
+  return kept;
+}
+
 export function dryRunBlockTransactions(
   db: DatabaseSync,
   txs: WireTransaction[],
@@ -213,6 +279,15 @@ export interface BftBlockProducerConfig {
    */
   onAccountRegistrationsApplied?: (regs: AccountRegistration[]) => void;
   /**
+   * Fired after a block's transactions have been applied to balances.
+   *
+   * Under commit-time execution this is the moment money actually moves, so it
+   * is the only correct moment to tell a connected wallet its balance changed.
+   * The API-time event fires before anything has moved and would show the user
+   * their old balance.
+   */
+  onTransactionsApplied?: (txs: WireTransaction[]) => void;
+  /**
    * Fired when a committed block cannot be applied locally. Consensus has
    * already fail-stopped at the previous height by the time this runs, so an
    * implementation should treat it as "this node is out of the network until
@@ -251,6 +326,7 @@ export class BftBlockProducer {
   private readonly onAccountRegistrationsApplied:
     | ((regs: AccountRegistration[]) => void)
     | undefined;
+  private readonly onTransactionsApplied: ((txs: WireTransaction[]) => void) | undefined;
   private incomingBlockHandler: ((data: unknown) => void) | null = null;
 
   constructor(config: BftBlockProducerConfig) {
@@ -263,6 +339,7 @@ export class BftBlockProducer {
     this.onValidatorChangesApplied = config.onValidatorChangesApplied;
     this.pendingAccountRegistrations = config.pendingAccountRegistrations;
     this.onAccountRegistrationsApplied = config.onAccountRegistrationsApplied;
+    this.onTransactionsApplied = config.onTransactionsApplied;
 
     const latest = getLatestBlock(this.db);
     const initialHeight = (latest?.number ?? 0) + 1;
@@ -476,7 +553,16 @@ export class BftBlockProducer {
   private buildCandidateBlock(height: number): string {
     const latest = getLatestBlock(this.db);
     const previousHash = latest?.hash ?? '0'.repeat(64);
-    const txs = transactionStore(this.db).findUnblockedTransactions();
+    // Drop transactions that cannot apply after the ones ahead of them. Under
+    // commit-time execution the pending set can hold genuine conflicts (the
+    // same points promised twice, submitted to two validators at once), and
+    // shipping both would produce a block that no node — including this one —
+    // can apply.
+    const txs = selectApplicableTransactions(
+      this.db,
+      transactionStore(this.db).findUnblockedTransactions().map(txRowToWire),
+      height,
+    );
     const txIds = txs.map((t) => t.id);
     const merkleRoot = computeMerkleRoot(txIds);
     const timestamp = Math.floor(Date.now() / 1000);
@@ -566,7 +652,7 @@ export class BftBlockProducer {
       rebaseEvent: null,
       prevCommitCertHash,
       txIds,
-      transactions: txs.map(txRowToWire),
+      transactions: txs,
       // State as of the END of the parent block, i.e. before this block's
       // transactions apply. Deliberately the parent's rather than this
       // block's: every receiver already holds that state, so the check needs
@@ -722,6 +808,18 @@ export class BftBlockProducer {
     if (accountRegistrations.length > 0 && this.onAccountRegistrationsApplied) {
       try {
         this.onAccountRegistrationsApplied(accountRegistrations);
+      } catch (err) {
+        void err;
+      }
+    }
+
+    // Money has now actually moved. Under commit-time execution this is the
+    // only point at which that is true, so it is the only honest moment to
+    // tell a connected wallet to refresh. Notification only — never let it
+    // disturb consensus.
+    if (txs.length > 0 && this.onTransactionsApplied) {
+      try {
+        this.onTransactionsApplied(txs);
       } catch (err) {
         void err;
       }

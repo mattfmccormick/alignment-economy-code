@@ -36,6 +36,17 @@ export interface CreateAppOptions {
    * replay elsewhere. Omitted in single-node/Authority mode.
    */
   accountBroadcaster?: AccountBroadcaster;
+  /**
+   * When a submitted transaction's balance effect happens. See ExecutionMode
+   * in node/config.ts.
+   *
+   * Defaults to 'receipt' here, NOT to the node's 'commit' default, because
+   * createApp is used directly by a large body of tests that submit a
+   * transaction and immediately assert on settled balances. The runner passes
+   * the real configured mode, so production behaviour comes from config; this
+   * default only governs callers that construct the app by hand.
+   */
+  executionMode?: 'receipt' | 'commit';
 }
 
 export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
@@ -58,7 +69,10 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
 
   // Routes
   app.use('/api/v1/accounts', accountRoutes(db, opts.accountBroadcaster));
-  app.use('/api/v1/transactions', transactionRoutes(db, opts.txBroadcaster));
+  app.use(
+    '/api/v1/transactions',
+    transactionRoutes(db, opts.txBroadcaster, opts.executionMode ?? 'receipt'),
+  );
   app.use('/api/v1/network', networkRoutes(db));
   app.use('/api/v1', healthRoutes(db));
   app.use('/api/v1/admin', adminRoutes(db));

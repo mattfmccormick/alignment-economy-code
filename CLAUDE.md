@@ -331,6 +331,63 @@ New suite: `tests/account-registration-onchain.test.ts` (11 tests).
   explains why. Since re-registering the same public key is now an explicit
   no-op, a failure there is a real failure, and it is surfaced.
 
+### Seventh pass: commit-time execution (schema v14)
+
+The execution model was the root cause behind both the un-enforceable state
+root and a real double-spend vector. Fixed.
+
+**What was wrong.** A transaction moved balances the instant the API or gossip
+accepted it; the block that later contained it merely recorded that it had
+happened. `block.ts` said so outright: "every transaction's state effect is
+applied at API-receipt time by processTransaction, so the in-block ordering
+carries no execution meaning."
+
+That is a double-spend vector. Submit two conflicting spends to two different
+validators simultaneously: each is individually valid against the state that
+node holds, so each accepts the one it saw first. The two nodes now disagree
+about the sender's balance, and the first block containing both is unappliable
+on both of them. The chain fail-stops, having acknowledged spends totalling
+twice the balance. It also made a state root permanently unenforceable, because
+honest nodes legitimately differ whenever messages arrive in different orders.
+
+Ordering is the one thing a blockchain is for. Doing the work before the
+ordering exists gives it away.
+
+**What changed.**
+
+- `AE_EXECUTION_MODE` (`commit` | `receipt`), defaulting to `commit`. Must be
+  identical on every node of a network — mixed modes are the divergence this
+  removes.
+- Schema v14 adds `transactions.applied`, defaulting to 1 so every existing row
+  is correctly treated as already applied. Defaulting to 0 would make a node
+  re-apply its entire history and double every balance.
+- `processTransaction(db, input, { defer })` validates and persists unapplied;
+  no balance, fee-pool or audit-log effect until commit.
+- `replayTransaction` now gates on `applied` rather than on row existence,
+  because under commit-time execution a row is known long before it is applied.
+- New `acceptPendingTransaction` for the gossip path: verifies signature and
+  accounts, then files the transaction rather than applying it, so garbage can
+  never reach the pending set and be proposed into an unappliable block.
+- Balance validation nets off `pendingOutgoingTotal`, since pending spends have
+  not reduced the balance yet. Receipt-time got this free by mutating on the
+  spot.
+- `selectApplicableTransactions` filters the proposer's candidate set: pending
+  transactions can legitimately conflict, and a block carrying two of them is
+  unappliable on every node including its author. Deterministic (ORDER BY id),
+  so every proposer would choose identically, and rolled back so selection
+  leaves no trace.
+
+**Verification.** New suite `tests/commit-time-execution.test.ts` (9 tests)
+covers both modes, double-apply idempotency, the pending-aware balance check,
+proposer conflict filtering, and gossip filing without applying. And
+`scripts/test-lan-multi-validator.mjs` passes with commit mode as the default:
+three real processes to height 23 with identical hashes.
+
+**Still receipt-time:** vouching, court actions and verification-panel outcomes
+mutate balances and `percentHuman` at API time. Those must move to
+block-ordered application before the state root can be enforced — transactions
+were the largest piece, not the only one.
+
 ### Open blockers (not fixed, ordered by severity)
 
 1. **The state root is diagnostic, and must stay that way for now.** It travels

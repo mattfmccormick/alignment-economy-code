@@ -21,6 +21,12 @@ export type TxBroadcaster = (tx: WireTransaction) => void;
 export function transactionRoutes(
   db: DatabaseSync,
   txBroadcaster?: TxBroadcaster,
+  /**
+   * When to apply the balance effect. See ExecutionMode in node/config.ts.
+   * Defaults to deferring, matching the node default; tests that construct the
+   * app directly and assert on immediately-settled balances pass 'receipt'.
+   */
+  executionMode: 'receipt' | 'commit' = 'commit',
 ): Router {
   const router = Router();
 
@@ -71,7 +77,9 @@ export function transactionRoutes(
         receiverSignature: typeof receiverSignature === 'string' ? receiverSignature : undefined,
       };
 
-      const result = processTransaction(db, input);
+      const result = processTransaction(db, input, {
+        defer: executionMode === 'commit',
+      });
       const sender = getAccount(db, accountId)!;
 
       // Gossip the tx so every peer's findUnblockedTransactions sees it.

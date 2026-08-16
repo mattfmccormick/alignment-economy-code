@@ -1,10 +1,43 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+/**
+ * When a transaction's effect on balances happens.
+ *
+ * 'receipt' — the historical behaviour. Balances move the moment the API or
+ * gossip accepts a transaction; the block that later contains it merely records
+ * that it happened.
+ *
+ * 'commit' — balances move only when the block carrying the transaction
+ * commits.
+ *
+ * 'receipt' has a double-spend vector, and it is not subtle. Submit two
+ * conflicting spends to two different validators simultaneously and each
+ * accepts the one it saw first, because each is individually valid against the
+ * state that node held. The nodes now disagree about the sender's balance, and
+ * the first block containing both is unappliable on both of them. State becomes
+ * a function of message arrival order instead of the chain — which also means
+ * no state root can ever be enforced, because honest nodes legitimately differ.
+ *
+ * 'commit' fixes that: ordering is decided once, by consensus, and every node
+ * applies the same sequence.
+ *
+ * MUST BE IDENTICAL ON EVERY NODE OF A NETWORK. Mixing modes means half the
+ * validators have applied a transaction the other half have not, which is the
+ * divergence this is meant to remove.
+ */
+export type ExecutionMode = 'receipt' | 'commit';
+
 export interface AENodeConfig {
   // Node identity
   nodeId: string;
   authorityNodeId: string;
+
+  /**
+   * When transaction effects are applied. See ExecutionMode. Defaults to
+   * 'commit'; set AE_EXECUTION_MODE=receipt to get the legacy behaviour.
+   */
+  executionMode: ExecutionMode;
 
   // Network
   apiPort: number;
@@ -88,6 +121,7 @@ export interface AENodeConfig {
 const DEFAULT_CONFIG: AENodeConfig = {
   nodeId: '',
   authorityNodeId: '',
+  executionMode: 'commit',
   apiPort: 3000,
   p2pPort: 9000,
   apiHost: '0.0.0.0',
@@ -125,6 +159,10 @@ export function loadConfig(configPath?: string): AENodeConfig {
     ...DEFAULT_CONFIG,
     ...fileConfig,
     nodeId: process.env.AE_NODE_ID ?? fileConfig.nodeId ?? DEFAULT_CONFIG.nodeId,
+    executionMode:
+      (process.env.AE_EXECUTION_MODE as ExecutionMode | undefined) ??
+      fileConfig.executionMode ??
+      DEFAULT_CONFIG.executionMode,
     authorityNodeId: process.env.AE_AUTHORITY_NODE_ID ?? fileConfig.authorityNodeId ?? DEFAULT_CONFIG.authorityNodeId,
     apiPort: (parseInt(process.env.AE_API_PORT ?? '', 10) || 0) || (fileConfig.apiPort ?? DEFAULT_CONFIG.apiPort),
     p2pPort: (parseInt(process.env.AE_P2P_PORT ?? '', 10) || 0) || (fileConfig.p2pPort ?? DEFAULT_CONFIG.p2pPort),

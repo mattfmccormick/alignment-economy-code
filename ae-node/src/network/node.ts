@@ -13,7 +13,7 @@ import { getLatestBlock } from '../core/block.js';
 import { serializeBlock } from './messages.js';
 import type { NodeIdentity } from './node-identity.js';
 import type { WireTransaction } from './block-validator.js';
-import { replayTransaction } from '../core/transaction.js';
+import { replayTransaction, acceptPendingTransaction } from '../core/transaction.js';
 import {
   accountStore,
   applyPeerAccountRegistration,
@@ -43,6 +43,13 @@ export interface NodeConfig {
    * validator set through ChainSync so incoming blocks get cert checks.
    */
   consensusMode?: 'authority' | 'bft';
+  /**
+   * When a gossiped transaction's balance effect happens. See ExecutionMode in
+   * node/config.ts. 'commit' files it as pending for a future block; 'receipt'
+   * applies it immediately, which is the legacy behaviour and the source of the
+   * arrival-order double-spend hole. Defaults to 'commit'.
+   */
+  executionMode?: 'receipt' | 'commit';
   /** Required when consensusMode === 'bft'. Live view of the validator table. */
   bftValidatorSet?: IValidatorSet;
   /** Required when consensusMode === 'bft'. This node's accountId in the validator set. */
@@ -135,22 +142,36 @@ export class AENode {
     this.peerManager.on('transaction:received', (txData: unknown) => {
       const tx = txData as Partial<WireTransaction>;
       if (this.config.consensusMode === 'bft') {
+        const wire = {
+          id: String(tx.id ?? ''),
+          from: String(tx.from ?? ''),
+          to: String(tx.to ?? ''),
+          amount: BigInt(tx.amount ?? '0'),
+          fee: BigInt(tx.fee ?? '0'),
+          netAmount: BigInt(tx.netAmount ?? '0'),
+          pointType: (tx.pointType ?? 'earned') as WireTransaction['pointType'],
+          isInPerson: Boolean(tx.isInPerson),
+          recipientIsHuman: Boolean(tx.recipientIsHuman),
+          memo: String(tx.memo ?? ''),
+          signature: String(tx.signature ?? ''),
+          receiverSignature: tx.receiverSignature ?? null,
+          timestamp: Number(tx.timestamp ?? 0),
+        };
         try {
-          replayTransaction(this.db, {
-            id: String(tx.id ?? ''),
-            from: String(tx.from ?? ''),
-            to: String(tx.to ?? ''),
-            amount: BigInt(tx.amount ?? '0'),
-            fee: BigInt(tx.fee ?? '0'),
-            netAmount: BigInt(tx.netAmount ?? '0'),
-            pointType: (tx.pointType ?? 'earned') as WireTransaction['pointType'],
-            isInPerson: Boolean(tx.isInPerson),
-            recipientIsHuman: Boolean(tx.recipientIsHuman),
-            memo: String(tx.memo ?? ''),
-            signature: String(tx.signature ?? ''),
-            receiverSignature: tx.receiverSignature ?? null,
-            timestamp: Number(tx.timestamp ?? 0),
-          });
+          if ((this.config.executionMode ?? 'commit') === 'commit') {
+            // Record it, do not apply it. Under commit-time execution a
+            // gossiped transaction is a candidate for a future block, nothing
+            // more — its effect lands when that block commits, in the order
+            // consensus fixed, identically on every node.
+            //
+            // Applying here is what made state depend on gossip arrival order,
+            // and with it came the double-spend hole: two conflicting spends
+            // sent to two validators at once are each accepted by whichever
+            // node saw them first, and the nodes then disagree.
+            acceptPendingTransaction(this.db, wire);
+          } else {
+            replayTransaction(this.db, wire);
+          }
           this.peerManager.emit('transaction:applied', tx);
         } catch (err) {
           this.peerManager.emit('transaction:apply-failed', tx, err);
