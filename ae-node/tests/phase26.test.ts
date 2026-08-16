@@ -264,6 +264,105 @@ describe('Phase 26: BFT driver', () => {
     driver.stop();
   });
 
+  // ── fail-stop when a committed block cannot be applied ───────────────
+  //
+  // onCommit persists the block and replays its transactions. If that throws,
+  // this node holds a valid commit certificate for a block it cannot apply.
+  //
+  // Before August 2026 the throw was unguarded: it propagated out of onCommit,
+  // through executeActions and the transport, into the raw ws.on('message')
+  // listener in peer.ts, which has no catch. With no process-level handlers
+  // either, the node died with a bare stack trace. And in any path where
+  // something did swallow it, `currentHeight += 1` never ran, so the round loop
+  // stopped dead with no explanation.
+  //
+  // Correct behaviour is an explicit fail-stop: do not advance past a block we
+  // could not apply (blocks carry no state root, so divergence would be
+  // permanent and undetectable), do not let the throw escape, and hand the
+  // reason to the operator.
+  it('fail-stops without advancing or throwing when onCommit fails to apply', () => {
+    const transport = new FakeTransport();
+    const clock = new FakeClock();
+    const failures: Array<{ height: number; hash: string; err: unknown }> = [];
+    let commitAttempts = 0;
+
+    const driver = new BftDriver({
+      transport,
+      clock,
+      validatorSet: env.set,
+      initialHeight: 1,
+      proposerSeedFor,
+      localValidator: {
+        accountId: proposer.accountId,
+        publicKey: proposer.identity.publicKey,
+        secretKey: proposer.identity.secretKey,
+      },
+      blockProviderFor: () => HASH_A,
+      onCommit: () => {
+        commitAttempts++;
+        // The real-world shape of this: an account that exists only on the
+        // node that created it, because accounts are not replicated.
+        throw new Error('Replay: sender account not found: 1cedf4e24e7cf479');
+      },
+      onApplyFailed: (height, blockHash, err) =>
+        failures.push({ height, hash: blockHash, err }),
+    });
+    driver.start();
+
+    const others = env.validators
+      .filter((v) => v.accountId !== proposer.accountId)
+      .slice(0, 2);
+    for (const kind of ['prevote', 'precommit'] as const) {
+      for (const v of others) {
+        // If the throw escaped, this call is where it would surface — the
+        // vote push is the synchronous entry point the transport uses.
+        transport.pushVote(
+          signVote({
+            kind,
+            height: 1,
+            round: 0,
+            blockHash: HASH_A,
+            validatorAccountId: v.accountId,
+            validatorPublicKey: v.identity.publicKey,
+            validatorSecretKey: v.identity.secretKey,
+          }),
+        );
+      }
+    }
+
+    assert.equal(commitAttempts, 1, 'commit should have been attempted once');
+    assert.equal(failures.length, 1, 'onApplyFailed should fire exactly once');
+    assert.equal(failures[0].height, 1);
+    assert.equal(failures[0].hash, HASH_A);
+    assert.match((failures[0].err as Error).message, /sender account not found/);
+
+    // The critical assertion: height did NOT advance past the block we could
+    // not apply. Advancing here is what would silently fork this node.
+    assert.equal(driver.getCurrentHeight(), 1);
+
+    // And the driver stopped, so late votes are inert rather than resuming a
+    // node whose state is now in question.
+    const proposalsAtHalt = transport.proposalsOut.length;
+    for (const v of others) {
+      transport.pushVote(
+        signVote({
+          kind: 'precommit',
+          height: 1,
+          round: 0,
+          blockHash: HASH_A,
+          validatorAccountId: v.accountId,
+          validatorPublicKey: v.identity.publicKey,
+          validatorSecretKey: v.identity.secretKey,
+        }),
+      );
+    }
+    assert.equal(commitAttempts, 1, 'halted driver must not retry the commit');
+    assert.equal(transport.proposalsOut.length, proposalsAtHalt);
+    assert.equal(driver.getCurrentHeight(), 1);
+
+    driver.stop();
+  });
+
   // ── propose-timeout drives NIL prevote ──────────────────────────────
 
   it('propose-timeout makes a non-proposer broadcast NIL prevote', () => {

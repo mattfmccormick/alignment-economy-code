@@ -41,6 +41,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { runTransaction } from '../../db/connection.js';
+import { logger } from '../../node/logger.js';
 import {
   blockStore,
   computeBlockHash,
@@ -124,6 +125,14 @@ export interface BftBlockProducerConfig {
    */
   onValidatorChangesApplied?: (changes: ValidatorChange[]) => void;
   /**
+   * Fired when a committed block cannot be applied locally. Consensus has
+   * already fail-stopped at the previous height by the time this runs, so an
+   * implementation should treat it as "this node is out of the network until
+   * an operator intervenes" — surface it, don't try to continue. See
+   * BftDriverConfig.onApplyFailed.
+   */
+  onApplyFailed?: (height: number, blockHash: string, err: unknown) => void;
+  /**
    * Session 54: forwarded to BftRuntime. Delays first round start by
    * this many ms so peer mesh has time to establish before round 0
    * fires. See BftDriverConfig.startupDelayMs for full rationale.
@@ -180,6 +189,7 @@ export class BftBlockProducer {
       // for now. Future content invariants would extend this.
       validateBlockContent: (hash) => this.validateStashedBlock(hash),
       onCommit: (h, hash, cert) => this.onCommit(h, hash, cert),
+      onApplyFailed: config.onApplyFailed,
       timeouts: config.timeouts,
       clock: config.clock,
       startupDelayMs: config.startupDelayMs,
@@ -392,59 +402,80 @@ export class BftBlockProducer {
 
     const validatorChanges: ValidatorChange[] = payload.validatorChanges ?? [];
 
-    runTransaction(this.db, () => {
-      for (const wireTx of txs) {
-        replayTransaction(
-          this.db,
-          {
-            id: wireTx.id,
-            from: wireTx.from,
-            to: wireTx.to,
-            amount: BigInt(wireTx.amount),
-            fee: BigInt(wireTx.fee),
-            netAmount: BigInt(wireTx.netAmount),
-            pointType: wireTx.pointType,
-            isInPerson: wireTx.isInPerson,
-            recipientIsHuman: wireTx.recipientIsHuman ?? false,
-            memo: wireTx.memo,
-            signature: wireTx.signature,
-            receiverSignature: wireTx.receiverSignature ?? null,
-            timestamp: wireTx.timestamp,
-          },
-          height,
-        );
-      }
-      const store = blockStore(this.db);
-      store.insert(block, /* isGenesis */ false);
-      // Persist the commit cert alongside the block. ChainSync uses this
-      // when replying to a sync request to ship the cert as the next
-      // block's parentCertificate, enabling full cert-verified
-      // multi-block catch-up.
-      store.saveCommitCertificate(height, cert);
-      // Snapshot the validator set BEFORE applying this block's
-      // validator changes. cert(N) was signed by validators voting
-      // at the START of height N — i.e., the set as it was AT THE
-      // END OF HEIGHT N-1, before any changes block N introduces.
-      // A future verifier of cert(N) needs that pre-change set.
-      // (Order with insert() above is irrelevant — listAll() reads
-      // the validators table, not the blocks table.)
-      store.saveValidatorSnapshot(height, this.validatorSet.listAll());
-      // Session 48: apply validator changes AFTER tx replay AND after
-      // snapshotting. Tx replay first so any earned-balance moves are
-      // visible when registerValidator checks `stake <= earnedBalance`.
-      // Snapshot before so cert(N) verifies against the set that
-      // actually signed it. Then apply, mutating the set for height
-      // N+1 onward. block.timestamp as `now` keeps timestamps
-      // byte-identical across nodes.
-      for (const change of validatorChanges) {
-        applyValidatorChange(this.db, change, block.timestamp);
-      }
+    // Everything below is one DB transaction, so a throw anywhere rolls the
+    // whole block back — the node keeps a consistent view of height N-1 rather
+    // than a half-applied N. The catch re-throws after logging: BftDriver
+    // treats a throw here as fail-stop, halting consensus at this height
+    // instead of advancing past a block it could not apply. See
+    // BftDriverConfig.onApplyFailed for why halting beats both alternatives.
+    try {
+      runTransaction(this.db, () => {
+        for (const wireTx of txs) {
+          replayTransaction(
+            this.db,
+            {
+              id: wireTx.id,
+              from: wireTx.from,
+              to: wireTx.to,
+              amount: BigInt(wireTx.amount),
+              fee: BigInt(wireTx.fee),
+              netAmount: BigInt(wireTx.netAmount),
+              pointType: wireTx.pointType,
+              isInPerson: wireTx.isInPerson,
+              recipientIsHuman: wireTx.recipientIsHuman ?? false,
+              memo: wireTx.memo,
+              signature: wireTx.signature,
+              receiverSignature: wireTx.receiverSignature ?? null,
+              timestamp: wireTx.timestamp,
+            },
+            height,
+          );
+        }
+        const store = blockStore(this.db);
+        store.insert(block, /* isGenesis */ false);
+        // Persist the commit cert alongside the block. ChainSync uses this
+        // when replying to a sync request to ship the cert as the next
+        // block's parentCertificate, enabling full cert-verified
+        // multi-block catch-up.
+        store.saveCommitCertificate(height, cert);
+        // Snapshot the validator set BEFORE applying this block's
+        // validator changes. cert(N) was signed by validators voting
+        // at the START of height N — i.e., the set as it was AT THE
+        // END OF HEIGHT N-1, before any changes block N introduces.
+        // A future verifier of cert(N) needs that pre-change set.
+        // (Order with insert() above is irrelevant — listAll() reads
+        // the validators table, not the blocks table.)
+        store.saveValidatorSnapshot(height, this.validatorSet.listAll());
+        // Session 48: apply validator changes AFTER tx replay AND after
+        // snapshotting. Tx replay first so any earned-balance moves are
+        // visible when registerValidator checks `stake <= earnedBalance`.
+        // Snapshot before so cert(N) verifies against the set that
+        // actually signed it. Then apply, mutating the set for height
+        // N+1 onward. block.timestamp as `now` keeps timestamps
+        // byte-identical across nodes.
+        for (const change of validatorChanges) {
+          applyValidatorChange(this.db, change, block.timestamp);
+        }
 
-      // Distribute the block's fees per WP economics. Idempotent — every
-      // node (proposer + followers replaying via this same path) reaches
-      // the same balances.
-      commitBlockSideEffects(this.db, block.number, block.hash);
-    });
+        // Distribute the block's fees per WP economics. Idempotent — every
+        // node (proposer + followers replaying via this same path) reaches
+        // the same balances.
+        commitBlockSideEffects(this.db, block.number, block.hash);
+      });
+    } catch (err) {
+      logger.error(
+        'bft',
+        `FATAL: could not apply committed block ${height} (${hash.slice(0, 12)}…, ` +
+          `${txs.length} tx): ${err instanceof Error ? err.message : String(err)}. ` +
+          `Consensus is halting at height ${height - 1} rather than diverging. ` +
+          `This node's local state disagrees with the proposer's — the usual causes ` +
+          `are an account that exists only on the node that created it (accounts are ` +
+          `not replicated) or a direct SQL write such as scripts/dev-bump-ph.mjs run ` +
+          `on some nodes but not all.`,
+        err,
+      );
+      throw err;
+    }
 
     // Session 48: notify the wrapping layer that validator changes
     // have been applied. Used by the proposer to drain matching

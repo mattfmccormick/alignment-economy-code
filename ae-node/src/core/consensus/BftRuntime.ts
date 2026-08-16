@@ -50,6 +50,12 @@ export interface BftRuntimeConfig {
   ) => void;
   /** Optional callback fired on every NIL round. Useful for tests / metrics. */
   onRoundFailed?: (height: number, round: number) => void;
+  /**
+   * Fired when a committed block cannot be applied locally. The driver has
+   * already fail-stopped and will not advance the height. See
+   * BftDriverConfig.onApplyFailed for the rationale.
+   */
+  onApplyFailed?: (height: number, blockHash: string, err: unknown) => void;
   /** Per-phase timeouts. Defaults to BftDriver's defaults. */
   timeouts?: Partial<TimeoutConfig>;
   /** Inject a clock for deterministic tests. Defaults to RealClock. */
@@ -81,6 +87,7 @@ export class BftRuntime {
       validateBlockContent: config.validateBlockContent,
       onCommit: config.onCommit,
       onRoundFailed: config.onRoundFailed,
+      onApplyFailed: config.onApplyFailed,
       timeouts: config.timeouts,
       startupDelayMs: config.startupDelayMs,
     });

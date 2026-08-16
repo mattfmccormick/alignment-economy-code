@@ -42,6 +42,13 @@ export type MessageType =
   | 'peers'
   | 'new_block'
   | 'new_transaction'
+  // Account replication. Accounts are written by the API as a local row and
+  // are not carried in blocks, so without gossip an account exists only on
+  // the node that created it, and every other node throws
+  // `Replay: sender account not found` on the first block containing one of
+  // its transactions. Same gossip discipline as new_transaction: authenticated
+  // sender, dedupe by id, relay onward.
+  | 'new_account'
   | 'get_blocks'
   | 'blocks'
   | 'ping'

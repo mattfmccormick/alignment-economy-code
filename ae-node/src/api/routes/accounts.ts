@@ -1,13 +1,26 @@
 import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
-import { createAccount, getAccount, getTotalEarnedPool } from '../../core/account.js';
+import {
+  createAccount,
+  getAccount,
+  getTotalEarnedPool,
+  type PeerAccountRegistration,
+} from '../../core/account.js';
+import { deriveAccountId } from '../../core/crypto.js';
 import { transactionStore } from '../../core/transaction.js';
 import { getCycleState } from '../../core/day-cycle.js';
 import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
 import type { AccountType } from '../../core/types.js';
 
-export function accountRoutes(db: DatabaseSync): Router {
+/**
+ * Broadcasts a newly created account to peers. Supplied by the runner in BFT
+ * mode. Omitted for single-node/Authority setups, where there is nobody to
+ * tell.
+ */
+export type AccountBroadcaster = (reg: PeerAccountRegistration) => void;
+
+export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroadcaster): Router {
   const router = Router();
 
   // POST /accounts - create new account (no auth).
@@ -47,8 +60,54 @@ export function accountRoutes(db: DatabaseSync): Router {
         }
       }
 
+      // Idempotent re-registration. Registering the same public key twice is a
+      // normal event, not an error: gossip is at-least-once, a client may retry
+      // after a network blip, and mirroring an account onto a second node is
+      // done by POSTing the same public key there. Since the id is
+      // sha256(publicKey) truncated, the second call is provably a no-op on an
+      // identical row, so return the existing account rather than 409.
+      //
+      // Only the client-custody path can be idempotent. Without a supplied
+      // publicKey the server mints a fresh keypair every call, so there is
+      // nothing to match on and each request is genuinely a new account.
+      if (publicKey) {
+        const existing = getAccount(db, deriveAccountId(publicKey));
+        if (existing) {
+          res.json({
+            success: true,
+            data: {
+              account: serializeAccount(existing),
+              publicKey: existing.publicKey,
+              alreadyRegistered: true,
+            },
+            meta: { timestamp: Math.floor(Date.now() / 1000) },
+          });
+          return;
+        }
+      }
+
       const currentDay = getCycleState(db).currentDay;
       const result = createAccount(db, type, currentDay, 0, publicKey || undefined);
+
+      // Tell the network. Without this the account exists only here, and the
+      // first block carrying one of its transactions throws
+      // `Replay: sender account not found` on every other node. Fire and
+      // forget, and never fail the user's request on a gossip error — the
+      // account is already committed locally.
+      if (accountBroadcaster) {
+        try {
+          accountBroadcaster({
+            id: result.account.id,
+            publicKey: result.account.publicKey,
+            type: result.account.type,
+            joinedDay: result.account.joinedDay,
+            createdAt: result.account.createdAt,
+          });
+        } catch {
+          // Intentionally swallowed. See above.
+        }
+      }
+
       // In client-custody mode, privateKey is empty — the client already holds it.
       // In legacy mode, the server-generated privateKey is returned ONCE.
       res.json({

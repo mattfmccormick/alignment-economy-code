@@ -14,6 +14,11 @@ import { serializeBlock } from './messages.js';
 import type { NodeIdentity } from './node-identity.js';
 import type { WireTransaction } from './block-validator.js';
 import { replayTransaction } from '../core/transaction.js';
+import {
+  accountStore,
+  applyPeerAccountRegistration,
+  type PeerAccountRegistration,
+} from '../core/account.js';
 import { logger } from '../node/logger.js';
 
 export interface NodeConfig {
@@ -154,6 +159,42 @@ export class AENode {
         this.mempool.add(tx as unknown as Parameters<typeof this.mempool.add>[0]);
       }
     });
+
+    // Account replication. Accounts are not carried in blocks, so without this
+    // an account exists only on the node whose API created it, and the first
+    // block containing one of its transactions throws
+    // `Replay: sender account not found` everywhere else.
+    //
+    // Wired here (constructor, not start()) for the same reason tx gossip is:
+    // tests that supply their own WebSocket server need the listener live
+    // without calling start().
+    this.peerManager.on('account:received', (data: unknown) => {
+      const reg = data as Partial<PeerAccountRegistration>;
+      try {
+        const written = applyPeerAccountRegistration(accountStore(this.db), {
+          id: String(reg.id ?? ''),
+          publicKey: String(reg.publicKey ?? ''),
+          type: (reg.type ?? 'individual') as PeerAccountRegistration['type'],
+          joinedDay: Number(reg.joinedDay ?? 1),
+          createdAt: Number(reg.createdAt ?? Math.floor(Date.now() / 1000)),
+        });
+        if (written) {
+          logger.info('p2p', `Replicated account ${String(reg.id).slice(0, 12)}… from peer`);
+        }
+      } catch (err) {
+        // A malformed or forged registration is the sender's problem, not
+        // ours. Log and drop; never let it reach an uncaught handler.
+        logger.warn(
+          'p2p',
+          `Rejected account registration from peer: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+  }
+
+  /** Broadcast a newly created account so every peer can replay its txs. */
+  broadcastAccount(reg: PeerAccountRegistration): void {
+    this.peerManager.broadcast('new_account', reg as unknown as Record<string, unknown>);
   }
 
   /** Start the P2P WebSocket server and connect to the network */

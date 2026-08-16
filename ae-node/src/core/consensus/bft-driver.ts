@@ -159,6 +159,24 @@ export interface BftDriverConfig {
    * just to bump the round; this hook lets the wrapper log / metrics.
    */
   onRoundFailed?: (height: number, round: number) => void;
+  /**
+   * Called when `onCommit` throws, i.e. this node reached a valid commit
+   * certificate for a block it cannot apply locally. The driver has already
+   * stopped itself by the time this fires and will NOT advance the height.
+   *
+   * This is a fail-stop, and deliberately so. The alternatives are both worse:
+   * advancing past an unapplied block leaves the node silently diverged from
+   * the rest of the network (blocks carry no state root, so nothing would ever
+   * detect it), and letting the throw escape unwinds through the transport
+   * into a raw WebSocket message handler with no catch, taking the process
+   * down without a usable log line.
+   *
+   * The usual cause is local state that disagrees with the proposer's:
+   * `Replay: sender account not found` when an account exists only on the
+   * node that created it, or `Replay: insufficient <type> balance` after a
+   * direct SQL write such as scripts/dev-bump-ph.mjs on one node only.
+   */
+  onApplyFailed?: (height: number, blockHash: string, err: unknown) => void;
   /** Injectable wallclock-seconds for the controllers (replay window). */
   nowSec?: () => number;
 }
@@ -444,7 +462,20 @@ export class BftDriver {
   }
 
   private onCommit(blockHash: string, cert: CommitCertificate): void {
-    this.config.onCommit(this.currentHeight, blockHash, cert);
+    // Fail-stop. onCommit persists the block and replays its transactions; if
+    // that throws, this node has a certified block it cannot apply. Advancing
+    // the height anyway would diverge it from the network permanently and
+    // undetectably (no state root in the block hash), and letting the throw
+    // escape would unwind into the transport's raw ws.on('message') handler,
+    // which has no catch, killing the process. So: stop cleanly, stay at this
+    // height, and hand the error to the operator.
+    try {
+      this.config.onCommit(this.currentHeight, blockHash, cert);
+    } catch (err) {
+      this.stop();
+      this.config.onApplyFailed?.(this.currentHeight, blockHash, err);
+      return;
+    }
     if (!this.running) return; // onCommit may have called stop()
     // Advance to height+1, round 0. Clear the lock AND the polka — both
     // are scoped to the height we just left.

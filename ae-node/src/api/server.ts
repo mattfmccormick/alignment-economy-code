@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { DatabaseSync } from 'node:sqlite';
-import { accountRoutes } from './routes/accounts.js';
+import { accountRoutes, type AccountBroadcaster } from './routes/accounts.js';
 import { transactionRoutes, type TxBroadcaster } from './routes/transactions.js';
 import { networkRoutes } from './routes/network.js';
 import { healthRoutes } from './routes/health.js';
@@ -29,6 +29,13 @@ export interface CreateAppOptions {
    * from the DB).
    */
   txBroadcaster?: TxBroadcaster;
+  /**
+   * Optional callback fired after an account is created. Runner provides this
+   * in BFT mode so the new account reaches every peer; without it the account
+   * exists only on this node and blocks carrying its transactions fail to
+   * replay elsewhere. Omitted in single-node/Authority mode.
+   */
+  accountBroadcaster?: AccountBroadcaster;
 }
 
 export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
@@ -50,7 +57,7 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
   });
 
   // Routes
-  app.use('/api/v1/accounts', accountRoutes(db));
+  app.use('/api/v1/accounts', accountRoutes(db, opts.accountBroadcaster));
   app.use('/api/v1/transactions', transactionRoutes(db, opts.txBroadcaster));
   app.use('/api/v1/network', networkRoutes(db));
   app.use('/api/v1', healthRoutes(db));

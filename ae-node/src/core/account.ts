@@ -9,7 +9,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { generateKeyPair, deriveAccountId } from './crypto.js';
-import { ConflictError } from './errors.js';
+import { ConflictError, ValidationError } from './errors.js';
 import type { Account, AccountCreationResult, AccountType } from './types.js';
 import { SqliteAccountStore } from './stores/SqliteAccountStore.js';
 import type { BalanceField, IAccountStore } from './stores/IAccountStore.js';
@@ -72,6 +72,72 @@ export function createAccountWithStore(
 
   const account = store.findById(id)!;
   return { account, publicKey, privateKey };
+}
+
+/** Wire shape for an account replicated from a peer. */
+export interface PeerAccountRegistration {
+  id: string;
+  publicKey: string;
+  type: AccountType;
+  joinedDay: number;
+  createdAt: number;
+}
+
+/**
+ * Apply an account registration received from a peer.
+ *
+ * Accounts used to be a purely local INSERT: `createAccount` was reachable only
+ * from POST /accounts and the seed script, with no gossip and no transaction
+ * type. On a multi-validator network that meant an account existed solely on
+ * the node that created it, so the first block carrying one of its transactions
+ * threw `Replay: sender account not found` on every other node — which, before
+ * the fail-stop landed, killed them.
+ *
+ * Returns true if a row was written, false if we already had it. Both are
+ * success: gossip is at-least-once and arrives out of order, so this must be
+ * idempotent.
+ *
+ * What a peer is NOT trusted to set:
+ *   - the id. It is recomputed from the public key and the claimed id must
+ *     match, so a peer cannot inject a row under an id it does not hold the
+ *     key for.
+ *   - percentHuman. Always 0 here. Verification score is raised by panel
+ *     completion, never by a peer's say-so.
+ *   - balances. Always 0 (the store's insert defaults). Value only ever moves
+ *     through replayed transactions.
+ *
+ * A forged-but-well-formed registration therefore costs a row and nothing else:
+ * a zero-balance, zero-score account whose key the sender may not even hold.
+ * Spam bounding is the gossip layer's dedupe plus peer authentication.
+ */
+export function applyPeerAccountRegistration(
+  store: IAccountStore,
+  reg: PeerAccountRegistration,
+): boolean {
+  if (typeof reg.publicKey !== 'string' || !/^[0-9a-f]{3904}$/i.test(reg.publicKey)) {
+    throw new ValidationError(
+      'Account registration publicKey must be a 1952-byte hex string (ML-DSA-65)',
+      'INVALID_PUBLIC_KEY',
+    );
+  }
+  const derived = deriveAccountId(reg.publicKey);
+  if (derived !== reg.id) {
+    throw new ValidationError(
+      `Account registration id ${reg.id} does not match its public key (expected ${derived})`,
+      'ACCOUNT_ID_MISMATCH',
+    );
+  }
+  if (store.findById(derived)) return false;
+
+  store.insert({
+    id: derived,
+    publicKey: reg.publicKey,
+    type: reg.type,
+    percentHuman: 0,
+    joinedDay: reg.joinedDay,
+    createdAt: reg.createdAt,
+  });
+  return true;
 }
 
 // ─── Back-compat wrappers. These keep the (db, ...) signatures working ──────

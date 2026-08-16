@@ -53,6 +53,7 @@ export class PeerManager extends EventEmitter {
   // LRU eviction at the cap keeps memory bounded over long uptime.
   private seenBlocks = new Set<string>();
   private seenTx = new Set<string>();
+  private seenAccounts = new Set<string>();
   private seenProposals = new Set<string>();
   private seenVotes = new Set<string>();
   private maxPeers: number;
@@ -279,6 +280,20 @@ export class PeerManager extends EventEmitter {
         if (!this.markSeenAndAccept(this.seenTx, txId, 5000)) return;
         this.emit('transaction:received', msg.data, msg.senderId);
         this.relayGossip('new_transaction', msg.data, msg.senderId);
+        break;
+      }
+      case 'new_account': {
+        // Account registrations must reach every node, because replaying a
+        // block throws if the sender or recipient row is missing. Same
+        // gossip shape as new_transaction: authenticate, dedupe by id, emit
+        // for local application, relay onward. The receiving handler
+        // re-derives the id from the public key, so a peer cannot inject a
+        // row under an id whose key it does not hold.
+        if (!this.isAuthenticatedSender(msg.publicKey, ws)) return;
+        const accountId = (msg.data as { id: string }).id;
+        if (!this.markSeenAndAccept(this.seenAccounts, accountId, 5000)) return;
+        this.emit('account:received', msg.data, msg.senderId);
+        this.relayGossip('new_account', msg.data, msg.senderId);
         break;
       }
       case 'get_blocks': {

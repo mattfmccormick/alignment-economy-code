@@ -73,6 +73,25 @@ export class AENodeRunner {
    * genesis path (single-node Authority dev only — never a real network).
    */
   private networkId: string = 'ae-legacy-dev';
+  /**
+   * Set when consensus fail-stops because a certified block could not be
+   * applied locally (see BftDriverConfig.onApplyFailed). Non-null means this
+   * node has permanently stopped participating and needs operator attention;
+   * it is surfaced on the health endpoint so the condition is queryable rather
+   * than log-only. Never cleared at runtime — the node must be restarted after
+   * the underlying state disagreement is fixed.
+   */
+  private consensusHalt:
+    | { height: number; blockHash: string; reason: string; at: number }
+    | null = null;
+
+  /**
+   * Null when consensus is healthy (or not in BFT mode). Non-null means the
+   * node has fail-stopped and is no longer voting or producing.
+   */
+  getConsensusHalt(): { height: number; blockHash: string; reason: string; at: number } | null {
+    return this.consensusHalt;
+  }
 
   constructor(config: AENodeConfig) {
     this.config = config;
@@ -203,7 +222,24 @@ export class AENodeRunner {
           }
         : undefined;
 
-    this.apiServer = startServer(this.db, this.config.apiPort, { txBroadcaster });
+    // Same deferred-lookup shape as txBroadcaster above: startApiServer runs
+    // before startP2P, so this.p2pNode does not exist yet at construction time.
+    //
+    // Only meaningful in BFT mode. A single-node network has nobody to tell,
+    // and in Authority mode followers get state from blocks the authority
+    // produces. In BFT every validator replays every block against its own
+    // state, so it needs the account row before the block arrives.
+    const accountBroadcaster =
+      this.config.consensusMode === 'bft'
+        ? (reg: Parameters<NonNullable<Parameters<typeof startServer>[2]>['accountBroadcaster'] & {}>[0]) => {
+            this.p2pNode?.broadcastAccount(reg);
+          }
+        : undefined;
+
+    this.apiServer = startServer(this.db, this.config.apiPort, {
+      txBroadcaster,
+      accountBroadcaster,
+    });
     logger.info('api', `API server listening on ${this.config.apiHost}:${this.config.apiPort}`);
   }
 
@@ -533,6 +569,29 @@ export class AENodeRunner {
         logger.info(
           'blocks',
           `BFT committed block ${block.number} (${block.transactionCount} txs)`,
+        );
+      },
+      // Consensus fail-stopped: the network certified a block this node could
+      // not apply. The driver has already halted and will not advance the
+      // height, so from here the node is a spectator until an operator
+      // intervenes. Make that loud and queryable. A silently stalled validator
+      // is the worst outcome — the chain just appears to stop, with nothing in
+      // any log saying why.
+      onApplyFailed: (height, blockHash, err) => {
+        this.consensusHalt = {
+          height,
+          blockHash,
+          reason: err instanceof Error ? err.message : String(err),
+          at: Math.floor(Date.now() / 1000),
+        };
+        logger.error(
+          'bft',
+          `CONSENSUS HALTED at height ${height - 1}. Block ${height} ` +
+            `(${blockHash.slice(0, 12)}…) was committed by the network but could ` +
+            `not be applied here, so this node stopped rather than diverge. It will ` +
+            `not produce or vote on further blocks. Restarting will not help until ` +
+            `the underlying state disagreement is fixed.`,
+          err,
         );
       },
       // Session 54: hold off on round 0 until peers have time to

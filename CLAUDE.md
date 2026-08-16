@@ -81,31 +81,65 @@ the seam between two packages that are only ever tested apart.
   both apps, and the only symptom is a vite `Failed to resolve import` in the
   terminal, never in the browser. Documented as a required first step.
 
+### Second pass, same day: the two consensus blockers
+
+- **Accounts now replicate.** `createAccount` was called from exactly two
+  places, the API route and `seed-test.ts`, and was a plain local `INSERT` with
+  no gossip, no mempool, and no transaction type. An account created in the
+  wallet existed only on that node's SQLite, so `replayTransaction` threw
+  `Replay: sender account not found` on every other node the moment a block
+  carrying its transaction arrived. This was the single biggest thing blocking
+  a real two-machine test.
+  Added a `new_account` gossip message following exactly the discipline
+  `new_transaction` already uses (authenticated sender, dedupe by id, relay
+  onward), plus `applyPeerAccountRegistration` in `core/account.ts` which is
+  idempotent and re-derives the accountId from the public key, so a peer
+  cannot inject a row under an id whose key it does not hold. A peer can never
+  set `percentHuman` or any balance: replicated accounts are empty shells, and
+  value only ever moves through replayed transactions.
+  `POST /accounts` is now idempotent for client-custody keys as well. Since the
+  id is `sha256(publicKey)` truncated, re-registering the same key is provably
+  a no-op on an identical row, so it returns the existing account with
+  `alreadyRegistered: true` instead of 409. That also makes mirroring an
+  account onto a second node a safe, repeatable operation.
+- **The block-apply path fail-stops instead of killing the node.**
+  `BftBlockProducer`'s commit loop and `BftDriver.onCommit` had no try/catch. A
+  throw aborted the apply and then propagated out through the transport into a
+  raw `ws.on('message')` listener; with no `uncaughtException` handler anywhere
+  in `ae-node`, the process died with a bare stack trace. The sync and gossip
+  paths both caught; the consensus commit path did not.
+  `BftDriver.onCommit` now catches, calls `stop()`, and fires a new
+  `onApplyFailed` hook. Critically it does **not** advance the height: a node
+  that skipped a block it could not apply would be silently and permanently
+  forked, and since blocks carry no state root nothing downstream would ever
+  detect it. The runner records the halt (`getConsensusHalt()`) and logs why in
+  plain language. `cli.ts` also gained `uncaughtException` and
+  `unhandledRejection` handlers so anything that still escapes is at least
+  diagnosable. Regression test: `tests/phase26.test.ts`, "fail-stops without
+  advancing or throwing when onCommit fails to apply".
+
+### Remaining limits of the account fix (worth knowing before Phase 2)
+
+Gossip closes the live case: a node that is online when an account is created
+gets it within a round trip, long before anyone can type a send. It does not
+close the offline case. A node that is down when the account is created, then
+catches up by syncing blocks, still has no row for it, because `ChainSync`
+ships blocks and certs only. It will fail-stop on the first block carrying
+that account rather than crash, which is a real improvement, but it is still a
+halt.
+
+Closing that properly means putting account registrations **in the block**, the
+way `validatorChanges` already ride one. `computeBlockHash` takes its optional
+parts as `?? ''`, so an `accountRegistrationsHash` appended the same way hashes
+identically for blocks that carry none, which makes it a backward-compatible
+change. That plus mirroring the Phase 57 sync-replay logic would make account
+creation consensus-ordered, forgery-resistant, and available to any node that
+can sync. That is the right next step and is deliberately not rushed in
+alongside the fixes above.
+
 ### Open blockers (not fixed, ordered by severity)
 
-1. **Accounts never replicate between nodes.** `createAccount` is called from
-   exactly two places, the API route and `seed-test.ts`. It is a plain local
-   `INSERT` (`SqliteAccountStore.insert`) with no gossip, no mempool, no
-   transaction type. An account created in the wallet exists only on that
-   node's SQLite. On a multi-validator network the second node has no row for
-   it, so `replayTransaction` throws `Replay: sender account not found` the
-   moment a block carrying that account's transaction arrives. This is the
-   single thing most blocking a real two-machine test. The proper fix is an
-   account-registration transaction that rides a block like any other state
-   change. Interim workaround: `deriveAccountId` is `sha256(publicKey)`
-   truncated, so POSTing the same public key to both nodes yields the same
-   accountId on both and keeps the DBs consistent.
-2. **The block-apply path is unguarded, so any replay throw kills the node.**
-   `BftBlockProducer`'s commit loop and `BftDriver.onCommit` have no try/catch.
-   A throw aborts the block apply (no insert, no cert, no fee distribution, no
-   day cycle), then propagates out through the transport to a raw
-   `ws.on('message')` listener. There are no `uncaughtException` or
-   `unhandledRejection` handlers anywhere in `ae-node`, so the realistic outcome
-   is the process dying. The sync path and the gossip path both catch; the
-   consensus commit path does not. This is the amplifier that turns any state
-   divergence into a chain halt, and with two validators one node stopping stops
-   everything.
-3. **Blocks carry no state root.** `computeBlockHash` covers number, previous
+1. **Blocks carry no state root.** `computeBlockHash` covers number, previous
    hash, timestamp, merkle root, day, prev cert and validator changes. No
    balance or account commitment, and no `stateRoot`/`appHash` anywhere in the
    codebase. Balance divergence surfaces only indirectly, as a
@@ -113,12 +147,14 @@ the seam between two packages that are only ever tested apart.
    account spends. `percentHuman` divergence produces no error at all, ever,
    because `replayTransaction` takes `netAmount` off the wire verbatim and never
    re-derives the spend multiplier locally.
-4. **Followers vote on blocks they cannot apply.** `validateStashedBlock` checks
+2. **Followers vote on blocks they cannot apply.** `validateStashedBlock` checks
    stash presence and timestamp only, never dry-runs the transactions. Its own
    comment concedes "a stash-presence check IS the content check for now". A
    follower will prevote and precommit a block that is guaranteed to throw on
-   its own apply, which is what makes (2) reachable.
-5. **The default "Create Account" needs a platform server nothing starts.**
+   its own apply. That now costs a clean fail-stop rather than a dead process,
+   but the right fix is to vote NIL on a block that fails a dry-run instead of
+   discovering it at apply time.
+3. **The default "Create Account" needs a platform server nothing starts.**
    `ae-app/src/lib/platform.ts` falls back to `http://localhost:3500/api/v1`.
    Electron's `main.cjs` spawns only `ae-node`, and `extraResources` copies only
    `ae-node`, so a packaged install does not even contain platform-server. The
@@ -126,7 +162,7 @@ the seam between two packages that are only ever tested apart.
    rejection, which means the friendly "Is the platform server running?" string
    at `Onboarding.tsx:226` is unreachable on the exact failure it was written
    for. Workaround today: the "Expert: I'll hold my own keys instead" link.
-6. **Genesis validator accounts cannot sign into either app.** Genesis keystores
+4. **Genesis validator accounts cannot sign into either app.** Genesis keystores
    hold a raw ML-DSA keypair generated by `generateKeyPair()`, with no BIP39
    mnemonic. Both apps' sign-in requires accountId plus a 12-word phrase and
    checks the derived public key matches, so no phrase can ever reproduce a
@@ -135,27 +171,27 @@ the seam between two packages that are only ever tested apart.
    above); `ae-miner` still has no keystore path at all, though
    `saveMinerWallet` exists unused and the Electron bridge is wired but never
    called from the UI.
-7. **Vouching never moves `percentHuman`.** `createVouch` locks real stake and
+5. **Vouching never moves `percentHuman`.** `createVouch` locks real stake and
    inserts a row but never calls `updatePercentHuman`. The only writers are
    panel completion and decay. A tester watches the secondary "Evidence Score"
    tile climb while the large %Human gauge and the wallet's spend multiplier
    both stay pinned at 0, and nothing tells them a miner panel is still
    required. Miner-in-the-loop is the intended design; the gap is that the UI
    never says so.
-8. **The second person cannot become a miner.** `registerMiner` exempts only the
+6. **The second person cannot become a miner.** `registerMiner` exempts only the
    first miner from the `percentHuman >= 50` floor, and raising a score requires
    a panel, which requires a miner. The register failure is also rendered as a
    raw API string in the miner UI.
-9. **Supportive and ambient points never pay out.** `finalizeSupportiveTags` and
+7. **Supportive and ambient points never pay out.** `finalizeSupportiveTags` and
    `finalizeAmbientTags` have no production caller anywhere in `ae-node/src`;
    they are referenced only from tests (phase6, phase12, phase61). Two of the
    four point types in the white paper do not currently reach anyone's balance.
-10. **The legacy genesis path is sticky.** The genesis branch is gated on
-    `if (!getLatestBlock(db))`. A node that boots once without
-    `AE_GENESIS_CONFIG_PATH` writes a random-timestamp genesis; setting the path
-    afterwards does not retro-apply accounts, it only sets `networkId`. The node
-    then advertises the real network over a legacy genesis hash and fails the
-    peer handshake on `genesisHash`. The only fix is deleting the DB.
+8. **The legacy genesis path is sticky.** The genesis branch is gated on
+   `if (!getLatestBlock(db))`. A node that boots once without
+   `AE_GENESIS_CONFIG_PATH` writes a random-timestamp genesis; setting the path
+   afterwards does not retro-apply accounts, it only sets `networkId`. The node
+   then advertises the real network over a legacy genesis hash and fails the
+   peer handshake on `genesisHash`. The only fix is deleting the DB.
 
 ### Note on the operator docs
 
