@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { saveMinerWalletFromMnemonic } from '../lib/keys';
+import { saveMinerWalletFromMnemonic, saveMinerWallet } from '../lib/keys';
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic, signPayload } from '../lib/crypto';
 
 type Mode = 'signin' | 'create';
@@ -117,6 +117,66 @@ export default function Login() {
   }
 
   /**
+   * Sign in with a genesis validator keystore.
+   *
+   * Genesis keystores hold a raw ML-DSA keypair produced by generateKeyPair(),
+   * with no BIP39 mnemonic anywhere in the file, so the accountId + phrase form
+   * can never accept one — no phrase reproduces that public key. Validators
+   * were locked out of the miner entirely as a result.
+   *
+   * The file's top-level publicKey/secretKey are the Ed25519 NODE identity used
+   * for P2P. The ML-DSA ACCOUNT keypair the API signs with lives under
+   * `account`, which is what we persist. Getting those two confused would
+   * produce a wallet that looks fine and fails every signed request.
+   */
+  async function handleKeystoreSignIn(file: File): Promise<void> {
+    setError('');
+    setStep('checking');
+    try {
+      const parsed = JSON.parse(await file.text());
+      const id: unknown = parsed?.accountId;
+      const pub: unknown = parsed?.account?.publicKey;
+      const priv: unknown = parsed?.account?.privateKey;
+
+      if (typeof id !== 'string' || typeof pub !== 'string' || typeof priv !== 'string') {
+        throw new Error(
+          "That file doesn't look like a validator keystore. Expected accountId plus account.publicKey and account.privateKey.",
+        );
+      }
+
+      // Confirm the node actually knows this account before persisting, and
+      // that the key matches. Otherwise a keystore from a different network
+      // yields a wallet that signs perfectly and is rejected by every route.
+      const res = await api.getAccount(id);
+      if (!res.success || !res.data) {
+        throw new Error(
+          `This node has no account ${id.slice(0, 12)}…. Check the keystore is for this network.`,
+        );
+      }
+      if (res.data.publicKey && res.data.publicKey !== pub) {
+        throw new Error('This keystore does not match that account on this node.');
+      }
+
+      saveMinerWallet({ accountId: id, publicKey: pub, privateKey: priv });
+      setAccountId(id);
+      setPublicKey(pub);
+      setPrivateKey(priv);
+
+      // Same branch the phrase path takes: already a miner goes straight in,
+      // otherwise offer registration.
+      const status = await api.getMinerStatus(id);
+      if (status.success && status.data?.isMiner) {
+        navigate('/');
+        return;
+      }
+      setStep('not_miner');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not read that keystore.');
+      setStep('enter_id');
+    }
+  }
+
+  /**
    * Turn a register failure into something a person can act on.
    *
    * The raw API string was going straight to the screen, so the single most
@@ -151,7 +211,17 @@ export default function Login() {
     // (409). In either case the on-chain state is valid; we just need the
     // local wallet persisted so the dashboard can sign requests.
     const persistAndEnter = () => {
-      saveMinerWalletFromMnemonic(accountId.trim(), publicKey, mnemonic || '');
+      // Two custody shapes reach here. Mnemonic accounts store the phrase and
+      // re-derive keys on load. Validator keystores have no phrase at all, so
+      // they take the raw-key path — storing them as a v2 wallet with an empty
+      // mnemonic would write a record that parseStoredWallet cannot read back
+      // (it needs either a mnemonic or a privateKey), locking the user out
+      // immediately after a successful registration.
+      if (mnemonic) {
+        saveMinerWalletFromMnemonic(accountId.trim(), publicKey, mnemonic);
+      } else {
+        saveMinerWallet({ accountId: accountId.trim(), publicKey, privateKey: _privateKey });
+      }
       navigate('/');
     };
 
@@ -276,6 +346,39 @@ export default function Login() {
               >
                 {step === 'checking' ? 'Checking...' : 'Sign In'}
               </button>
+
+              {/* Validator keystore sign-in.
+                  Genesis keystores hold a raw ML-DSA keypair from
+                  generateKeyPair() and have no BIP39 mnemonic, so no phrase can
+                  ever reproduce their public key and the form above can never
+                  accept one. That left every genesis validator unable to sign
+                  into the miner at all: their account exists on-chain, funded
+                  and at 100% human, and the app had no door for it.
+
+                  The raw-key persistence path (saveMinerWallet) already
+                  existed and parseStoredWallet already handled the resulting
+                  shape — the only thing missing was a way to reach them. */}
+              <div className="mt-6 pt-5 border-t border-border">
+                <p className="text-xs font-medium text-muted mb-1.5">
+                  Running a validator? Use your keystore
+                </p>
+                <p className="text-[10px] text-muted/60 mb-2.5 leading-relaxed">
+                  The private <span className="font-mono">.json</span> file from the genesis
+                  ceremony. Validator accounts have no recovery phrase, so this is how
+                  they sign in. It stays on this device.
+                </p>
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleKeystoreSignIn(f);
+                    e.target.value = '';
+                  }}
+                  disabled={step === 'checking'}
+                  className="w-full text-xs text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-teal/20 file:text-teal hover:file:bg-teal/30 file:cursor-pointer"
+                />
+              </div>
             </>
           )}
 
