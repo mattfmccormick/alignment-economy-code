@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { displayPoints, toBaseUnits, displayPercent, truncateId, countdown } from './formatting';
+import {
+  displayPoints,
+  toBaseUnits,
+  baseUnitsToExactDisplay,
+  displayPercent,
+  truncateId,
+  countdown,
+} from './formatting';
 
 describe('toBaseUnits', () => {
   it('scales whole points to base units (10^8)', () => {
@@ -37,6 +44,52 @@ describe('displayPoints', () => {
     for (const pts of [1, 42, 999]) {
       expect(displayPoints(toBaseUnits(pts))).toBe(pts.toFixed(2));
     }
+  });
+});
+
+// The MAX button used to feed displayPoints back into the amount field.
+// displayPoints is the HUMAN formatter and is lossy on purpose, so MAX could
+// produce an amount that was either unparseable or larger than the balance —
+// on the one button whose whole promise is "all of it".
+describe('baseUnitsToExactDisplay (what MAX puts in the box)', () => {
+  it('never abbreviates, so large balances stay parseable', () => {
+    const big = toBaseUnits(3_000_000);
+    expect(displayPoints(big)).toBe('3.00M');           // fine for a human
+    expect(() => toBaseUnits(displayPoints(big))).toThrow(); // unusable as input
+    expect(baseUnitsToExactDisplay(big)).toBe('3000000');
+    expect(toBaseUnits(baseUnitsToExactDisplay(big))).toBe(big);
+  });
+
+  it('never inserts thousands separators', () => {
+    const raw = toBaseUnits(2500);
+    expect(displayPoints(raw)).toBe('2,500');
+    expect(baseUnitsToExactDisplay(raw)).toBe('2500');
+  });
+
+  it('truncates rather than rounds, so MAX can never exceed the balance', () => {
+    // 12.999999999 points. Rounding to 2dp gives "13.00", which is MORE than
+    // the account holds and comes back as insufficient balance.
+    const raw = '1299999999';
+    expect(displayPoints(raw)).toBe('13.00');
+    expect(BigInt(toBaseUnits(baseUnitsToExactDisplay(raw)))).toBeLessThanOrEqual(BigInt(raw));
+  });
+
+  it('round-trips exactly for a spread of balances', () => {
+    for (const raw of ['0', '1', '100000000', '1299999999', '5000000000', '300000000000000']) {
+      expect(toBaseUnits(baseUnitsToExactDisplay(raw))).toBe(BigInt(raw).toString());
+    }
+  });
+
+  it('stays exact above 2^53 base units', () => {
+    // Beyond ~90 million points, Math.round(n * 1e8) silently loses precision.
+    // Both directions must stay in bigint.
+    const raw = '9007199254740993'; // 2^53 + 1
+    expect(toBaseUnits(baseUnitsToExactDisplay(raw))).toBe(raw);
+  });
+
+  it('handles zero and negatives without emitting junk', () => {
+    expect(baseUnitsToExactDisplay('0')).toBe('0');
+    expect(baseUnitsToExactDisplay(-5n)).toBe('0');
   });
 });
 

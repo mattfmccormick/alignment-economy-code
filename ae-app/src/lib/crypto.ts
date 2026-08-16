@@ -1,4 +1,5 @@
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
@@ -51,6 +52,26 @@ export function mnemonicToKeypair(phrase: string): { publicKey: string; privateK
     publicKey: bytesToHex(kp.publicKey),
     privateKey: bytesToHex(kp.secretKey),
   };
+}
+
+/**
+ * Derive the accountId from a public key: the first 20 bytes of its SHA-256,
+ * hex-encoded. Must stay byte-identical to ae-node's deriveAccountId in
+ * core/crypto.ts, which is what actually assigns ids on the server.
+ *
+ * This exists so a 12-word recovery phrase is genuinely sufficient to restore
+ * a wallet. Before it, the accountId was only ever computed server-side and
+ * read back off the create-account response, so recovery demanded the phrase
+ * AND a 40-character hex id the user had no reason to have written down.
+ * Handing someone twelve words, calling them a recovery phrase, and then
+ * requiring a second secret to use them is a data-loss trap: the phrase alone
+ * is what every wallet in the world teaches people to keep.
+ *
+ * The derivation is deterministic and offline, so recovery needs no server
+ * lookup and no by-public-key endpoint.
+ */
+export function deriveAccountId(publicKeyHex: string): string {
+  return bytesToHex(sha256(hexToBytes(publicKeyHex)).slice(0, 20));
 }
 
 export { hexToBytes, bytesToHex };

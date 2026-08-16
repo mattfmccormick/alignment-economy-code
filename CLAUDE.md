@@ -296,6 +296,41 @@ the P2P handshake. New hash parts must always be appended, never inserted.
 
 New suite: `tests/account-registration-onchain.test.ts` (11 tests).
 
+### Sixth pass: recovery, MAX, and a swallowed failure
+
+- **Twelve words are now genuinely enough to recover a wallet.** They were not.
+  `handleLogin` derived the keypair, threw it away with `void publicKey`, and
+  set the error "To recover on a fresh device, also enter your Account ID
+  below." The comment above it proposed adding a `GET /accounts/by-public-key`
+  endpoint to remove that step one day. That is a data-loss trap: the app
+  generates twelve words, tells you to write them down, calls them a recovery
+  phrase — and then also requires a 40-character hex id it never told you to
+  keep. Anyone who followed the instructions exactly was locked out for good.
+  No endpoint was needed. `accountId` is `sha256(publicKey).slice(0, 20)` and
+  the phrase determines the keypair, so the id is a pure offline derivation.
+  Added `deriveAccountId` to `ae-app/src/lib/crypto.ts` and made the login use
+  it; the Account ID field is still accepted as a cross-check when someone has
+  it. Pinned by a test against ae-node's own derivation, because if the two
+  ever drift, recovery silently resolves to a phantom account and the symptom
+  reads as "account not found" rather than "the wallet is computing the wrong
+  id".
+- **The MAX button could produce an amount you cannot send.** It fed
+  `displayPoints` — the HUMAN formatter, lossy on purpose — back into the
+  amount field. Above a million points that emits `"1.23M"`, which `Number()`
+  reads as NaN and `toBaseUnits` rejects; below that it rounds to two decimals,
+  which can round UP past the balance and come back as "insufficient balance".
+  On the one button whose entire promise is "all of it". New
+  `baseUnitsToExactDisplay` truncates rather than rounds, emits no separators
+  or suffixes, and works in bigint. `toBaseUnits` also now parses plain decimal
+  strings digit-by-digit in bigint: `Math.round(n * 1e8)` is only exact below
+  about 90 million points, past which it silently rounds someone's balance.
+- **Platform signup no longer swallows an ae-node failure.** It caught and
+  discarded the error from registering the account on the node, justified as
+  "the account may already exist". The result was a user dropped into a wallet
+  whose accountId did not exist on the node — every screen errors, nothing
+  explains why. Since re-registering the same public key is now an explicit
+  no-op, a failure there is a real failure, and it is surfaced.
+
 ### Open blockers (not fixed, ordered by severity)
 
 1. **The state root is diagnostic, and must stay that way for now.** It travels

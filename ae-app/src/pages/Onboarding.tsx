@@ -2,7 +2,7 @@
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { saveWalletFromMnemonic, saveFounderWallet, saveJoinerWallet, saveJoinedNetwork } from '../lib/keys';
-import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
+import { newMnemonic, mnemonicToKeypair, isValidMnemonic, deriveAccountId } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
 import { encodeInviteLink, decodeInviteLink } from '../lib/invite';
 import { platformClient, savePlatformSession, sessionFromSdk } from '../lib/platform';
@@ -242,13 +242,31 @@ export function Onboarding() {
       // table. Self-custody does this via createAccount() above; the
       // platform path needs to do it explicitly with the publicKey the
       // SDK just generated.
+      // Not optional bookkeeping. The platform session proves custody; the
+      // ae-node row is what gives the user a balance, a daily allocation, and
+      // the ability to transact at all. Swallowing a failure here dropped
+      // people into a wallet whose accountId did not exist on the node, where
+      // every screen errors and nothing explains why.
+      //
+      // The old comment justified the swallow as "the account may already
+      // exist". Re-registering the same public key is now an explicit no-op on
+      // the node (the id is sha256(publicKey), so it returns the existing
+      // account rather than 409), which means a failure here is a real failure
+      // and not a duplicate.
       try {
-        await api.createAccount('individual', session.publicKey);
-      } catch {
-        // The account may already exist if a previous signup attempt
-        // partially completed. Falling through is safe: the platform
-        // session is what determines whether the user is signed in,
-        // and a stale ae-node row is harmless.
+        const acctRes = await api.createAccount('individual', session.publicKey);
+        if (!acctRes.success) {
+          throw new Error(acctRes.error?.message ?? 'the node rejected the registration');
+        }
+      } catch (nodeErr) {
+        setPlatformError(
+          'Your login was created, but this device could not register you on the ' +
+            'network node, so the wallet would have no balance. Check the node is ' +
+            'running, then sign in to finish setting up. ' +
+            (nodeErr instanceof Error ? nodeErr.message : ''),
+        );
+        setFlow('platform-signup');
+        return;
       }
       savePlatformSession(sessionFromSdk(platformEmail.trim(), session));
       setFlow('encourage-2fa');
@@ -613,36 +631,20 @@ export function Onboarding() {
     }
   }
 
+  /**
+   * Phrase-only recovery.
+   *
+   * This used to be a dead end: it derived the keypair, threw it away with a
+   * `void publicKey`, and set the error "To recover on a fresh device, also
+   * enter your Account ID below." The comment above it proposed adding a
+   * GET /accounts/by-public-key endpoint to remove that step one day.
+   *
+   * No endpoint is needed. accountId is sha256(publicKey).slice(0, 20) and the
+   * phrase determines the keypair, so the id is a pure offline derivation the
+   * client can do itself. Delegates to handleLoginWithId, which now does that.
+   */
   async function handleLogin() {
-    const phrase = loginMnemonic.trim();
-    if (!phrase) return;
-    if (!isValidMnemonic(phrase)) {
-      setError('Invalid recovery phrase. Check spelling and word count (12 words).');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      // Derive the keypair locally, then look up the account by its derived ID.
-      const { publicKey } = mnemonicToKeypair(phrase);
-      // The account ID is the SHA-256 prefix of the publicKey. To stay framework-
-      // agnostic we'd recompute it client-side, but the server already computes
-      // it deterministically â€” fetch by querying every account isn't feasible,
-      // so we resolve via the publicKey on the API side.
-      // For now: ask the user to also paste their account ID. (Future: add a
-      // lookup-by-publicKey endpoint.)
-      // Simpler path: many wallets just store the mnemonic + accountId together
-      // when first created; on a fresh device the user types both. Adding a
-      // GET /accounts/by-public-key/:hex endpoint later removes that step.
-      void publicKey;
-      // Fall through to the legacy form: ask the user to paste their accountId
-      // alongside the mnemonic.
-      setError('To recover on a fresh device, also enter your Account ID below.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Network error. Is the backend running?');
-    } finally {
-      setLoading(false);
-    }
+    await handleLoginWithId();
   }
 
   // Login with an account ID and recovery phrase together.
@@ -651,11 +653,29 @@ export function Onboarding() {
   // (the new, easier path) because that's what most people will use.
   // Tabs at the top of the screen let them switch to self-custody.
   const [loginTrack, setLoginTrack] = useState<'platform' | 'self-custody'>('platform');
+  /**
+   * Restore a self-custody wallet.
+   *
+   * The recovery phrase alone is enough. accountId is
+   * sha256(publicKey).slice(0, 20), and the phrase determines the keypair, so
+   * the id is a pure offline derivation — no server lookup, no by-public-key
+   * endpoint needed.
+   *
+   * This used to require the phrase AND the 40-character account id, because
+   * the id was only ever computed server-side and read back off the
+   * create-account response; the client never derived it. That made the
+   * "recovery phrase" a half-measure: twelve words the app told you to write
+   * down, plus a hex string it never told you to keep. Anyone who did what the
+   * app said and saved only the phrase was locked out permanently.
+   *
+   * The Account ID field is still accepted when filled in, purely as a
+   * cross-check for people who have it.
+   */
   async function handleLoginWithId() {
     const phrase = loginMnemonic.trim();
-    const id = loginAccountId.trim();
-    if (!phrase || !id) {
-      setError('Enter both your Account ID and your 12-word recovery phrase.');
+    const typedId = loginAccountId.trim();
+    if (!phrase) {
+      setError('Enter your 12-word recovery phrase.');
       return;
     }
     if (!isValidMnemonic(phrase)) {
@@ -666,17 +686,32 @@ export function Onboarding() {
     setError(null);
     try {
       const { publicKey } = mnemonicToKeypair(phrase);
+      const id = deriveAccountId(publicKey);
+
+      if (typedId && typedId.toLowerCase() !== id.toLowerCase()) {
+        setError(
+          `That recovery phrase belongs to account ${id.slice(0, 12)}…, not the ID you entered. ` +
+            'Leave the Account ID blank to use the phrase on its own.',
+        );
+        return;
+      }
+
       const res = await api.getAccount(id);
       if (res.success && res.data) {
-        // Sanity-check that the mnemonic matches the account on file.
+        // Belt and braces: the server's stored key must match what the phrase
+        // derives. A mismatch would mean the id collided or the node is on a
+        // different network.
         if (res.data.publicKey && res.data.publicKey !== publicKey) {
-          setError('Recovery phrase does not match this Account ID.');
+          setError('This node has a different key on file for that account.');
           return;
         }
         saveWalletFromMnemonic(id, publicKey, phrase);
         navigate('/');
       } else {
-        setError('Account not found. Check your Account ID.');
+        setError(
+          `No account ${id.slice(0, 12)}… on this node. The phrase is valid, so either this ` +
+            'is a different network, or the account was never created here.',
+        );
       }
     } catch {
       setError('Network error. Is the backend running?');

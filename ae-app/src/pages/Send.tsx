@@ -3,7 +3,7 @@ import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
-import { displayPoints, truncateId, toBaseUnits } from '../lib/formatting';
+import { displayPoints, truncateId, toBaseUnits, baseUnitsToExactDisplay } from '../lib/formatting';
 import type { AccountSearchResult } from '../lib/types';
 
 type Tab = 'contacts' | 'search' | 'recent';
@@ -255,7 +255,11 @@ export function Send() {
               className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-lg tabular-nums placeholder-gray-600 focus:border-teal focus:outline-none"
             />
             <button
-              onClick={() => setAmount(displayPoints(balance).replace(/,/g, ''))}
+              // Exact, truncated, separator-free. displayPoints is the human
+              // formatter: it abbreviates above a million ("1.23M", which the
+              // amount field cannot parse) and rounds below it, which could
+              // round up past the balance and reject the send.
+              onClick={() => setAmount(baseUnitsToExactDisplay(balance))}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-teal bg-teal/10 px-2 py-1 rounded hover:bg-teal/20 transition-colors"
             >
               MAX
