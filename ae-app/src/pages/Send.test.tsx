@@ -168,6 +168,36 @@ describe('Send flow', () => {
     expect(signed.to).toBe('recipient-xyz');
   });
 
+  // With commit-time execution the node accepts a transaction but no balance
+  // moves until the block carrying it commits. Saying "Sent" over an unchanged
+  // balance reads to the user as a bug, so the copy has to distinguish the two.
+  it('says pending, not sent, when the node has only accepted the transaction', async () => {
+    mockApi.sendTransaction.mockResolvedValue({
+      success: true,
+      data: { transaction: fakeTx, newBalance: '0', pending: true },
+    });
+
+    render(<Send />);
+    selectRecipientAndEnterAmount('recipient-xyz', '12.50');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(screen.getByText(/Sending/)).toBeTruthy());
+    expect(screen.queryByText(/^Sent /)).toBeNull();
+  });
+
+  it('says sent when the node applied it immediately (receipt mode)', async () => {
+    mockApi.sendTransaction.mockResolvedValue({
+      success: true,
+      data: { transaction: fakeTx, newBalance: '0', pending: false },
+    });
+
+    render(<Send />);
+    selectRecipientAndEnterAmount('recipient-xyz', '12.50');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(screen.getByText(/Sent 12\.50/)).toBeTruthy());
+  });
+
   it('surfaces the error message when the send is rejected', async () => {
     mockApi.sendTransaction.mockResolvedValue({
       success: false,

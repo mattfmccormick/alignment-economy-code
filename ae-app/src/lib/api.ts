@@ -132,8 +132,15 @@ export const api = {
     request<{ points: SharePoint[]; currentDay: number; joinedDay: number }>('GET', `/accounts/${id}/share-history`),
 
   // Transactions
+  // `pending` is true when the node defers a transaction's balance effect to
+  // block commit (the default). The send is accepted, but nothing has moved
+  // yet, so the UI must not claim it has.
   sendTransaction: (body: unknown) =>
-    request<{ transaction: TransactionData; newBalance: string }>('POST', '/transactions', body),
+    request<{ transaction: TransactionData; newBalance: string; pending?: boolean }>(
+      'POST',
+      '/transactions',
+      body,
+    ),
 
   // Contacts
   getContacts: (ownerId: string) =>

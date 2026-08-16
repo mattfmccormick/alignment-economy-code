@@ -147,6 +147,16 @@ export function transactionRoutes(
             pointType: result.transaction.pointType,
           },
           newBalance: sender.earnedBalance.toString(),
+          /**
+           * True when the transaction is accepted but its balance effect has
+           * not happened yet — it lands when the block carrying it commits.
+           *
+           * Without this the wallet says "Sent" over a balance that has not
+           * moved, which is not true yet, and the user watches their number
+           * fail to change. Under receipt-time execution this is false and
+           * "Sent" is accurate.
+           */
+          pending: executionMode === 'commit',
         },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });

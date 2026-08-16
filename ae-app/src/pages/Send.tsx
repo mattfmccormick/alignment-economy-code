@@ -177,7 +177,18 @@ export function Send() {
       });
 
       if (res.success) {
-        setResult({ success: true, message: `Sent ${amountNum.toFixed(2)} ${pointType} points to ${truncateId(to)}` });
+        // Don't claim it has landed when it hasn't. With commit-time execution
+        // the node accepts the transaction but no balance moves until the block
+        // carrying it commits, a few seconds later. Saying "Sent" over an
+        // unchanged balance reads as a bug, and the correction arrives on its
+        // own when the balance:updated event fires at commit.
+        const amountText = `${amountNum.toFixed(2)} ${pointType} points to ${truncateId(to)}`;
+        setResult({
+          success: true,
+          message: res.data.pending
+            ? `Sending ${amountText}. It confirms when the next block commits, usually a few seconds.`
+            : `Sent ${amountText}`,
+        });
         setAmount('');
         setMemo('');
         setRecipient(null);
