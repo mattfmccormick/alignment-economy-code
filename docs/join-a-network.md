@@ -2,6 +2,17 @@
 
 Walks one invitee through joining a network the founder already created. About 5 minutes.
 
+> **Running from source instead of the packaged app?** Build the SDK before
+> either app: `cd sdk && npm install && npm run build`. `ae-app` and `ae-miner`
+> both depend on it via `file:../sdk`, and its `dist/` is gitignored, so a fresh
+> clone does not have it. Skip this and both apps serve a blank page with the
+> only error in the vite terminal, never in the browser.
+>
+> On Windows use PowerShell, and set environment variables with
+> `$env:VAR="value"`. The `set VAR=value` form is Command Prompt syntax; in
+> PowerShell `set` is an alias for `Set-Variable`, so it silently fails to set
+> anything and the node boots with no BFT config at all.
+
 ## What you'll need from the founder
 
 Two things, in two messages:

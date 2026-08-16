@@ -12,6 +12,160 @@ Optimize for, in order:
 
 Deployment-stage and operations work (NAT traversal, public bootstrap nodes, picking a host, code-signing certs, running infrastructure, external audits) is explicitly the professional team's job. We make the code ready for that work and document the seams. We do not have to operate it ourselves.
 
+## Two-laptop bring-up audit (August 16, 2026)
+
+First attempt to run the two-laptop LAN test from a clean `git clone`. It did not
+work, and the reasons were not in the consensus layer. A code audit of the four
+paths the test depends on (wallet account creation, genesis keystore identity,
+the dev seeding script, send + miner registration) turned up a set of defects
+that unit tests structurally could not catch, because every one of them lives in
+the seam between two packages that are only ever tested apart.
+
+### Fixed this session
+
+- **Transaction signatures were broken for every send.** `ae-app`'s Send page and
+  the public SDK's `signTransaction` both built a 6-key payload
+  (`from, to, amount, pointType, isInPerson, memo`), while `ae-node` verifies a
+  7-key one that also carries `recipientIsHuman` (`core/transaction.ts`). Both
+  sides hash a raw `JSON.stringify` with no key canonicalization
+  (`core/crypto.ts`), so the byte strings differed and ML-DSA verification
+  returned false 100% of the time. Every wallet send returned
+  `400 INVALID_SIGNATURE`. Fixed in `ae-app/src/pages/Send.tsx` and
+  `sdk/src/client.ts` by signing `recipientIsHuman: false` in the position the
+  node expects. Verified two ways: byte-level (old payload rejected, new one
+  accepted by the node's own `verifyPayload`) and end-to-end against a throwaway
+  node (old → `400 INVALID_SIGNATURE`, new → `200`, recipient balance moved).
+  **Why 663 green tests missed it:** the node's tests build the correct 7-key
+  payload themselves, and `ae-app/src/pages/Send.test.tsx` mocks the API client.
+  Nothing anywhere signs with the wallet's code and verifies with the node's.
+  That seam is still untested and should get a contract test, in the spirit of
+  `api-shape-contract.test.ts` but for signing payloads.
+- **Six onboarding screens were unreachable.** `network-mode`, `start-new-form`,
+  `start-new-generating`, `start-new-result`, `join-existing-form` and
+  `restart-to-apply` formed an island: the only `setFlow('network-mode')` calls
+  were the "Back" buttons on screens inside the island itself. `what-is-ae` was
+  orphaned the same way. The genesis ceremony and the validator keystore import,
+  the entire operator path documented in `docs/start-a-network.md` and
+  `docs/join-a-network.md`, could not be reached from the shipped app. Added two
+  text links on the welcome screen. Both target screens already had working Back
+  buttons, so the loop closes. Verified by clicking through to the keystore
+  upload in a real browser.
+- **Miner assignment dead-ended on small networks.** `mining/fifo-queue.ts`
+  returned `[]` when the conflict-of-interest filter emptied the pool, which is
+  guaranteed on a two-person network the moment the pair transacts. That created
+  a panel with zero assignments, and `api/routes/verification.ts` 403s
+  `NOT_ASSIGNED` for any miner without an assignment row, so the panel could
+  never complete. Panel completion is one of only two writers of `percentHuman`,
+  so the account was stuck with no in-app escape. Added a small-network fallback
+  mirroring the heartbeat bootstrap allowance already in the same function: if
+  the conflict filter empties the pool, keep the conflicted miners and log a
+  warning. The file header comment claimed both filters already degraded
+  gracefully; only the heartbeat one did. Now both do.
+- **`scripts/dev-bump-ph.mjs` was a silent one-shot.** The `AND percent_human <
+  100` predicate meant a second run changed zero rows while printing output
+  indistinguishable from success, so it could not be used to top an account back
+  up. It also had no path guard: run from a directory that happens to contain a
+  `data/` folder, `DatabaseSync` created a 0-byte DB and the script died on
+  `no such table: accounts`; run from anywhere else it died on `unable to open
+  database file`. Both are raw stack traces rather than "run this from
+  ae-node/". Now guards with `existsSync`, drops the predicate so it is
+  idempotent and re-runnable as a top-up, and reports the actual changed-row
+  count so a no-op run is visible.
+- **`.gitignore` did not cover genesis keystores.** `npm run genesis:init` writes
+  one keystore per validator named by bare accountId (`1cedf4e2….json`), matching
+  neither `*-key.json` nor `*-keys.json`. Nothing stopped a `git add .` from
+  committing live ML-DSA private keys. Added `**/keys/*.json` and `**/testnet/`.
+- **README skipped the SDK build.** `ae-app` and `ae-miner` both depend on
+  `@alignmenteconomy/sdk` via `file:../sdk`, whose `main` points at gitignored
+  `dist/`. A fresh clone that follows the README verbatim gets a blank page from
+  both apps, and the only symptom is a vite `Failed to resolve import` in the
+  terminal, never in the browser. Documented as a required first step.
+
+### Open blockers (not fixed, ordered by severity)
+
+1. **Accounts never replicate between nodes.** `createAccount` is called from
+   exactly two places, the API route and `seed-test.ts`. It is a plain local
+   `INSERT` (`SqliteAccountStore.insert`) with no gossip, no mempool, no
+   transaction type. An account created in the wallet exists only on that
+   node's SQLite. On a multi-validator network the second node has no row for
+   it, so `replayTransaction` throws `Replay: sender account not found` the
+   moment a block carrying that account's transaction arrives. This is the
+   single thing most blocking a real two-machine test. The proper fix is an
+   account-registration transaction that rides a block like any other state
+   change. Interim workaround: `deriveAccountId` is `sha256(publicKey)`
+   truncated, so POSTing the same public key to both nodes yields the same
+   accountId on both and keeps the DBs consistent.
+2. **The block-apply path is unguarded, so any replay throw kills the node.**
+   `BftBlockProducer`'s commit loop and `BftDriver.onCommit` have no try/catch.
+   A throw aborts the block apply (no insert, no cert, no fee distribution, no
+   day cycle), then propagates out through the transport to a raw
+   `ws.on('message')` listener. There are no `uncaughtException` or
+   `unhandledRejection` handlers anywhere in `ae-node`, so the realistic outcome
+   is the process dying. The sync path and the gossip path both catch; the
+   consensus commit path does not. This is the amplifier that turns any state
+   divergence into a chain halt, and with two validators one node stopping stops
+   everything.
+3. **Blocks carry no state root.** `computeBlockHash` covers number, previous
+   hash, timestamp, merkle root, day, prev cert and validator changes. No
+   balance or account commitment, and no `stateRoot`/`appHash` anywhere in the
+   codebase. Balance divergence surfaces only indirectly, as a
+   `Replay: insufficient <type> balance` throw the first time a divergent
+   account spends. `percentHuman` divergence produces no error at all, ever,
+   because `replayTransaction` takes `netAmount` off the wire verbatim and never
+   re-derives the spend multiplier locally.
+4. **Followers vote on blocks they cannot apply.** `validateStashedBlock` checks
+   stash presence and timestamp only, never dry-runs the transactions. Its own
+   comment concedes "a stash-presence check IS the content check for now". A
+   follower will prevote and precommit a block that is guaranteed to throw on
+   its own apply, which is what makes (2) reachable.
+5. **The default "Create Account" needs a platform server nothing starts.**
+   `ae-app/src/lib/platform.ts` falls back to `http://localhost:3500/api/v1`.
+   Electron's `main.cjs` spawns only `ae-node`, and `extraResources` copies only
+   `ae-node`, so a packaged install does not even contain platform-server. The
+   user sees a raw "Failed to fetch" because the SDK never wraps the fetch
+   rejection, which means the friendly "Is the platform server running?" string
+   at `Onboarding.tsx:226` is unreachable on the exact failure it was written
+   for. Workaround today: the "Expert: I'll hold my own keys instead" link.
+6. **Genesis validator accounts cannot sign into either app.** Genesis keystores
+   hold a raw ML-DSA keypair generated by `generateKeyPair()`, with no BIP39
+   mnemonic. Both apps' sign-in requires accountId plus a 12-word phrase and
+   checks the derived public key matches, so no phrase can ever reproduce a
+   genesis key. Validator identity and wallet identity are separate things
+   today. The wallet can now at least reach keystore import again (see fixed
+   above); `ae-miner` still has no keystore path at all, though
+   `saveMinerWallet` exists unused and the Electron bridge is wired but never
+   called from the UI.
+7. **Vouching never moves `percentHuman`.** `createVouch` locks real stake and
+   inserts a row but never calls `updatePercentHuman`. The only writers are
+   panel completion and decay. A tester watches the secondary "Evidence Score"
+   tile climb while the large %Human gauge and the wallet's spend multiplier
+   both stay pinned at 0, and nothing tells them a miner panel is still
+   required. Miner-in-the-loop is the intended design; the gap is that the UI
+   never says so.
+8. **The second person cannot become a miner.** `registerMiner` exempts only the
+   first miner from the `percentHuman >= 50` floor, and raising a score requires
+   a panel, which requires a miner. The register failure is also rendered as a
+   raw API string in the miner UI.
+9. **Supportive and ambient points never pay out.** `finalizeSupportiveTags` and
+   `finalizeAmbientTags` have no production caller anywhere in `ae-node/src`;
+   they are referenced only from tests (phase6, phase12, phase61). Two of the
+   four point types in the white paper do not currently reach anyone's balance.
+10. **The legacy genesis path is sticky.** The genesis branch is gated on
+    `if (!getLatestBlock(db))`. A node that boots once without
+    `AE_GENESIS_CONFIG_PATH` writes a random-timestamp genesis; setting the path
+    afterwards does not retro-apply accounts, it only sets `networkId`. The node
+    then advertises the real network over a legacy genesis hash and fails the
+    peer handshake on `genesisHash`. The only fix is deleting the DB.
+
+### Note on the operator docs
+
+`docs/start-a-network.md` and `docs/join-a-network.md` describe the packaged
+desktop flow. The two-laptop PDF Matt was working from describes a raw
+terminal flow. Both are missing the SDK build step, and the PDF's Windows
+instructions use `set VAR=value`, which is Command Prompt syntax that silently
+does nothing in PowerShell (it is an alias for `Set-Variable`, so the node boots
+with no BFT config at all). PowerShell needs `$env:VAR="value"`.
+
 ## Current honest status (July 29, 2026)
 
 - **UX review round is live (July 29).** A full frontend screenshot walkthrough (every wallet + miner screen, captured headless against a running node) shipped as `AE-Frontend-Walkthrough.pdf` for Matt's markup. The walkthrough + the new shape-contract suite surfaced and fixed **four real frontend bugs** that all unit tests missed: (1) miner declared `account.balances.{...}` nested while the API sends flat `activeBalance` fields — every authed miner screen crashed blank; (2) miner rendered the evidence-score breakdown object directly as a React child — same crash; (3) miner declared the miner row snake_case (`is_active`/`registered_at`) vs the API's camelCase — Dashboard showed "Inactive / Registered --" and a 0% uptime gauge for real active miners; (4) miner's API client hardcoded `localhost:3001` in browser dev so its Vite proxy was dead code and every dev API call was connection-refused. Guards now exist so this class can't silently recur: `ae-node/tests/api-shape-contract.test.ts` pins the wire shapes the frontends declare, and `scripts/smoke-pages.mjs` renders all 19 wallet+miner routes in a real headless browser against a live node (19/19 green).
@@ -25,7 +179,9 @@ Deployment-stage and operations work (NAT traversal, public bootstrap nodes, pic
 
 See "Build plan to handoff" below for the ownership-tagged to-do list.
 
-> Last updated: July 29, 2026. 75 build phases, 663 blocking tests (607 ae-node incl. the new shape-contract suite + 20 SDK + 36 platform-server) plus the non-blocking multi-runner e2e set and the 19-route page smoke script. The chain runs end-to-end (multi-validator BFT, real txs, on-chain validator changes, sync replay) on a real WebSocket P2P layer. **Milestone 2 (Whitepaper completeness) is 6/6 done.** **WP v2 alignment is complete** (7 build groups, July 2026): (1) treasury deleted, fee split now 20/80 Tier 1/Tier 2; (2) court burns are true burns (supply decreases), innocent verdict splits 50/50 (compensation/burn); (3) rebase target raised from 14,400 to 525,600 (1 minute = 1 point); (4) percentHuman discount applies only to daily-point spends (not earned); (5) mandatory `humanTag` field on every transaction; (6) percentage-based vouching (stake % of total holdings, not fixed points); (7) court escrow (defendant's earned transfers blocked while case is open); (8) parameter governance (Constitutional/Bounded/Algorithmic/Open classes per Appendix A); (9) blockchain pruning (7-year rolling window, governed 3-15 year bounds). Phase 73 foundation hardening: pure bigint fee/court/tagging math, supply conservation integration test, rebase stress test at 500 accounts.
+> Last updated: August 16, 2026 (see "Two-laptop bring-up audit" above; the
+> paragraph below is the July 29 state and its test counts predate that audit).
+> July 29, 2026. 75 build phases, 663 blocking tests (607 ae-node incl. the new shape-contract suite + 20 SDK + 36 platform-server) plus the non-blocking multi-runner e2e set and the 19-route page smoke script. The chain runs end-to-end (multi-validator BFT, real txs, on-chain validator changes, sync replay) on a real WebSocket P2P layer. **Milestone 2 (Whitepaper completeness) is 6/6 done.** **WP v2 alignment is complete** (7 build groups, July 2026): (1) treasury deleted, fee split now 20/80 Tier 1/Tier 2; (2) court burns are true burns (supply decreases), innocent verdict splits 50/50 (compensation/burn); (3) rebase target raised from 14,400 to 525,600 (1 minute = 1 point); (4) percentHuman discount applies only to daily-point spends (not earned); (5) mandatory `humanTag` field on every transaction; (6) percentage-based vouching (stake % of total holdings, not fixed points); (7) court escrow (defendant's earned transfers blocked while case is open); (8) parameter governance (Constitutional/Bounded/Algorithmic/Open classes per Appendix A); (9) blockchain pruning (7-year rolling window, governed 3-15 year bounds). Phase 73 foundation hardening: pure bigint fee/court/tagging math, supply conservation integration test, rebase stress test at 500 accounts.
 >
 > **Repo layout:** This is `alignment-economy-code` (apps + protocol). The marketing website lives in a separate sibling repo at `alignment-economy-website` (was `ae-platform/`). Don't mix them.
 

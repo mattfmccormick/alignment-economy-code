@@ -46,8 +46,13 @@ vi.mock('../hooks/useAccount', () => ({
 }));
 
 // Deterministic signature so we can assert the envelope without real crypto.
+// A spy rather than a bare arrow so tests can inspect the payload that was
+// actually signed — see the canonical-shape test below.
+const mockSignPayload = vi.hoisted(() =>
+  vi.fn((_payload: object, _timestamp: number, _privateKey: string) => 'test-signature'),
+);
 vi.mock('../lib/crypto', () => ({
-  signPayload: () => 'test-signature',
+  signPayload: mockSignPayload,
 }));
 
 // Mock the whole API client. NOTE: formatting.ts is intentionally NOT mocked —
@@ -120,6 +125,47 @@ describe('Send flow', () => {
     expect(arg.payload.isInPerson).toBe(false);
     expect(arg.accountId).toBe('me');
     expect(arg.signature).toBe('test-signature');
+  });
+
+  // Regression guard for the August 16 2026 signature bug.
+  //
+  // signPayload/verifyPayload on both sides hash a raw JSON.stringify with no
+  // key canonicalization, so the signed bytes depend on the exact key SET and
+  // INSERTION ORDER. This page previously omitted `recipientIsHuman`, which
+  // ae-node's processTransaction includes when it rebuilds the payload to
+  // verify (ae-node/src/core/transaction.ts). The byte strings differed and
+  // ML-DSA verification returned false, so every single send came back
+  // 400 INVALID_SIGNATURE.
+  //
+  // Nothing caught it: the node's own tests build the correct payload
+  // themselves, and this file mocks the API client. Asserting the key order
+  // here is the cheap guard. If ae-node ever changes its verification payload,
+  // this test must change with it, in lockstep.
+  it('signs the exact payload shape and key order ae-node verifies', async () => {
+    mockApi.sendTransaction.mockResolvedValue({
+      success: true,
+      data: { transaction: fakeTx, newBalance: '0' },
+    });
+
+    render(<Send />);
+    selectRecipientAndEnterAmount('recipient-xyz', '12.50');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockSignPayload).toHaveBeenCalled());
+
+    const signed = mockSignPayload.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(signed)).toEqual([
+      'from',
+      'to',
+      'amount',
+      'pointType',
+      'isInPerson',
+      'recipientIsHuman',
+      'memo',
+    ]);
+    expect(signed.recipientIsHuman).toBe(false);
+    expect(signed.from).toBe('me');
+    expect(signed.to).toBe('recipient-xyz');
   });
 
   it('surfaces the error message when the send is rejected', async () => {

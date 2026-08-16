@@ -226,15 +226,23 @@ describe('SDK v0.1 smoke', () => {
       privateKey: sender.privateKey,
     });
 
-    // Re-derive what the server would verify against and confirm the sig
-    // checks out. This is the exact payload shape ae-node signs in
-    // tests/phase1.test.ts.
+    // Re-derive what the server actually verifies against and confirm the sig
+    // checks out. This must mirror ae-node/src/core/transaction.ts, which
+    // builds { from, to, amount, pointType, isInPerson, recipientIsHuman, memo }
+    // before calling verifyPayload.
+    //
+    // This literal previously omitted recipientIsHuman, matching the SDK's own
+    // (wrong) payload rather than the node's. Both sides of the assertion were
+    // wrong in the same way, so it passed while every real send failed with
+    // 400 INVALID_SIGNATURE. Keep this in sync with the NODE, never with
+    // signTransaction — asserting the SDK against itself proves nothing.
     const payload = {
       from: senderId,
       to: recipientId,
       amount: amountBaseUnits.toString(),
       pointType: 'earned' as const,
       isInPerson: false,
+      recipientIsHuman: false,
       memo: '',
     };
     assert.equal(verifyPayload(payload, timestamp, signature, sender.publicKey), true);

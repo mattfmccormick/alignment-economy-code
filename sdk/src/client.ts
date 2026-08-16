@@ -299,16 +299,23 @@ export function signTransaction(opts: {
   amountBaseUnits: bigint;
   pointType: TransactionPayload['pointType'];
   isInPerson?: boolean;
+  recipientIsHuman?: boolean;
   memo?: string;
   privateKey: string;
 }): { timestamp: number; signature: string } {
   const timestamp = Math.floor(Date.now() / 1000);
+  // Key order and key set both matter: signPayload/verifyPayload hash a raw
+  // JSON.stringify with no canonicalization. ae-node verifies
+  // { from, to, amount, pointType, isInPerson, recipientIsHuman, memo }, so
+  // recipientIsHuman must be present here in that position or every signature
+  // is rejected with INVALID_SIGNATURE.
   const payload = {
     from: opts.from,
     to: opts.to,
     amount: opts.amountBaseUnits.toString(),
     pointType: opts.pointType,
     isInPerson: opts.isInPerson ?? false,
+    recipientIsHuman: opts.recipientIsHuman ?? false,
     memo: opts.memo ?? '',
   };
   const signature = signPayload(payload, timestamp, opts.privateKey);

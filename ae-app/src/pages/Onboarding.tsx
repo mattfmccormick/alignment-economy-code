@@ -688,6 +688,33 @@ export function Onboarding() {
           Sign In
         </button>
 
+        {/* Entry points into two screen groups that were previously
+            unreachable. Both existed with working handlers, but the only
+            setFlow() calls that led to them were the "Back" buttons on the
+            screens themselves, so no user could ever arrive.
+
+            'what-is-ae' is the plain-language explainer. 'network-mode' is
+            the door to the genesis ceremony (start a new network) and to
+            validator keystore import (join an existing one) — the whole
+            operator path documented in docs/start-a-network.md and
+            docs/join-a-network.md, which was unreachable from the shipped
+            app. Kept as low-key text links so the two primary buttons above
+            stay the obvious choice for a normal participant. */}
+        <div className="flex flex-col items-center gap-3 mt-8">
+          <button
+            onClick={() => setFlow('what-is-ae')}
+            className="text-sm text-gray-500 hover:text-gray-300 transition-colors underline underline-offset-4"
+          >
+            New here? What is the Alignment Economy?
+          </button>
+          <button
+            onClick={() => setFlow('network-mode')}
+            className="text-sm text-gray-500 hover:text-gray-300 transition-colors underline underline-offset-4"
+          >
+            Start or join a network (advanced)
+          </button>
+        </div>
+
         {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
       </div>
     );

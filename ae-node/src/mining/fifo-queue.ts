@@ -12,6 +12,7 @@ import { v4 as uuid } from 'uuid';
 import { getActiveMiners, miningStore } from './registration.js';
 import { transactionStore } from '../core/transaction.js';
 import { getParam } from '../config/params.js';
+import { logger } from '../node/logger.js';
 
 export interface QueueEntry {
   panelId: string;
@@ -58,13 +59,38 @@ export function assignMinersToPanel(
   // (Still inline — the conflict-of-interest query crosses tables in a way
   // ITransactionStore could grow to express, but a single dedicated method
   // is cleaner than overloading the contract here.)
-  eligible = eligible.filter((m) => {
+  const beforeConflictFilter = eligible;
+  const conflictFree = eligible.filter((m) => {
     const txCount = db.prepare(
       `SELECT COUNT(*) as cnt FROM transactions
        WHERE ("from" = ? AND "to" = ?) OR ("from" = ? AND "to" = ?)`,
     ).get(m.accountId, accountId, accountId, m.accountId) as { cnt: number };
     return txCount.cnt === 0;
   });
+
+  // Small-network fallback, mirroring the heartbeat bootstrap allowance above.
+  //
+  // On an early network every active miner may have transacted with the
+  // applicant, which empties the pool. Returning [] there is not a soft
+  // degradation — it creates a panel with zero assignments, and the scoring
+  // route rejects every miner with 403 NOT_ASSIGNED because there is no
+  // assignment row. That panel can never complete, and since panel completion
+  // is one of only two writers of percentHuman, the account is stuck at its
+  // current score with no in-app way out.
+  //
+  // Preferring a conflicted reviewer over no reviewer is the lesser evil while
+  // the network is too small to honour the constraint. Once enough independent
+  // miners exist the filter applies normally and this branch stops firing.
+  if (conflictFree.length === 0 && beforeConflictFilter.length > 0) {
+    logger.warn(
+      'mining',
+      `Conflict-of-interest filter left no eligible miners for panel ${panelId} ` +
+        `(applicant ${accountId}); falling back to the ${beforeConflictFilter.length} ` +
+        `conflicted miner(s) so the panel can still complete. This network is too ` +
+        `small to enforce reviewer independence.`,
+    );
+  }
+  eligible = conflictFree.length > 0 ? conflictFree : beforeConflictFilter;
 
   // Filter out miners already assigned to this panel
   const assignedIds = new Set(mining.findAssignmentMinerIds(panelId));

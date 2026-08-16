@@ -38,11 +38,24 @@ AE_PROJECT_BRIEF.md  Original project brief.
 
 Run each project from its own directory:
 
+**Build the SDK first.** `ae-app` and `ae-miner` both depend on
+`@alignmenteconomy/sdk` via `file:../sdk`, and its `package.json` points
+`main` at `dist/index.js`. `dist/` is gitignored, so a fresh clone does not
+have it. Skip this step and both apps serve a blank page: vite fails with
+`Failed to resolve import "@alignmenteconomy/sdk"` and returns 500 for every
+module. The error appears only in the terminal running vite, never in the
+browser, which makes it very easy to misdiagnose.
+
 ```bash
+cd sdk && npm install && npm run build        # REQUIRED before ae-app / ae-miner
 cd ae-node && npm install && npm run dev      # protocol on :3000
 cd ae-app && npm install && npm run dev       # wallet on :5173
 cd ae-miner && npm install && npm run dev     # miner dashboard on :5174
 ```
+
+Re-run `npm run build` in `sdk/` after any change to `sdk/src/` — the apps
+consume the built `dist/`, not the TypeScript source, so edits are invisible
+until you rebuild.
 
 For the 2-person test setup see `CLAUDE.md` (search "2-Person Testing").
 
@@ -57,9 +70,24 @@ node scripts/dev-bump-ph.mjs            # uses ./data/ae-node.db
 node scripts/dev-bump-ph.mjs path.db    # explicit DB path
 ```
 
-It opens the DB in WAL mode, sets every active individual's
-`percentHuman` to 100, and seeds each with 5,000 earned points so you
-have something to spend. Safe to run while the node is running.
+It opens the DB in WAL mode, sets every individual account's `percentHuman`
+to 100, and sets each earned balance to 5,000 points so you have something
+to spend. Safe to run while the node is running, and safe to re-run (it is
+idempotent, so it doubles as a top-up when you spend a test account dry).
+
+Run it from `ae-node/` or pass an explicit path. It refuses to run against a
+missing DB rather than silently creating an empty one.
+
+**Single-node use only.** This writes account state directly to one node's
+SQLite file, outside consensus. Blocks carry no state root, so a
+multi-validator network cannot detect the resulting divergence: `percentHuman`
+drift is silent forever, and balance drift surfaces only as a
+`Replay: insufficient <type> balance` throw on the un-bumped node the first
+time a seeded account spends. Run it on every node of a network, or none.
+
+The miner dashboard picks up the change within 30 seconds (it polls). The
+wallet does not poll and a raw SQL write emits no `balance:updated` event, so
+switch tabs or reload to see new numbers there.
 
 ### LAN multi-validator test
 

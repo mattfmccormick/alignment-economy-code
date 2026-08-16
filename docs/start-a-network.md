@@ -8,6 +8,22 @@ Generating a **genesis ceremony**: a public network spec everyone shares, plus o
 
 The founder runs the ceremony, distributes keystores privately to invitees, and shares the spec publicly. Each invitee installs the wallet, joins the network with their keystore, and starts validating.
 
+> **Running from source instead of the packaged app?** Build the SDK before
+> either app: `cd sdk && npm install && npm run build`. `ae-app` and `ae-miner`
+> both depend on it via `file:../sdk`, and its `dist/` is gitignored, so a fresh
+> clone does not have it. Skip this and both apps serve a blank page with the
+> only error in the vite terminal, never in the browser.
+>
+> On Windows use PowerShell, and set environment variables with
+> `$env:VAR="value"`. The `set VAR=value` form is Command Prompt syntax; in
+> PowerShell `set` is an alias for `Set-Variable`, so it silently fails to set
+> anything and the node boots with no BFT config at all.
+>
+> The genesis ceremony is also available from the terminal without the desktop
+> app: `npm run genesis:init -- --output ./testnet --network-id <id>
+> --validators <n> --names <a,b>` from `ae-node/`. It writes `genesis.json` plus
+> one keystore per validator under `keys/`, and prints the spec hash.
+
 ## What you need
 
 - The Alignment Economy Wallet installed on each machine (download links in the project README).

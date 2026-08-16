@@ -31,6 +31,14 @@ phase*.log
 !.env.example
 *-key.json
 *-keys.json
+# Genesis ceremony output. `npm run genesis:init` writes one keystore per
+# validator named by bare accountId (e.g. 1cedf4e2…feca.json), which matches
+# none of the *-key.json patterns above. Each of those files is a live ML-DSA
+# private key. genesis.json itself is public, but it lives in the same tree
+# and is per-network, so the whole output directory stays out of git.
+**/keys/*.json
+testnet/
+**/testnet/
 data/node-key.json
 data/test-keys.json
 *.pem

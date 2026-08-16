@@ -142,13 +142,20 @@ export function Send() {
       const storageAmount = toBaseUnits(amountNum);
       const timestamp = Math.floor(Date.now() / 1000);
 
-      // Build payload for signing (must match backend verification format)
+      // Build payload for signing (must match backend verification format).
+      // Key order and key set both matter: signPayload/verifyPayload hash a raw
+      // JSON.stringify with no canonicalization, so a missing or reordered key
+      // changes the bytes and the signature fails. The node verifies
+      // { from, to, amount, pointType, isInPerson, recipientIsHuman, memo }
+      // (core/transaction.ts), defaulting recipientIsHuman to false when the
+      // wire payload omits it, so we sign false here to match.
       const internalPayload = {
         from,
         to,
         amount: storageAmount,
         pointType,
         isInPerson: false,
+        recipientIsHuman: false,
         memo: memo || '',
       };
 
