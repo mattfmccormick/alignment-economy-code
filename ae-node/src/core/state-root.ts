@@ -1,0 +1,89 @@
+// Deterministic fingerprint of the ledger's account state.
+//
+// Why this exists
+// ---------------
+// Blocks commit to their transactions (via merkleRoot) but not to the state
+// those transactions produce. `computeBlockHash` covers number, previous hash,
+// timestamp, merkle root, day, parent cert and validator changes — no balance
+// or account commitment anywhere, and no stateRoot/appHash existed in the
+// codebase at all.
+//
+// The consequence was that two nodes could disagree about every balance on the
+// network and nothing would ever say so. Balance drift surfaced only
+// indirectly, as a `Replay: insufficient <type> balance` throw the first time a
+// divergent account happened to spend more than the lagging node thought it
+// had. percentHuman drift produced no error whatsoever, ever, because
+// `replayTransaction` takes netAmount off the wire verbatim and never
+// re-derives the spend multiplier locally — so nodes silently converged on the
+// proposer's arithmetic while holding different views of who is verified.
+//
+// Scope, deliberately
+// -------------------
+// This root is carried in the gossiped block payload and checked by receivers.
+// It is NOT yet folded into the block hash. That ordering is intentional:
+//
+//   - as a payload field it needs no schema migration, no change to block
+//     hashing, and no change to how historical blocks verify during sync, so it
+//     can land without putting a working chain at risk;
+//   - it already solves the actual problem, which is accidental divergence
+//     going unnoticed (a direct SQL write on one node, an account that only
+//     exists on its creator) — the failures that were silent are now loud.
+//
+// What it does not yet do is make divergence unforgeable: a malicious proposer
+// could publish a root that does not match its own state, because nothing
+// signs over it. Folding `stateRootHash` into computeBlockHash the way
+// `validatorChangesHash` already is closes that, and is backward compatible
+// because the optional parts hash as '' when absent. That is the follow-up.
+
+import { DatabaseSync } from 'node:sqlite';
+import { sha256 } from './crypto.js';
+
+/**
+ * Hash every account's consensus-relevant fields into one 64-char digest.
+ *
+ * Ordered by id so the result does not depend on insertion order or on
+ * SQLite's row layout. Balances are read as the TEXT they are stored as, which
+ * keeps the digest exact — going through Number would silently lose precision
+ * above 2^53 and make the root disagree between nodes for large balances,
+ * which is precisely the bug class this is meant to catch.
+ *
+ * Included: id, type, percentHuman, and all five balances. These are the
+ * fields consensus actually depends on.
+ *
+ * Excluded: createdAt and joinedDay (set locally, never re-derived from the
+ * chain, and a replicated account legitimately carries the origin node's
+ * values), plus anything cosmetic. Including a locally-set timestamp would
+ * make the root differ between honest nodes and render it useless.
+ */
+export function computeStateRoot(db: DatabaseSync): string {
+  const rows = db
+    .prepare(
+      `SELECT id, type, percent_human, active_balance, supportive_balance,
+              ambient_balance, earned_balance, locked_balance
+         FROM accounts
+        ORDER BY id ASC`,
+    )
+    .all() as Array<{
+      id: string;
+      type: string;
+      percent_human: number;
+      active_balance: string;
+      supportive_balance: string;
+      ambient_balance: string;
+      earned_balance: string;
+      locked_balance: string;
+    }>;
+
+  // Pipe-delimited per row, newline between rows. Field values are hex ids,
+  // enum-ish type strings and decimal integers, none of which can contain the
+  // delimiters, so the encoding is unambiguous without escaping.
+  const canonical = rows
+    .map(
+      (r) =>
+        `${r.id}|${r.type}|${r.percent_human}|${r.active_balance}|${r.supportive_balance}|` +
+        `${r.ambient_balance}|${r.earned_balance}|${r.locked_balance}`,
+    )
+    .join('\n');
+
+  return sha256(`ae.stateRoot.v1\n${canonical}`);
+}

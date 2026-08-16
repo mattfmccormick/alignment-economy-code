@@ -270,18 +270,35 @@ export function Verify() {
         </div>
       </div>
 
-      {/* Evidence score */}
+      {/* Evidence score.
+          Two numbers on this screen move independently and people read them as
+          the same thing. Evidence Score climbs as vouches and documents come
+          in; the big % human gauge above does not move until a miner panel
+          completes and writes the median of the reviewers' scores. Someone who
+          collected five vouches and watched their spendable value stay at zero
+          reasonably concluded the app was broken. Say plainly that evidence is
+          the case, and the panel is the verdict. */}
       {vouchScore && (
-        <div className="bg-navy rounded-xl p-3 border border-navy-light flex justify-around text-center">
-          <div>
-            <p className="text-lg text-white tabular-nums">{vouchScore.totalScore}</p>
-            <p className="text-xs text-gray-500">Evidence Score</p>
+        <div className="bg-navy rounded-xl p-3 border border-navy-light space-y-3">
+          <div className="flex justify-around text-center">
+            <div>
+              <p className="text-lg text-white tabular-nums">{vouchScore.totalScore}</p>
+              <p className="text-xs text-gray-500">Evidence Score</p>
+            </div>
+            <div className="w-px bg-navy-light" />
+            <div>
+              <p className="text-lg text-white tabular-nums">{vouchScore.vouchCount}</p>
+              <p className="text-xs text-gray-500">Vouches</p>
+            </div>
           </div>
-          <div className="w-px bg-navy-light" />
-          <div>
-            <p className="text-lg text-white tabular-nums">{vouchScore.vouchCount}</p>
-            <p className="text-xs text-gray-500">Vouches</p>
-          </div>
+          {score === 0 && vouchScore.totalScore > 0 && (
+            <p className="text-xs text-gray-400 leading-relaxed border-t border-navy-light pt-3">
+              Your evidence is building, but your % human is still 0. Vouches and
+              documents do not set your score on their own, a miner does. Request a
+              review below and the miners assigned to you will read this evidence and
+              set your score between them.
+            </p>
+          )}
         </div>
       )}
 

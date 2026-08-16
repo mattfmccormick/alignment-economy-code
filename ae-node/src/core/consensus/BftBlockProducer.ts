@@ -42,6 +42,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { runTransaction } from '../../db/connection.js';
 import { logger } from '../../node/logger.js';
+import { computeStateRoot } from '../state-root.js';
 
 /**
  * Sentinel thrown to unwind a successful dry run so runTransaction rolls it
@@ -350,6 +351,37 @@ export class BftBlockProducer {
     );
     if (!timestampCheck.valid) return timestampCheck;
 
+    // State-root agreement, checked before the dry run because it is a cheap
+    // hash comparison and because a mismatch explains a dry-run failure that
+    // would otherwise look like a bad block rather than a diverged node.
+    //
+    // The proposer publishes its view of state as of the parent block; we hold
+    // that state too, so the digests must match. When they do not, one of us
+    // has drifted — an account only one node knows about, a direct SQL write,
+    // a percentHuman set locally — and voting for the block would bake that
+    // disagreement into the chain.
+    //
+    // Absent field means an older proposer that makes no claim. Vote normally
+    // rather than rejecting: refusing would partition the network on a version
+    // difference, which is worse than the drift this is meant to surface.
+    if (typeof payload.parentStateRoot === 'string') {
+      const localRoot = computeStateRoot(this.db);
+      if (localRoot !== payload.parentStateRoot) {
+        const result = {
+          valid: false,
+          error:
+            `state divergence at height ${payload.number}: proposer's parent state root ` +
+            `${payload.parentStateRoot.slice(0, 16)}… does not match local ` +
+            `${localRoot.slice(0, 16)}…. This node's balances or percentHuman values ` +
+            `disagree with the proposer's. Common causes: an account that exists only on ` +
+            `one node, or scripts/dev-bump-ph.mjs run on some nodes but not all.`,
+        };
+        logger.error('bft', `Voting NIL: ${result.error}`);
+        this.dryRunCache.set(blockHash, result);
+        return result;
+      }
+    }
+
     return this.dryRunTransactions(blockHash, payload);
   }
 
@@ -489,6 +521,14 @@ export class BftBlockProducer {
       prevCommitCertHash,
       txIds,
       transactions: txs.map(txRowToWire),
+      // State as of the END of the parent block, i.e. before this block's
+      // transactions apply. Deliberately the parent's rather than this
+      // block's: every receiver already holds that state, so the check needs
+      // no prediction of post-apply side effects (fee distribution, day
+      // cycle, validator changes) and stays a pure comparison. Divergence is
+      // caught one block later than a post-state root would catch it, which
+      // costs nothing when the alternative was never catching it at all.
+      parentStateRoot: computeStateRoot(this.db),
       ...(validatorChanges.length > 0 ? { validatorChanges } : {}),
       ...(parentCert ? { parentCertificate: parentCert } : {}),
       ...(parentSnapshot ? { parentValidatorSnapshot: parentSnapshot } : {}),

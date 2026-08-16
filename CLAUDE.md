@@ -183,25 +183,57 @@ alongside the fixes above.
   explicit "delete the DB and restart" message rather than running a node that
   can never peer.
 
+### Fourth pass: state divergence is detectable, and the UI stops lying
+
+- **Nodes can now tell when they disagree.** Blocks commit to their
+  transactions via `merkleRoot` but never to the state those transactions
+  produce, and no `stateRoot`/`appHash` existed anywhere. Two nodes could
+  disagree about every balance on the network and nothing would say so: balance
+  drift surfaced only as an incidental `Replay: insufficient <type> balance`
+  throw the first time a divergent account overspent, and `percentHuman` drift
+  produced no error at any point, ever, because `replayTransaction` takes
+  `netAmount` off the wire verbatim and never re-derives the spend multiplier.
+  New `core/state-root.ts` hashes every account's id, type, percentHuman and
+  five balances, ordered by id, reading balances as the TEXT they are stored as
+  so precision above 2^53 survives. The proposer publishes its root for the
+  PARENT block in the gossip payload; receivers compare against their own
+  before voting and vote NIL on mismatch with a message naming the likely
+  cause. Parent state rather than post-apply state, because every receiver
+  already holds it, so no prediction of fee distribution or day-cycle side
+  effects is needed.
+  **Scope, deliberately:** the root rides the payload, it is not yet folded
+  into the block hash. That needs no schema migration and no change to how
+  historical blocks verify during sync, so it lands without risking a working
+  chain, and it already solves the real problem (accidental divergence going
+  unnoticed). What it does not yet do is make the claim unforgeable — nothing
+  signs over it. Folding `stateRootHash` into `computeBlockHash` the way
+  `validatorChangesHash` already is closes that and is backward compatible,
+  since the optional parts hash as `''` when absent. Written up in the module
+  header. New suite: `tests/state-root.test.ts` (10 tests).
+- **The Verify screen no longer implies vouches raise your score.** Two numbers
+  move independently there and people read them as the same thing: Evidence
+  Score climbs as vouches and documents arrive, while the large %Human gauge
+  does not move until a miner panel completes and writes the median of the
+  reviewers' scores. Someone who collected five vouches and watched their
+  spendable value stay at zero reasonably concluded the app was broken. The
+  card now says plainly that evidence is the case and the panel is the verdict,
+  shown only when the score is still 0 and evidence exists.
+- **Platform-server failures explain themselves.** The default account-creation
+  track talks to a service on :3500 that nothing starts and the packaged build
+  does not even contain. Worse, the generic branch rendered `e.message`, and
+  since the SDK never wraps its fetch rejection the thrown value is a
+  `TypeError` — so what reached the screen was "Failed to fetch" and the
+  friendly "Is the platform server running?" string written for exactly this
+  case was unreachable. All four platform error paths now route through one
+  explainer that names the situation and points at the self-custody option,
+  which needs nothing but `ae-node`.
+- **Miner registration failures are actionable.** The raw API string went
+  straight to the screen, so the most likely failure for the second person on a
+  network read as a defect rather than a next step.
+
 ### Open blockers (not fixed, ordered by severity)
 
-1. **Blocks carry no state root.** `computeBlockHash` covers number, previous
-   hash, timestamp, merkle root, day, prev cert and validator changes. No
-   balance or account commitment, and no `stateRoot`/`appHash` anywhere in the
-   codebase. Balance divergence surfaces only indirectly, as a
-   `Replay: insufficient <type> balance` throw the first time a divergent
-   account spends. `percentHuman` divergence produces no error at all, ever,
-   because `replayTransaction` takes `netAmount` off the wire verbatim and never
-   re-derives the spend multiplier locally.
-2. **The default "Create Account" needs a platform server nothing starts.**
-   `ae-app/src/lib/platform.ts` falls back to `http://localhost:3500/api/v1`.
-   Electron's `main.cjs` spawns only `ae-node`, and `extraResources` copies only
-   `ae-node`, so a packaged install does not even contain platform-server. The
-   user sees a raw "Failed to fetch" because the SDK never wraps the fetch
-   rejection, which means the friendly "Is the platform server running?" string
-   at `Onboarding.tsx:226` is unreachable on the exact failure it was written
-   for. Workaround today: the "Expert: I'll hold my own keys instead" link.
-3. **Genesis validator accounts cannot sign into either app.** Genesis keystores
+1. **Genesis validator accounts cannot sign into either app.** Genesis keystores
    hold a raw ML-DSA keypair generated by `generateKeyPair()`, with no BIP39
    mnemonic. Both apps' sign-in requires accountId plus a 12-word phrase and
    checks the derived public key matches, so no phrase can ever reproduce a
@@ -210,16 +242,22 @@ alongside the fixes above.
    above); `ae-miner` still has no keystore path at all, though
    `saveMinerWallet` exists unused and the Electron bridge is wired but never
    called from the UI.
-4. **Vouching never moves `percentHuman`.** `createVouch` locks real stake and
-   inserts a row but never calls `updatePercentHuman`. The only writers are
-   panel completion and decay. A tester watches the secondary "Evidence Score"
-   tile climb while the large %Human gauge and the wallet's spend multiplier
-   both stay pinned at 0, and nothing tells them a miner panel is still
-   required. Miner-in-the-loop is the intended design; the gap is that the UI
-   never says so. Now reachable in practice, since a network can seat more than
-   one miner.
-5. **The miner's register failure is a raw API string.** Cosmetic, but it is
-   the first thing a second person sees if they hit the floor.
+2. **Account replication does not cover the offline case.** Gossip reaches every
+   node that is online when an account is created, which is the live path. A
+   node that is down at that moment and later catches up by syncing blocks still
+   has no row for it, because `ChainSync` ships blocks and certs only. It
+   fail-stops cleanly rather than crashing, and the state root now names the
+   disagreement, but it is still a halt. Closing it means putting registrations
+   in the block the way `validatorChanges` already ride one.
+3. **The state root is advisory, not enforced.** It travels in the gossip
+   payload and receivers check it, but it is not folded into
+   `computeBlockHash`, so nothing signs over it and a dishonest proposer could
+   publish a root that does not match its own state. Detects accidents, not
+   attacks. See `core/state-root.ts` for the follow-up.
+4. **Platform-server is not shipped with the app.** The explainer now points
+   users at self-custody, which is a fix for the confusion, not for the missing
+   service. Either bundle it in `extraResources` and spawn it from
+   `main.cjs`, or drop the hosted track from onboarding until it is real.
 
 ### Note on the operator docs
 

@@ -109,6 +109,24 @@ export interface IncomingBlockPayload {
    */
   transactions?: WireTransaction[];
   /**
+   * Proposer's fingerprint of account state as of the END of the PARENT block,
+   * i.e. before this block's transactions apply. See core/state-root.ts.
+   *
+   * A receiver compares this against its own computeStateRoot() before voting.
+   * A mismatch means the two nodes disagree about balances or percentHuman,
+   * which nothing else in the protocol can detect: block hashes commit to
+   * transactions but never to the state those transactions produce, so balance
+   * drift only ever surfaced as an incidental replay throw, and percentHuman
+   * drift surfaced not at all.
+   *
+   * The parent's state rather than this block's, because every receiver
+   * already holds it — no prediction of post-apply side effects needed.
+   *
+   * Optional, and absence is treated as "no claim made" rather than a failure,
+   * so payloads from older nodes and hand-built test fixtures still validate.
+   */
+  parentStateRoot?: string;
+  /**
    * BFT commit certificate proving this block's PARENT (block N-1) was
    * committed by 2/3+ of the validator set. Required for blocks N >= 2
    * under BFT consensus; omitted under AuthorityConsensus and for block 1

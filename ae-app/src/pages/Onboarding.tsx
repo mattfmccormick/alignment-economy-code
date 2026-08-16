@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+﻿import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { saveWalletFromMnemonic, saveFounderWallet, saveJoinerWallet, saveJoinedNetwork } from '../lib/keys';
@@ -95,7 +95,7 @@ export function Onboarding() {
   const [confirmInputs, setConfirmInputs] = useState<{ [k: number]: string }>({});
   const [confirmError, setConfirmError] = useState(false);
 
-  // Login state — paste a mnemonic phrase
+  // Login state â€” paste a mnemonic phrase
   const [loginMnemonic, setLoginMnemonic] = useState('');
 
   // Founder flow state.
@@ -108,7 +108,7 @@ export function Onboarding() {
   // founder: genesis.json (public, the network spec) and their personal
   // keystore.json (private, contains their account/node/VRF keys). We
   // validate that the keystore is one of the validators listed in the
-  // genesis spec — otherwise the keystore is for some other network or
+  // genesis spec â€” otherwise the keystore is for some other network or
   // got mismatched with this spec.
   // Genesis spec shape (per ae-node/src/node/genesis-config.ts): top-level
   // accounts[] each with optional `validator` field. A validator entry IS
@@ -122,7 +122,7 @@ export function Onboarding() {
   const [joinKeystoreFilename, setJoinKeystoreFilename] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  // Summary card shown on the restart-to-apply screen — the network ID +
+  // Summary card shown on the restart-to-apply screen â€” the network ID +
   // accountId the user just committed to, regardless of which onboarding
   // path they took.
   const [pendingNetworkSummary, setPendingNetworkSummary] = useState<{ networkId: string; accountId: string } | null>(null);
@@ -179,6 +179,41 @@ export function Onboarding() {
     return null;
   }
 
+  /**
+   * Explain a platform-server failure instead of leaking the raw fetch error.
+   *
+   * The account-creation track people are steered to by default talks to
+   * platform-server on :3500. Nothing starts it: the Electron main process
+   * spawns only ae-node, and the packaged build's extraResources does not even
+   * include platform-server. So on a clean install the primary button on the
+   * primary screen fails.
+   *
+   * It failed badly, too. The generic branch below used to read
+   * `e.message`, and because the SDK never wraps its fetch rejection the thrown
+   * value is a TypeError â€” so what actually reached the screen was "Failed to
+   * fetch". The friendly "Is the platform server running?" string that had been
+   * written for precisely this case was unreachable, because it only rendered
+   * for non-Error throws.
+   *
+   * Until platform-server ships alongside the app, the honest move is to name
+   * the situation and point at the self-custody path, which needs nothing but
+   * ae-node and is fully functional.
+   */
+  function explainPlatformFailure(e: unknown): string {
+    const msg = e instanceof Error ? e.message : String(e ?? '');
+    const looksOffline =
+      /failed to fetch|networkerror|load failed|fetch failed|ECONNREFUSED/i.test(msg);
+    if (looksOffline || !msg) {
+      return (
+        'Cannot reach the account server. This is the hosted sign-up option and it ' +
+        'needs a service that is not running (and is not bundled with the app yet). ' +
+        'Use "I\'ll hold my own keys instead" below â€” it works with just your node, ' +
+        'and gives you a 12-word recovery phrase to write down.'
+      );
+    }
+    return msg;
+  }
+
   async function handlePlatformSignup() {
     setPlatformError(null);
     if (!platformEmail.trim() || !platformPassword) {
@@ -223,7 +258,7 @@ export function Onboarding() {
       } else if (e instanceof PlatformError && e.code === 'WEAK_PASSWORD') {
         setPlatformError('That password was rejected. Use 15+ characters with an uppercase letter and a special character.');
       } else {
-        setPlatformError(e instanceof Error ? e.message : 'Network error. Is the platform server running?');
+        setPlatformError(explainPlatformFailure(e));
       }
       setFlow('platform-signup');
     } finally {
@@ -267,7 +302,7 @@ export function Onboarding() {
         setPlatformError('Wrong email or password.');
         setFlow('login');
       } else {
-        setPlatformError(e instanceof Error ? e.message : 'Network error. Is the platform server running?');
+        setPlatformError(explainPlatformFailure(e));
         setFlow('login');
       }
     } finally {
@@ -300,7 +335,7 @@ export function Onboarding() {
       );
       setFlow('platform-forgot-token');
     } catch (e) {
-      setPlatformError(e instanceof Error ? e.message : 'Network error.');
+      setPlatformError(explainPlatformFailure(e));
       setFlow('platform-forgot-start');
     } finally {
       setPlatformBusy(false);
@@ -341,7 +376,7 @@ export function Onboarding() {
       } else if (e instanceof PlatformError && e.code === 'NOT_VERIFIED') {
         setPlatformError('Email click was not registered. Try recovery again.');
       } else {
-        setPlatformError(e instanceof Error ? e.message : 'Network error.');
+        setPlatformError(explainPlatformFailure(e));
       }
       setFlow('platform-forgot-token');
     } finally {
@@ -592,7 +627,7 @@ export function Onboarding() {
       const { publicKey } = mnemonicToKeypair(phrase);
       // The account ID is the SHA-256 prefix of the publicKey. To stay framework-
       // agnostic we'd recompute it client-side, but the server already computes
-      // it deterministically — fetch by querying every account isn't feasible,
+      // it deterministically â€” fetch by querying every account isn't feasible,
       // so we resolve via the publicKey on the API side.
       // For now: ask the user to also paste their account ID. (Future: add a
       // lookup-by-publicKey endpoint.)
@@ -655,8 +690,8 @@ export function Onboarding() {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
         {/* AE mark: an A with two horizontal crossbars that extend past
-            the diagonals — same geometry as the official website logo
-            (alignment-economy-website/src/app/icon.svg, scaled 32→512).
+            the diagonals â€” same geometry as the official website logo
+            (alignment-economy-website/src/app/icon.svg, scaled 32â†’512).
             The bars + diagonals together read like a $. */}
         <div className="w-16 h-16 rounded-2xl bg-teal/20 flex items-center justify-center mb-6">
           <svg viewBox="0 0 512 512" className="w-12 h-12" aria-hidden="true">
@@ -695,7 +730,7 @@ export function Onboarding() {
 
             'what-is-ae' is the plain-language explainer. 'network-mode' is
             the door to the genesis ceremony (start a new network) and to
-            validator keystore import (join an existing one) — the whole
+            validator keystore import (join an existing one) â€” the whole
             operator path documented in docs/start-a-network.md and
             docs/join-a-network.md, which was unreachable from the shipped
             app. Kept as low-key text links so the two primary buttons above
@@ -849,7 +884,7 @@ export function Onboarding() {
     );
   }
 
-  // "Start a new network" — step 1: collect inputs.
+  // "Start a new network" â€” step 1: collect inputs.
   if (flow === 'start-new-form') {
     const networkIdValid = /^[a-z0-9-]{3,32}$/.test(founderNetworkId.trim());
     return (
@@ -933,7 +968,7 @@ export function Onboarding() {
     );
   }
 
-  // "Start a new network" — step 2: working state while ae-node generates.
+  // "Start a new network" â€” step 2: working state while ae-node generates.
   // buildGenesisSet is fast (key generation + spec assembly), so this is a
   // brief flicker most of the time. Showing it explicitly avoids a blank
   // moment if the API is slow.
@@ -941,7 +976,7 @@ export function Onboarding() {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
         <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4 animate-pulse">
-          <span className="text-xl text-gold">⋯</span>
+          <span className="text-xl text-gold">â‹¯</span>
         </div>
         <h2 className="text-xl font-serif text-white mb-2">Generating genesis</h2>
         <p className="text-gray-400 text-sm max-w-sm">
@@ -951,7 +986,7 @@ export function Onboarding() {
     );
   }
 
-  // "Start a new network" — step 3: result. Show the spec hash, let the
+  // "Start a new network" â€” step 3: result. Show the spec hash, let the
   // founder download the public spec and each private keystore, then
   // continue to the wallet using their own keystore as the wallet identity.
   if (flow === 'start-new-result' && genesis) {
@@ -1063,7 +1098,7 @@ export function Onboarding() {
     return (
       <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
         <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center mb-4">
-          <span className="text-xl text-gold">→</span>
+          <span className="text-xl text-gold">â†’</span>
         </div>
         <h2 className="text-2xl font-serif text-white mb-2 text-center">Join an existing network</h2>
         <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
@@ -1119,7 +1154,7 @@ export function Onboarding() {
             {joinSpecFilename && joinSpec?.networkId && (
               <p className="text-[11px] text-gray-400 mt-2">
                 <span className="text-gray-500">Network:</span> <span className="font-mono text-white">{joinSpec.networkId}</span>
-                {' · '}
+                {' Â· '}
                 <span className="text-gray-500">{validatorAccounts.length} validators</span>
               </p>
             )}
@@ -1171,7 +1206,7 @@ export function Onboarding() {
             {joinKeystoreFilename && joinKeystore?.accountId && (
               <p className="text-[11px] text-gray-400 mt-2">
                 <span className="text-gray-500">Account:</span> <span className="font-mono text-white">{truncateId(joinKeystore.accountId, 16)}</span>
-                {joinKeystore.name && <> · <span className="text-gray-500">{joinKeystore.name}</span></>}
+                {joinKeystore.name && <> Â· <span className="text-gray-500">{joinKeystore.name}</span></>}
               </p>
             )}
           </div>
@@ -1227,7 +1262,7 @@ export function Onboarding() {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
         <div className="w-12 h-12 rounded-full bg-teal/20 flex items-center justify-center mb-4">
-          <span className="text-xl text-teal">✓</span>
+          <span className="text-xl text-teal">âœ“</span>
         </div>
         <h2 className="text-2xl font-serif text-white mb-2">Network saved</h2>
         <p className="text-gray-400 text-sm mb-6 max-w-sm leading-relaxed">
@@ -1407,7 +1442,7 @@ export function Onboarding() {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
         <div className="w-12 h-12 rounded-full bg-teal/20 flex items-center justify-center mb-4 animate-pulse">
-          <span className="text-xl text-teal">⋯</span>
+          <span className="text-xl text-teal">â‹¯</span>
         </div>
         <p className="text-sm text-gray-400">Working on it...</p>
       </div>
