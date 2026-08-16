@@ -77,8 +77,22 @@ export function History() {
                     <p className="text-sm text-white">
                       {tx.from === wallet?.accountId ? 'Sent' : 'Received'}
                       <span className="text-gray-500 ml-1 text-xs">{tx.pointType}</span>
+                      {/* blockNumber stays null until a block carries this
+                          transaction, which under commit-time execution is also
+                          when the money actually moves. Drawing an unconfirmed
+                          row identically to a settled one tells the user
+                          something that is not true yet. */}
+                      {tx.blockNumber === null && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-gold border border-gold/40 rounded px-1.5 py-0.5">
+                          Pending
+                        </span>
+                      )}
                     </p>
-                    <p className="text-xs text-gray-500 mt-0.5">{timeAgo(tx.timestamp)}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {tx.blockNumber === null
+                        ? 'Waiting for the next block'
+                        : timeAgo(tx.timestamp)}
+                    </p>
                   </div>
                   <p className={`text-sm tabular-nums ${tx.from === wallet?.accountId ? 'text-red-400' : 'text-teal'}`}>
                     {tx.from === wallet?.accountId ? '-' : '+'}{displayPoints(tx.amount)}
