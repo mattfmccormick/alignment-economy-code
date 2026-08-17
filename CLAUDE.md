@@ -501,10 +501,24 @@ were the largest piece, not the only one.
    as of v13, but gossip still front-runs them), then fold a `stateRootHash`
    into `computeBlockHash`. Doing it in the other order just moves the deadlock
    into hash verification.
-2. **Platform-server is not shipped with the app.** The explainer now points
-   users at self-custody, which is a fix for the confusion, not for the missing
-   service. Either bundle it in `extraResources` and spawn it from
-   `main.cjs`, or drop the hosted track from onboarding until it is real.
+2. ~~**Platform-server is not shipped with the app.**~~ Fixed. `ae-app`'s
+   `extraResources` now copies `platform-server/dist`, `package.json` and
+   `node_modules`, and `electron/main.cjs` spawns it on :3500 alongside
+   ae-node, killing it on `window-all-closed` and `before-quit`. Started
+   fire-and-forget and NOT health-polled: self-custody works without it, so
+   blocking startup on an optional service would turn it into a hard
+   dependency, which is the opposite of the bug.
+
+   **What this does not do, and the UI now says so.** Running the service on
+   localhost gives email + password unlock and a local encrypted vault. It does
+   not give what an email/password screen implies: the vault is on that
+   machine, so there is no signing in from a second device and no recovery
+   after the computer is gone, and `AE_PLATFORM_EMAIL_MODE` is `dev` because no
+   SMTP credentials ship with an installer. The signup screen now states
+   plainly that the account lives on this computer and points at the 12-word
+   self-custody path for anyone who wants real portability. Making it a genuine
+   hosted service is a deployment task (stand up an instance, set
+   `VITE_PLATFORM_URL` at build time, skip the spawn), not a code one.
 3. **Vouching, court and panel scores still mutate state at API time.** See the
    state-mutation audit section above. This is the same root cause as blocker 1:
    until every balance and `percentHuman` write is a function of committed

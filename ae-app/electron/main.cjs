@@ -62,7 +62,12 @@ function readNetworkConfig() {
 }
 
 let nodeChild = null;
+let platformChild = null;
 let mainWindow = null;
+
+// The hosted-account service. Must match DEFAULT_PLATFORM_URL in
+// ae-app/src/lib/platform.ts, which is where the renderer looks for it.
+const PLATFORM_PORT = 3500;
 
 function findAeNodeEntry() {
   // In packaged builds, electron-builder copies extraResources to:
@@ -178,6 +183,82 @@ function stopAeNode() {
   }
 }
 
+// ─── platform-server (the hosted email + password account track) ──────────
+//
+// The default "Create Account" flow calls a platform-server on :3500. Nothing
+// used to start it, and nothing shipped it, so on a clean install the primary
+// onboarding button failed with a raw "Failed to fetch". Bundling and spawning
+// it here makes that path work.
+//
+// IMPORTANT — what this is and is not. Running platform-server on localhost
+// gives you email+password login and an encrypted local vault. It does NOT
+// give you what a hosted service would: the vault lives on this machine, so
+// "sign in from another device" and "recover after losing this computer" do
+// not work, and the recovery email has nowhere to go without SMTP configured
+// (email mode is 'dev', which returns the token to the caller instead of
+// sending it). Onboarding copy must not promise otherwise — see the
+// local-only note on the platform signup screen.
+//
+// Pointing the wallet at a genuinely hosted instance later is a one-line
+// change: set VITE_PLATFORM_URL at build time and skip this spawn.
+function findPlatformServerEntry() {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'platform-server', 'dist', 'index.js'),
+    path.join(__dirname, '..', '..', 'platform-server', 'dist', 'index.js'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+function startPlatformServer() {
+  if (isDev) return; // developer runs it themselves if they want the hosted track
+
+  const entry = findPlatformServerEntry();
+  if (!entry) {
+    // Non-fatal by design. Self-custody is the complete, working path and it
+    // needs only ae-node; killing the whole app because an optional service is
+    // missing would be a worse failure than the one it prevents.
+    console.warn('[platform-server] not bundled; the hosted account track will be unavailable');
+    return;
+  }
+
+  const dataDir = path.join(app.getPath('userData'), 'platform-server-data');
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  platformChild = spawn(process.execPath, [entry], {
+    cwd: path.dirname(path.dirname(entry)),
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      AE_PLATFORM_PORT: String(PLATFORM_PORT),
+      AE_PLATFORM_DB_PATH: path.join(dataDir, 'platform.db'),
+      // No SMTP credentials ship with the app, so real mail cannot be sent.
+      // 'dev' returns the recovery token to the caller instead of emailing it,
+      // which is the only mode that can work on a single machine.
+      AE_PLATFORM_EMAIL_MODE: 'dev',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  platformChild.stdout.on('data', (c) => process.stdout.write(`[platform-server] ${c}`));
+  platformChild.stderr.on('data', (c) => process.stderr.write(`[platform-server] ${c}`));
+  platformChild.on('exit', (code) => {
+    platformChild = null;
+    if (code !== 0 && code !== null) {
+      console.error(`[platform-server] exited with code ${code}`);
+    }
+  });
+}
+
+function stopPlatformServer() {
+  if (platformChild && !platformChild.killed) {
+    platformChild.kill('SIGTERM');
+    setTimeout(() => { if (platformChild && !platformChild.killed) platformChild.kill('SIGKILL'); }, 3000);
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 420,
@@ -285,6 +366,12 @@ app.whenReady().then(async () => {
     );
   }
 
+  // Fire-and-forget, and deliberately not awaited or health-polled: the hosted
+  // account track is optional, and self-custody works without it. Blocking
+  // startup on it would turn an optional service into a hard dependency, which
+  // is the opposite of the problem being fixed.
+  startPlatformServer();
+
   createWindow();
 
   // Check for updates in packaged production builds only. In dev (running
@@ -306,7 +393,11 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   stopAeNode();
+  stopPlatformServer();
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', stopAeNode);
+app.on('before-quit', () => {
+  stopAeNode();
+  stopPlatformServer();
+});

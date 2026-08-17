@@ -51,6 +51,23 @@
           "!**/.cache/**",
           "!**/.bin/**"
         ]
+      },
+      {
+        "from": "../platform-server/dist",
+        "to": "platform-server/dist"
+      },
+      {
+        "from": "../platform-server/package.json",
+        "to": "platform-server/package.json"
+      },
+      {
+        "from": "../platform-server/node_modules",
+        "to": "platform-server/node_modules",
+        "filter": [
+          "**/*",
+          "!**/.cache/**",
+          "!**/.bin/**"
+        ]
       }
     ],
     "win": {

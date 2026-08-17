@@ -195,9 +195,11 @@ export function Onboarding() {
    * written for precisely this case was unreachable, because it only rendered
    * for non-Error throws.
    *
-   * Until platform-server ships alongside the app, the honest move is to name
-   * the situation and point at the self-custody path, which needs nothing but
-   * ae-node and is fully functional.
+   * platform-server now ships in the app's extraResources and is spawned by
+   * electron/main.cjs, so reaching this branch means the service genuinely
+   * failed to launch (or the app was run from source without it) rather than
+   * "it was never built". The message says that, and still points at the
+   * self-custody path, which needs nothing but ae-node.
    */
   function explainPlatformFailure(e: unknown): string {
     const msg = e instanceof Error ? e.message : String(e ?? '');
@@ -205,10 +207,11 @@ export function Onboarding() {
       /failed to fetch|networkerror|load failed|fetch failed|ECONNREFUSED/i.test(msg);
     if (looksOffline || !msg) {
       return (
-        'Cannot reach the account server. This is the hosted sign-up option and it ' +
-        'needs a service that is not running (and is not bundled with the app yet). ' +
-        'Use "I\'ll hold my own keys instead" below â€” it works with just your node, ' +
-        'and gives you a 12-word recovery phrase to write down.'
+        'Cannot reach the account service. The desktop app ships it and starts it ' +
+        'automatically, so this usually means the app was started from source ' +
+        'without it, or the service failed to launch. ' +
+        'Use "I\'ll hold my own keys instead" above — it needs nothing but your ' +
+        'node, and gives you a 12-word recovery phrase to write down.'
       );
     }
     return msg;
@@ -1361,6 +1364,23 @@ export function Onboarding() {
         >
           Expert: I&apos;ll hold my own keys instead &rarr;
         </button>
+
+        {/* The account service now ships with the app and runs on this
+            machine. That makes this path work, but it does not make it a
+            hosted service: the vault is local, so there is no signing in from
+            another device and no recovering after this computer is gone. An
+            email + password screen strongly implies both, so say otherwise
+            here rather than letting someone find out by losing everything. */}
+        <div className="w-full max-w-sm mb-5 bg-navy border border-navy-light rounded-xl p-3">
+          <p className="text-xs text-gray-300">
+            Your account is stored <span className="text-white font-medium">on this computer</span>.
+          </p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            Email and password unlock it here. They will not sign you in on another device, and
+            they cannot recover your points if this computer is lost. Back up the machine, or
+            choose &ldquo;hold my own keys&rdquo; above for a 12-word phrase you can write down.
+          </p>
+        </div>
 
         <div className="w-full max-w-sm space-y-3 mb-6">
           <div className="text-left">
