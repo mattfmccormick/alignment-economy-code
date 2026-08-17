@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+﻿import { DatabaseSync } from 'node:sqlite';
 import {
   DAILY_ACTIVE_POINTS,
   DAILY_SUPPORTIVE_POINTS,
@@ -17,6 +17,7 @@ import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
 import { runTransaction } from '../db/connection.js';
 import { rebalanceVouchLocks } from '../verification/vouching.js';
 import { rebaseCourtStakes, expireCourtDeadlines } from '../court/court.js';
+import { expireOverdueAssignments } from '../mining/fifo-queue.js';
 import { finalizeSupportiveTags } from '../tagging/supportive.js';
 import { finalizeAmbientTags } from '../tagging/ambient.js';
 import { logger } from '../node/logger.js';
@@ -41,7 +42,7 @@ function advanceDay(db: DatabaseSync): void {
 //
 // Only individual accounts ever receive daily allocations (active/supportive/
 // ambient). Companies, governments, and ai_bot accounts always have zero in
-// those buckets — iterating over them and zeroing-zero is wasted work that
+// those buckets â€” iterating over them and zeroing-zero is wasted work that
 // scales with account count. We pre-filter at the SQL level to only touch
 // rows that actually have non-zero daily balances.
 
@@ -54,7 +55,7 @@ function advanceDay(db: DatabaseSync): void {
  * "the economy noticing where you spent your day."
  *
  * `finalizeSupportiveTags` and `finalizeAmbientTags` existed, were correct, and
- * were covered by tests — but nothing in `ae-node/src` ever called them. The
+ * were covered by tests â€” but nothing in `ae-node/src` ever called them. The
  * only callers were the tests themselves, so on a live network a user could tag
  * their chair and their office all day and the points simply expired at 03:59
  * along with everything else. Two of the four point types never reached anyone.
@@ -212,8 +213,8 @@ export function mintDaily(db: DatabaseSync): void {
 //   2) Accounts that already have a rebase log entry for this day must be
 //      skipped on resume to avoid being multiplied twice.
 //
-// PRECISION: We use direct rational arithmetic — newBalance = (oldBalance *
-// targetTotal) / preRebaseTotal — instead of a scaled fixed-point multiplier.
+// PRECISION: We use direct rational arithmetic â€” newBalance = (oldBalance *
+// targetTotal) / preRebaseTotal â€” instead of a scaled fixed-point multiplier.
 // This loses at most 1 storage unit per account to integer truncation. We
 // then run a dust-distribution pass that hands each lost unit back to a
 // participant (sorted by account_id for determinism), restoring exact
@@ -241,7 +242,7 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
   let targetTotal: bigint;
 
   if (existing) {
-    // Resume path. Trust the stored snapshot — current pool has been partly
+    // Resume path. Trust the stored snapshot â€” current pool has been partly
     // mutated and would give a wrong multiplier if recomputed.
     participantCount = existing.participant_count;
     preRebaseTotal = BigInt(existing.pre_rebase_total);
@@ -280,7 +281,7 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
       }
 
       // Direct rational rebase. Loses at most 1 storage unit per balance to
-      // integer division — recovered below in the dust pass.
+      // integer division â€” recovered below in the dust pass.
       const newEarned = preRebaseTotal === 0n ? 0n : (acct.earnedBalance * targetTotal) / preRebaseTotal;
       const newLocked = preRebaseTotal === 0n ? 0n : (acct.lockedBalance * targetTotal) / preRebaseTotal;
 
@@ -299,7 +300,7 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
     // Court stakes are recorded as nominal amounts at filing/seating time and
     // are paid out of locked_balance, which the loop above just rescaled. Move
     // them by the same ratio, in the same transaction, or the verdict later
-    // subtracts a figure that no longer matches what is locked — driving
+    // subtracts a figure that no longer matches what is locked â€” driving
     // balances negative when the multiplier is below 1, and stranding locked
     // value when it is above.
     //
@@ -331,7 +332,7 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
       }
     }
     // If we still have dust (e.g., zero non-zero earned holders), drop it. The
-    // total stays internally consistent — only TARGET drift, no balance loss.
+    // total stays internally consistent â€” only TARGET drift, no balance loss.
 
     // Snapshot for resume + audit. Inside the same transaction so either both
     // the balance updates and this row commit, or neither does.
@@ -394,7 +395,13 @@ export function runExpireAndRebase(db: DatabaseSync): RebaseEvent | null {
   // rather than against rescaled ones. Until this existed nothing ever read
   // arbitration_deadline or voting_deadline, so a single juror who never voted
   // froze the defendant's escrowed balance and every juror's stake forever.
-  expireCourtDeadlines(db, Math.floor(Date.now() / 1000));
+  const nowSec = Math.floor(Date.now() / 1000);
+  expireCourtDeadlines(db, nowSec);
+  // Same for verification panels: mining.verification_deadline_hours was
+  // stamped on every assignment and never read, so one miner who ignored their
+  // queue held an applicant at their existing percentHuman indefinitely â€” zero
+  // for a new joiner, which means every spend burns.
+  expireOverdueAssignments(db, nowSec);
   expireDaily(db);                  // phase: expiring
   const event = rebase(db);         // phase: rebasing
   rebalanceVouchLocks(db);          // WP v2: percentage-based locks scale with balance
@@ -404,7 +411,7 @@ export function runExpireAndRebase(db: DatabaseSync): RebaseEvent | null {
 
 export function runMintAndAdvance(db: DatabaseSync): void {
   advanceDay(db);                   // currentDay++ inside same intent group
-  mintDaily(db);                    // phase: minting → active
+  mintDaily(db);                    // phase: minting â†’ active
 }
 
 // Combined: run the full cycle in one shot. Used by tests and by the
@@ -506,8 +513,8 @@ export function setNextCycleAt(db: DatabaseSync, ts: number): void {
 // The fix is to drive the cycle off block timestamps instead of wall
 // clocks. Every validator, after committing a block, runs the same pure
 // predicate over (block.timestamp, cycleState, nextCycleAt) and applies
-// the same cycle phase if it fires. Identical inputs → identical
-// post-state → no divergence.
+// the same cycle phase if it fires. Identical inputs â†’ identical
+// post-state â†’ no divergence.
 //
 // The block timestamp is set by the proposer. Clock skew between
 // validators is bounded by BFT consensus rules (proposers from divergent
@@ -516,7 +523,7 @@ export function setNextCycleAt(db: DatabaseSync, ts: number): void {
 // canonical "time when this block landed."
 //
 // Predicates are split per phase so the catch-up logic naturally handles
-// "blockchain was offline for 3 days" — each block whose timestamp
+// "blockchain was offline for 3 days" â€” each block whose timestamp
 // crosses a UTC anchor advances the cycle by one phase, and the next
 // block picks up the next phase. Eventually the chain catches up.
 
@@ -564,7 +571,7 @@ export function shouldTriggerMintAndAdvance(
  * work: if the chain was offline for 3 days, the first block back has
  * a timestamp far in the future of the stored nextCycleAt. The loop
  * applies expire+rebase for day N, mint+advance into day N+1, sets
- * nextCycleAt += 86400, then re-checks — and the predicate fires again
+ * nextCycleAt += 86400, then re-checks â€” and the predicate fires again
  * for day N+1. Eventually the chain has applied every missed day and
  * the loop exits.
  *
@@ -616,7 +623,7 @@ export function applyChainDayCycle(
       continue;
     }
 
-    // Neither predicate fires — caught up.
+    // Neither predicate fires â€” caught up.
     break;
   }
 

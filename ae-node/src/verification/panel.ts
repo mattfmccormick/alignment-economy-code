@@ -88,6 +88,14 @@ export function submitPanelScore(
     submittedAt: now,
   });
 
+  // Close the FIFO assignment. `markAssignmentComplete` existed and had no
+  // production caller, so doing the work never registered: every miner's
+  // `countMinerAssignmentsCompleted` stayed at zero regardless of how many
+  // panels they had actually reviewed, which is the number their reliability
+  // is judged on. It also meant the deadline sweep could not tell a miner who
+  // reviewed on time from one who ignored the panel entirely.
+  miningStore(db).markAssignmentComplete(minerId, panelId);
+
   // Determine if the panel is complete:
   //   - 3+ reviews is the standard threshold
   //   - OR all assigned miners have submitted (early-network graceful fallback)
@@ -128,7 +136,14 @@ function getAssignedCount(db: DatabaseSync, panelId: string): number {
   // Count actual assignments. If fewer than 3 miners were assigned (early
   // network), the panel completes when all of them have submitted scores —
   // not when an unreachable count of 3 is hit.
-  const ids = miningStore(db).findAssignmentMinerIds(panelId);
+  //
+  // Live assignments only. A miner who blew their deadline is marked missed by
+  // expireOverdueAssignments, and counting them here would keep the threshold
+  // permanently out of reach: the panel needs `scores.length >= assignedCount`,
+  // and someone who never reviews never contributes a score. That is how one
+  // silent miner used to strand an applicant at percentHuman 0 forever, with
+  // every spend burning to nothing.
+  const ids = miningStore(db).findLiveAssignmentMinerIds(panelId);
   return ids.length > 0 ? ids.length : 3;
 }
 

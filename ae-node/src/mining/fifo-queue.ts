@@ -132,6 +132,58 @@ export function markAssignmentMissed(db: DatabaseSync, minerId: string, panelId:
   miningStore(db).markAssignmentMissed(minerId, panelId);
 }
 
+/**
+ * Mark overdue verification assignments as missed.
+ *
+ * `mining.verification_deadline_hours` (72 by default) was stamped onto every
+ * assignment and never read: `markAssignmentMissed` had no production caller at
+ * all. So one assigned miner who never looked at their queue stranded the
+ * applicant permanently. A panel completes when `scores.length >=
+ * assignedCount`, and an assignment that is never marked missed keeps counting
+ * toward `assignedCount` forever — so the panel could never reach its
+ * threshold, and the applicant's percentHuman stayed where it was. For a new
+ * joiner that is zero, which means every spend burns to nothing.
+ *
+ * Deliberately conservative, same instinct as `expireCourtDeadlines`: an
+ * overdue assignment stops blocking the count and is recorded as missed
+ * against that miner, but nothing here invents a score for a review nobody
+ * performed. Panels left with no reviewers are returned so the caller can log
+ * them and the next assignment round can hand them to miners who will engage.
+ *
+ * `nowSec` is passed in so the caller owns the reference time.
+ */
+export function expireOverdueAssignments(
+  db: DatabaseSync,
+  nowSec: number,
+): { missed: number; panelsLeftUnreviewed: string[] } {
+  const overdue = db
+    .prepare(
+      `SELECT miner_id, panel_id FROM miner_verification_assignments
+        WHERE completed = 0 AND missed = 0 AND deadline <= ?`,
+    )
+    .all(nowSec) as Array<{ miner_id: string; panel_id: string }>;
+
+  const mining = miningStore(db);
+  const touched = new Set<string>();
+  for (const row of overdue) {
+    mining.markAssignmentMissed(row.miner_id, row.panel_id);
+    touched.add(row.panel_id);
+  }
+
+  const panelsLeftUnreviewed: string[] = [];
+  for (const panelId of touched) {
+    const open = db
+      .prepare(
+        `SELECT COUNT(*) AS cnt FROM miner_verification_assignments
+          WHERE panel_id = ? AND completed = 0 AND missed = 0`,
+      )
+      .get(panelId) as { cnt: number };
+    if (open.cnt === 0) panelsLeftUnreviewed.push(panelId);
+  }
+
+  return { missed: overdue.length, panelsLeftUnreviewed };
+}
+
 export function resetRoundRobin(): void {
   roundRobinIndex = 0;
 }

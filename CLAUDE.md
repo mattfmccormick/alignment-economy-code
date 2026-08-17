@@ -547,6 +547,24 @@ reproduced against the real modules, not inferred.
 - **The duplicate-account counterpart is excluded from the jury**, alongside the
   defendant and challenger.
 
+- **Panel deadlines are enforced, and doing the work now counts.**
+  `mining.verification_deadline_hours` (72 by default) was stamped on every
+  assignment and never read — `markAssignmentMissed` had no production caller.
+  One assigned miner who never opened their queue stranded the applicant
+  permanently, and the symptom looked like nothing happening rather than an
+  error: a panel completes when `scores.length >= assignedCount`, an assignment
+  never marked missed keeps counting toward `assignedCount` forever, and a miner
+  who never reviews never contributes a score. The applicant sat at their
+  existing percentHuman, which for a new joiner is zero, so every spend burned.
+  `expireOverdueAssignments` now runs in `runExpireAndRebase` beside the court
+  sweep, and `getAssignedCount` counts only live assignments.
+
+  Writing the test surfaced a second one: **`markAssignmentComplete` had no
+  production caller either**, so submitting a score never closed the assignment.
+  Every miner's `countMinerAssignmentsCompleted` — the number their reliability
+  is judged on — stayed at zero no matter how many panels they reviewed.
+  `submitPanelScore` now closes it. `panel-deadlines.test.ts`.
+
 **Still open**
 
 1. **`phase64`'s conservation assertion cannot catch minted value.** The guilty
@@ -555,12 +573,17 @@ reproduced against the real modules, not inferred.
    hiding real minting. Largely defused now that `updateBalance` rejects
    negatives, but the assertion should be per-column, not on the sum. Treat this
    as a lesson about the tests, not only the code.
-2. **No panel deadline enforcement** — same shape as the court deadline bug that
-   was just fixed: one silent assigned miner strands an applicant's panel
-   forever. `expireCourtDeadlines` is the pattern to copy.
-3. **Court and panel state is still node-local** — the point below about state
+2. **Court and panel state is still node-local** — the point below about state
    not being a function of the chain applies to everything in this section. The
    fixes above make each node behave correctly; they do not make two nodes agree.
+
+**Pattern worth noting across this whole audit.** Four separate defects were of
+the form *"this function exists, is correct, and nothing calls it"*:
+`withdrawVouch`, `resolveAppeal`, `markAssignmentMissed`,
+`markAssignmentComplete` (and earlier, `finalizeSupportiveTags` /
+`finalizeAmbientTags`). Each had tests that passed in isolation. A grep for
+exported functions whose only callers live in `tests/` is cheap and would have
+caught all of them.
 
 ### Original repro notes (superseded by the audit above)
 

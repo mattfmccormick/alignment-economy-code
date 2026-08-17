@@ -135,6 +135,15 @@ export class SqliteMiningStore implements IMiningStore {
     return rows.map((r) => r.miner_id);
   }
 
+  findLiveAssignmentMinerIds(panelId: string): string[] {
+    const rows = this.db
+      .prepare(
+        'SELECT miner_id FROM miner_verification_assignments WHERE panel_id = ? AND missed = 0',
+      )
+      .all(panelId) as Array<{ miner_id: string }>;
+    return rows.map((r) => r.miner_id);
+  }
+
   markAssignmentComplete(minerId: string, panelId: string): void {
     this.db
       .prepare(

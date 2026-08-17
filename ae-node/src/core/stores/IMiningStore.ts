@@ -94,6 +94,18 @@ export interface IMiningStore {
   /** Miner ids already assigned to this panel (for de-dup during selection). */
   findAssignmentMinerIds(panelId: string): string[];
 
+  /**
+   * Miner ids on this panel who have not missed their deadline — everyone who
+   * has scored or still could.
+   *
+   * Deliberately distinct from findAssignmentMinerIds, which includes missed
+   * assignments so selection does not hand a panel back to a miner who already
+   * ignored it. This one drives the completion threshold: a miner who blew
+   * their deadline has to stop counting toward the required score total, or the
+   * panel can never complete and the applicant stays stranded.
+   */
+  findLiveAssignmentMinerIds(panelId: string): string[];
+
   /** Mark an assignment as completed (the miner submitted a score). */
   markAssignmentComplete(minerId: string, panelId: string): void;
 
