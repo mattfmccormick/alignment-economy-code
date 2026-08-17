@@ -121,6 +121,24 @@ export function fileChallenge(
   const stakeAmount = (challenger.earnedBalance * BigInt(Math.round(stakePercent * 100))) / 10000n;
   if (stakeAmount > challenger.earnedBalance) throw new InsufficientBalanceError('Insufficient balance for stake');
 
+  // A challenge MUST cost the challenger something.
+  //
+  // The stake is a percentage of the challenger's own earned balance, so a
+  // challenger holding zero stakes zero — and the `> earnedBalance` check
+  // above passes, because 0 > 0 is false. Filing then escrowed the defendant
+  // for free. That is a griefing vector against any account on the network:
+  // register as a miner (the first miner on a fresh network needs no
+  // percentHuman at all), spend down to zero, and freeze anyone's earned
+  // balance at no cost, repeatedly, since escrow lifts only when the case
+  // resolves. Skin in the game is the entire mechanism that makes filing
+  // self-limiting, and a zero stake removes it.
+  if (stakeAmount <= 0n) {
+    throw new InsufficientBalanceError(
+      `Challenge stake rounds to zero: ${stakePercent}% of a ${challenger.earnedBalance} earned balance. ` +
+        'Filing a challenge must cost the challenger real points.',
+    );
+  }
+
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);
   const arbDays = getParam<number>(db, 'court.arbitration_response_days');

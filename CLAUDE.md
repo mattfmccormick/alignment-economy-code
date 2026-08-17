@@ -477,6 +477,54 @@ were the largest piece, not the only one.
   stale — Phase 64 superseded it. **Lesson worth keeping: "the code does not do
   X" is not evidence that it should.**
 
+### Court defects found by audit repro, ordered by severity
+
+An audit agent left a repro harness in the repo. Running it reproduced **six**
+distinct defects. These are real, observed outputs, not model claims. One is
+fixed; five are open and none has a test yet.
+
+**FIXED — free challenges froze anyone's money.** The court stake is a
+percentage of the challenger's *own* earned balance, so a challenger holding
+zero staked zero, and the guard above it (`stakeAmount > earnedBalance`) passed
+because `0 > 0` is false. Filing escrowed the defendant anyway. Observed:
+`stake locked by broke challenger: 0`, `defendant is_escrowed: true`. A
+zero-cost, repeatable freeze on any account's earned balance — register as a
+miner (the first miner on a fresh network needs no percentHuman), hold nothing,
+and deny someone their money. `fileChallenge` now rejects a stake of zero.
+`tests/court-free-challenge.test.ts`.
+
+**OPEN 1 — the daily rebase drives locked balances negative.** Court stakes are
+stored as a nominal amount at selection time, but `rebase` scales
+`locked_balance`. After a down-rebase the stored stake exceeds what is actually
+locked, and the verdict subtracts it anyway. Observed: 12 accounts with
+negative balances, e.g. `locked= -14744000000000`. Negative balances are supply
+corruption and every downstream sum is then wrong. Vouches already solve this
+with `rebalanceVouchLocks`; court stakes have no equivalent.
+
+**OPEN 2 — the same rebase strands locked value forever.** With an up-rebase the
+opposite happens: juror stake stored 25,000,000,000, locked after rebase
+2,318,823,529,411, and after the verdict 2,293,823,529,411 — it should be 0.
+That value is locked with nothing left to release it.
+
+**OPEN 3 — a case with too small a jury pool freezes the defendant forever.**
+With one tier-2 miner: `jurors seated: 0`, status stuck at
+`court_waiting_jury`, `defendant escrowed: true`, challenger stake still
+locked, and re-running `escalateToFull` throws `Can only escalate from
+arbitration`. No other route re-runs `selectJury`, so the case, the escrow and
+the stake are permanently stuck.
+
+**OPEN 4 — the defendant can be seated on their own jury.** Observed:
+`defendant minerId in jury? true`. They vote on their own case.
+
+**OPEN 5 — zero-balance tier-2 miners are silently skipped, producing a
+one-juror "jury".** Pool of 3, `jurors actually seated: 1`, and the case
+advanced to `court_voting` regardless. A single juror then decides a verdict
+that burns 80% of the defendant's balance.
+
+Common threads worth fixing at the root rather than one at a time: court stakes
+are not rebase-aware (1 and 2), and jury selection reports success without
+checking that it actually seated a viable jury (3, 4, 5).
+
 ### Open blockers (not fixed, ordered by severity)
 
 1. **The state root is diagnostic, and must stay that way for now.** It travels
