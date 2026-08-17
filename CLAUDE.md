@@ -388,6 +388,54 @@ mutate balances and `percentHuman` at API time. Those must move to
 block-ordered application before the state root can be enforced — transactions
 were the largest piece, not the only one.
 
+### Eighth pass: peer addresses, vouch withdrawal, and a correction
+
+- **The LAN test was flaky, and the cause was a real peering bug.** Three
+  healthy nodes, matching genesis, zero blocks in 90s; passed on re-run. A peer
+  that connects TO us is recorded with port 0 (the socket reports its ephemeral
+  source port, not its listen port), and that address was included in the peer
+  list gossiped during peer exchange — so every other node learned an address it
+  could only fail to dial, and burned a reconnect slot on it every interval
+  while real peers went unconnected. Node also reports IPv4 on a dual-stack
+  listener as `::ffff:127.0.0.1`, which is not a legal URL host unbracketed, so
+  the dial threw `Invalid URL` before it could fail honestly. Fixed at all three
+  choke points (dial, discovery memory, gossiped list), hosts normalised so the
+  mapped and plain forms stop double-storing. LAN test 3/3 clean after.
+  `tests/peer-address.test.ts`.
+- **Vouchers can withdraw, and it costs the vouched account.** WP §7.2 requires
+  it; there was no route and `withdrawVouch` had no production caller, so
+  staking was a one-way ratchet whose only exit was a guilty verdict. New
+  `POST /miners/vouches/:id/withdraw`, auth-gated to the voucher (otherwise
+  anyone could withdraw someone else's vouch and knock down a third party's
+  score — pinned by a 403 test that also asserts the score did not move).
+  Withdrawal returns the stake and drops the vouched account's `percentHuman` by
+  that vouch's contribution (`stakedPercentage`, the same weight
+  `calculateScore` credits), floored at 0. Without the score drop a ring could
+  park a stake just long enough to get someone verified and then reclaim it.
+  Wired in `ae-miner`'s Vouch page behind a confirm step that states the cost to
+  the vouched account before the click — they are not in the room to object and
+  the drop is immediate.
+  **POST, not DELETE, deliberately:** the auth envelope must travel in a signed
+  body, `express.json()` leaves `req.body` undefined for DELETE here, and
+  intermediaries may strip a DELETE body. Every other auth-gated route in this
+  API is a signed POST/PUT.
+- **`authMiddleware` returned 500 instead of 401 on every protected route.** It
+  destructured `req.body` directly, and `express.json()` leaves that undefined
+  when there is no parseable JSON body (no Content-Type, empty body, or a
+  method it does not treat as carrying one). The TypeError became an unhandled
+  API error, so the most likely malformed request — an auth-gated route called
+  with no body — reported itself as a server fault rather than the 401 it is.
+  Now defaults to `{}`. Found while testing the withdraw route; it affected
+  every protected endpoint.
+- **Correction: vouch burns are true burns and I broke that.** A state-mutation
+  audit flagged the missing `addToFeePool` in `burnVouch` as a supply leak. The
+  code reading was right, the intent reading was wrong: WP v2 made every court
+  burn destroy supply on purpose, pinned by `phase64.test.ts`. The change was
+  reverted and the behaviour is now pinned from the vouching side too so the two
+  cannot drift. The legacy folder's Phase 62 note describing fee-pool routing is
+  stale — Phase 64 superseded it. **Lesson worth keeping: "the code does not do
+  X" is not evidence that it should.**
+
 ### Open blockers (not fixed, ordered by severity)
 
 1. **The state root is diagnostic, and must stay that way for now.** It travels
@@ -416,6 +464,17 @@ were the largest piece, not the only one.
    users at self-custody, which is a fix for the confusion, not for the missing
    service. Either bundle it in `extraResources` and spawn it from
    `main.cjs`, or drop the hosted track from onboarding until it is real.
+3. **The wallet has no vouch-withdrawal UI.** `ae-miner` has it; `ae-app` does
+   not. A participant who vouched from the wallet cannot release that stake
+   without opening the miner app. Same shape as the miner implementation: a
+   button on the Verify screen plus the confirm dialog stating the percentHuman
+   cost to the person vouched for.
+4. **Vouching, court and panel scores still mutate state at API time.** See the
+   state-mutation audit section above. This is the same root cause as blocker 1:
+   until every balance and `percentHuman` write is a function of committed
+   blocks, the state root cannot be enforced. Adding
+   `DELETE /miners/vouches/:id` in this pass adds one more such writer, which is
+   consistent with `createVouch` next to it but does move the wrong way.
 ### Real multi-node check
 
 `node scripts/test-lan-multi-validator.mjs` was run after all of the above and
@@ -635,10 +694,11 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 
 ## Known Issues
 
-### Open: the percent-human spend formula does not match the white paper
+### Decided: discount-down is canonical, the white paper needs updating
 
-Needs Matt's call, not a unilateral code change — it moves who bears the cost
-of being unverified.
+**Matt's call (this session): discount-down is correct. The code is right; the
+paper is what needs to change.** No code change — `core/transaction.ts` already
+implements it. What follows records the divergence so the paper can be fixed.
 
 **White paper §7** grosses the payment UP and the seller is made whole:
 
@@ -660,10 +720,19 @@ everything more expensive. Under the code, a seller quoting 20 points silently
 receives 18 from a 90% buyer, which is likely to read as the system shorting
 them.
 
-The legacy folder's CLAUDE.md describes the current behaviour as a deliberate
-"Option B" choice, so this may be an intentional divergence that the paper has
-not caught up with. Either way the two should be reconciled before anyone
-outside the project reads both.
+**Action: edit the white paper**, replacing the bread example with the
+discount-down form. Something like: a seller who wants 20 points of value
+should quote 22.2 to a 90%-human buyer, because the buyer's 22.2 delivers 20
+and the remaining 2.2 burns. The paper's current numbers are right; it is the
+direction of the adjustment that is backwards.
+
+One sub-question the paper does not address and the code decides on its own:
+the discount applies **only to daily-point spends** (active/supportive/ambient).
+Earned points transfer at full value, and non-individual accounts are never
+discounted (`isDailyPointType && isIndividual` in `processTransaction`). That
+looks deliberate — earned points have already been through the discount once
+when they were first spent into existence, so discounting them again would tax
+the same value twice. Worth stating explicitly in the paper either way.
 
 Note the code is right about the other half of §7: an account at 0% receives
 its full daily allocation but cannot move value.
@@ -716,14 +785,16 @@ pass only and should be re-checked before anyone acts on them.
   the delta would push `earned_balance` negative. `vouch-locked-balance.test.ts`
   covers stake preservation, conservation across the rebalance, and convergence
   on repeat runs (the absolute write oscillated).
-- ~~**Burned vouch stakes destroyed supply.**~~ `burnVouch` decremented
-  `locked_balance` and stopped, never calling `addToFeePool` — so punishing a
-  vouching ring shrank total supply outright, visibly deflationary on a small
-  network. (The legacy folder's CLAUDE.md claims Phase 62 routed voucher stakes
-  into the fee pool; that was not true of this repo.) Now routes the burn to the
-  fee pool, matching the court burn path, so supply is conserved and the value
-  redistributes to miners over subsequent blocks. Conservation is asserted in
-  `vouch-locked-balance.test.ts`.
+- **Vouch burns are true burns, and that is deliberate — do not "fix" it.**
+  `burnVouch` decrements `locked_balance` and does not call `addToFeePool`. A
+  state-mutation audit flagged this as a supply leak and I changed it; that was
+  wrong and is reverted. WP v2 made every court burn a true burn, and
+  `phase64.test.ts` pins it ("fee pool unchanged", "supply decreases from
+  defendant + vouch burns"). The legacy folder's CLAUDE.md describes Phase 62
+  routing voucher stakes into the pool — Phase 64 superseded that, so the
+  legacy note is stale. Backing a fraudulent account has to cost the voucher
+  something the network does not hand straight back. Now pinned from the
+  vouching side too, in `vouch-locked-balance.test.ts`, so the two cannot drift.
 - **Known gap, not fixed:** `withdrawVouch` has no production caller. A
   repo-wide grep finds only its definition and `phase3.test.ts`; `minerRoutes`
   exposes no withdraw or DELETE endpoint. Locking points into a vouch is

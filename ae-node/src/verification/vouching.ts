@@ -10,9 +10,8 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
-import { getAccount, updateBalance } from '../core/account.js';
+import { getAccount, updateBalance, updatePercentHuman } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
-import { addToFeePool } from '../core/fee-pool.js';
 import { runTransaction } from '../db/connection.js';
 import { NotFoundError, ValidationError, InsufficientBalanceError } from '../core/errors.js';
 import { getPolicy } from './policy.js';
@@ -108,12 +107,32 @@ export function withdrawVouch(db: DatabaseSync, vouchId: string): void {
   // Use the current stakeAmount (which may have been rebalanced)
   const unlockAmount = vouch.stakeAmount;
 
+  // WP §7.2: "Vouchers may withdraw at any time, but doing so immediately
+  // reduces the vouched account's percent-human score by the corresponding
+  // amount."
+  //
+  // "The corresponding amount" is this vouch's own contribution to the score.
+  // calculateScore credits vouches at their stakedPercentage (tier C), so
+  // pulling one back removes exactly that many points. Without this, withdrawal
+  // would be free for the voucher and costless to the vouched account, and a
+  // ring could park a stake just long enough to get someone verified and then
+  // reclaim it with the score left standing.
+  const vouched = getAccount(db, vouch.vouchedId);
+  const scoreDrop = Math.round(vouch.stakedPercentage);
+  const newPercentHuman = vouched ? Math.max(0, vouched.percentHuman - scoreDrop) : 0;
+
   runTransaction(db, () => {
     const newEarned = voucher.earnedBalance + unlockAmount;
     const newLocked = voucher.lockedBalance - unlockAmount;
     updateBalance(db, vouch.voucherId, 'earned_balance', newEarned);
     updateBalance(db, vouch.voucherId, 'locked_balance', newLocked);
     recordLog(db, vouch.voucherId, 'vouch_unlock', 'earned', unlockAmount, voucher.earnedBalance, newEarned, vouchId, now);
+
+    // Clamped at 0 rather than allowed to go negative: percentHuman is a
+    // 0-100 multiplier on spending, and a negative one has no meaning.
+    if (vouched && scoreDrop > 0) {
+      updatePercentHuman(db, vouch.vouchedId, newPercentHuman);
+    }
 
     verif.markVouchInactive(vouchId, now);
   });
@@ -135,16 +154,14 @@ export function burnVouch(db: DatabaseSync, vouchId: string): void {
     updateBalance(db, vouch.voucherId, 'locked_balance', newLocked);
     recordLog(db, vouch.voucherId, 'vouch_burn', 'earned', burnAmount, voucher.lockedBalance, newLocked, vouchId, now);
 
-    // Route the burn into the fee pool rather than destroying it.
+    // Deliberately a TRUE burn: the stake leaves the voucher and is destroyed,
+    // not routed to the fee pool. WP v2 made every court burn a true burn, and
+    // phase64.test.ts pins it ("fee pool unchanged", "supply decreases").
     //
-    // A burn that only decrements the voucher shrinks total supply, which on a
-    // small network is a visible deflation every time a vouching ring is
-    // punished — the value simply disappears from the economy. Sending it to
-    // the fee pool keeps supply conserved and redistributes it to miners over
-    // subsequent blocks, which is also what the court burn path does for
-    // defendant stakes.
-    addToFeePool(db, burnAmount);
-
+    // Do not "fix" this into addToFeePool. An earlier note in the legacy
+    // folder's CLAUDE.md describes Phase 62 routing voucher stakes into the
+    // pool; Phase 64 superseded that. Backing a fraudulent account has to cost
+    // the voucher something the network does not hand straight back.
     verif.markVouchInactive(vouchId, now);
   });
 }

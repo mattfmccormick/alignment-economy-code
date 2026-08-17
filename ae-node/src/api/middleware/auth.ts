@@ -18,7 +18,15 @@ declare global {
 
 export function authMiddleware(db: DatabaseSync) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const { accountId, timestamp, signature, payload } = req.body;
+    // Default to {} rather than destructuring req.body directly.
+    //
+    // express.json() leaves req.body undefined when there is no parseable JSON
+    // body — no Content-Type, an empty body, or a method it does not treat as
+    // carrying one. Destructuring that threw a TypeError, which the error
+    // handler turned into a 500. So the single most likely malformed request,
+    // "auth-gated route called with no body at all", reported itself as a
+    // server fault instead of the 401 it is, on every auth-gated route.
+    const { accountId, timestamp, signature, payload } = req.body ?? {};
 
     if (!accountId || !timestamp || !signature) {
       res.status(401).json({

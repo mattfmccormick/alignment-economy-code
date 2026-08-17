@@ -133,6 +133,7 @@ export default function Vouch() {
       <ActiveVouchesCard
         received={vouches?.received ?? []}
         given={vouches?.given ?? []}
+        onWithdrawn={refresh}
       />
     </div>
   );
@@ -430,7 +431,50 @@ function OutgoingRequestsCard({ requests }: { requests: VouchRequest[] }) {
 
 // ---------- Active vouches ----------
 
-function ActiveVouchesCard({ received, given }: { received: Vouch[]; given: Vouch[] }) {
+function ActiveVouchesCard({
+  received,
+  given,
+  onWithdrawn,
+}: {
+  received: Vouch[];
+  given: Vouch[];
+  onWithdrawn: () => void;
+}) {
+  // Which stake is mid-confirm, and which is mid-request. The confirm step is
+  // not optional politeness: withdrawing drops the OTHER person's percentHuman,
+  // and that consequence has to be stated before the click, not discovered
+  // after it.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string>('');
+
+  const withdraw = async (v: Vouch) => {
+    setErr('');
+    setBusy(v.id);
+    try {
+      const w = loadMinerWallet();
+      if (!w) { setErr('Wallet not loaded. Sign in again.'); return; }
+      const ts = Math.floor(Date.now() / 1000);
+      const signature = signPayload({ vouchId: v.id }, ts, w.privateKey);
+      const res = await api.withdrawVouch(v.id, {
+        accountId: w.accountId,
+        timestamp: ts,
+        signature,
+        payload: { vouchId: v.id },
+      });
+      if (!res.success) {
+        setErr(res.error?.message ?? 'Could not withdraw that stake.');
+        return;
+      }
+      setConfirming(null);
+      onWithdrawn();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Network error.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="bg-card border border-border rounded-lg p-5">
@@ -465,16 +509,54 @@ function ActiveVouchesCard({ received, given }: { received: Vouch[]; given: Vouc
         ) : (
           <ul className="space-y-2">
             {given.map((v) => (
-              <li key={v.id} className="bg-bg border border-border/50 rounded p-3 flex items-center justify-between gap-3">
-                <div className="text-xs font-mono text-muted truncate">→ {truncateId(v.vouchedId)}</div>
-                <div className="text-xs tabular-nums shrink-0 text-right">
-                  <div>{v.stakedPercentage ?? '—'}% locked</div>
-                  <div className="text-muted">{displayPoints(v.stakeAmount)} pts</div>
+              <li key={v.id} className="bg-bg border border-border/50 rounded p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-mono text-muted truncate">→ {truncateId(v.vouchedId)}</div>
+                  <div className="text-xs tabular-nums shrink-0 text-right">
+                    <div>{v.stakedPercentage ?? '—'}% locked</div>
+                    <div className="text-muted">{displayPoints(v.stakeAmount)} pts</div>
+                  </div>
                 </div>
+
+                {confirming === v.id ? (
+                  <div className="mt-3 pt-3 border-t border-border/50">
+                    {/* State the cost to the other person plainly. They are not
+                        in the room to object, and the drop is immediate. */}
+                    <p className="text-xs text-red-400">
+                      This returns your {displayPoints(v.stakeAmount)} points and immediately drops{' '}
+                      {truncateId(v.vouchedId)}'s human score by {v.stakedPercentage ?? 0} points.
+                      They may not be able to spend afterwards.
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => setConfirming(null)}
+                        disabled={busy === v.id}
+                        className="text-xs px-3 py-1.5 rounded border border-border hover:bg-card disabled:opacity-50"
+                      >
+                        Keep vouching
+                      </button>
+                      <button
+                        onClick={() => withdraw(v)}
+                        disabled={busy === v.id}
+                        className="text-xs px-3 py-1.5 rounded bg-red-500/90 hover:bg-red-500 text-white disabled:opacity-50"
+                      >
+                        {busy === v.id ? 'Withdrawing…' : 'Withdraw stake'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setErr(''); setConfirming(v.id); }}
+                    className="mt-2 text-xs text-muted hover:text-fg underline underline-offset-2"
+                  >
+                    Withdraw this stake
+                  </button>
+                )}
               </li>
             ))}
           </ul>
         )}
+        {err && <p className="text-xs text-red-400 mt-3">{err}</p>}
       </div>
     </div>
   );

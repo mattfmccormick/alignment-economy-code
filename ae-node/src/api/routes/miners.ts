@@ -4,7 +4,7 @@ import { registerMiner, getMinerByAccount } from '../../mining/registration.js';
 import { getAccount } from '../../core/account.js';
 import { submitEvidence } from '../../verification/evidence.js';
 import { calculateScore } from '../../verification/scoring.js';
-import { createVouch, getActiveVouchesForAccount } from '../../verification/vouching.js';
+import { createVouch, getActiveVouchesForAccount, withdrawVouch } from '../../verification/vouching.js';
 import { verificationStore } from '../../verification/panel.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
@@ -108,6 +108,59 @@ export function minerRoutes(db: DatabaseSync) {
       res.json({ vouch: { ...vouch, stakeAmount: vouch.stakeAmount.toString() } });
     } catch (err) {
       res.status(400).json({ error: String(err) });
+    }
+  });
+
+  // POST /vouches/:id/withdraw - withdraw a vouch you gave.
+  //
+  // WP §7.2 says vouchers may withdraw at any time. Until this route existed
+  // there was no production caller for withdrawVouch at all, so locking points
+  // into a vouch was a one-way ratchet whose only exit was a guilty verdict
+  // burning them. Withdrawing returns the stake and drops the vouched
+  // account's percentHuman by this vouch's contribution to its score.
+  //
+  // POST rather than DELETE deliberately. The auth envelope has to travel in a
+  // signed body, and a body on DELETE is poorly supported: express.json()
+  // leaves req.body undefined for it here, and intermediaries are entitled to
+  // strip it. Every other auth-gated route in this API is a signed POST/PUT,
+  // so this matches them.
+  router.post('/vouches/:id/withdraw', authMiddleware(db), (req, res) => {
+    const accountId = req.accountId!;
+    const vouchId = req.params.id as string;
+
+    const vouch = verificationStore(db).findActiveVouchById(vouchId);
+    if (!vouch) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'VOUCH_NOT_FOUND', message: `Active vouch not found: ${vouchId}` },
+      });
+    }
+    // Only the person who staked may unstake. Without this, anyone could
+    // withdraw someone else's vouch and knock down a third party's score.
+    if (vouch.voucherId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'NOT_VOUCHER', message: 'Only the voucher can withdraw this vouch' },
+      });
+    }
+
+    try {
+      withdrawVouch(db, vouchId);
+      return res.json({
+        success: true,
+        data: {
+          withdrawn: vouchId,
+          vouchedId: vouch.vouchedId,
+          returnedStake: vouch.stakeAmount.toString(),
+          percentHumanReduction: Math.round(vouch.stakedPercentage),
+        },
+        meta: { timestamp: Math.floor(Date.now() / 1000) },
+      });
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'WITHDRAW_FAILED', message: String(err) },
+      });
     }
   });
 
