@@ -57,6 +57,27 @@ Re-run `npm run build` in `sdk/` after any change to `sdk/src/` — the apps
 consume the built `dist/`, not the TypeScript source, so edits are invisible
 until you rebuild.
 
+`platform-server` is a separate workspace with its own dependencies, and
+nothing above installs it. You only need it if you are exercising the hosted
+(email + password) account track or running the SDK's platform tests — the
+self-custody track needs only `ae-node`:
+
+```bash
+cd platform-server && npm install && npm run dev   # optional, :3500
+```
+
+Without it, `cd sdk && npm test` fails six tests at startup. That is a missing
+install, not a broken build.
+
+`explorer` is likewise not installed by the steps above:
+
+```bash
+cd explorer && npm install && npm run dev          # optional, :5175
+```
+
+So of the six packages, the quick start covers four. `platform-server` and
+`explorer` are opt-in.
+
 For the 2-person test setup see `CLAUDE.md` (search "2-Person Testing").
 
 ### Dev shortcut: bump every account to 100% verified

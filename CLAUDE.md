@@ -443,6 +443,23 @@ were the largest piece, not the only one.
   identical root, a DB with one extra account does not. The old header warning
   claiming "blocks carry no state root, so divergence cannot be detected" was
   stale and is corrected in both the script and `README.md`.
+- **`cd sdk && npm test` failed six tests on a fresh clone.** Not a code bug:
+  `platform-server` is a separate workspace with its own dependencies and
+  nothing in the documented setup installs it, so the spawned server had no
+  `tsx` to run. The symptom was `platform-server did not start within 15s`,
+  which reads as a hang or a port clash and sends you looking in the wrong
+  place. The test now checks for `platform-server/node_modules` **before**
+  spawning and says exactly what to run; the timeout message now states that
+  node_modules was present, so a real startup failure is distinguishable from a
+  missing install. README documents the workspace and that it is only needed
+  for the hosted account track and these tests. With it installed: sdk 20/20,
+  platform-server 36/36.
+- **Package install status across the repo (checked this pass).** `sdk`,
+  `ae-node`, `ae-app`, `ae-miner` were installed; `platform-server` and
+  `explorer` were not, and neither is covered by the README quick start.
+  `explorer` builds clean once installed. Worth knowing before a handoff: a
+  "fresh clone builds everything" claim is only true for four of the six
+  packages.
 - **`authMiddleware` returned 500 instead of 401 on every protected route.** It
   destructured `req.body` directly, and `express.json()` leaves that undefined
   when there is no parseable JSON body (no Content-Type, empty body, or a

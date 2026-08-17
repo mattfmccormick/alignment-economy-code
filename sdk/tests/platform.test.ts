@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -43,6 +43,20 @@ before(async () => {
   });
 
   const dataDir = mkdtempSync(join(tmpdir(), 'sdk-platform-test-'));
+
+  // Check the dependency BEFORE spawning. platform-server is a separate
+  // workspace with its own node_modules, and nothing in a fresh clone installs
+  // it — so on a new machine these six tests failed with "did not start within
+  // 15s", which reads as a hang or a port problem and sends you looking in the
+  // wrong place. The actual cause is that tsx is not there to run.
+  if (!existsSync(join(platformRoot, 'node_modules'))) {
+    throw new Error(
+      `platform-server has no node_modules at ${platformRoot}.\n` +
+        `It is a separate workspace and a fresh clone does not install it. Run:\n` +
+        `  cd platform-server && npm install\n` +
+        `then re-run the SDK tests.`,
+    );
+  }
   // Use npx tsx to launch — same way the package's `npm run dev` does.
   // Cross-platform: on Windows npx resolves to npx.cmd; shell: true picks
   // that up. Inheriting cwd to platformRoot ensures the relative
@@ -78,7 +92,11 @@ before(async () => {
     } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error('platform-server did not start within 15s');
+  throw new Error(
+    `platform-server did not answer /health at ${baseUrl} within 15s. ` +
+      `node_modules is present, so this is a real startup failure — check the ` +
+      `[platform-server ERR] lines above for the cause.`,
+  );
 });
 
 after(async () => {
