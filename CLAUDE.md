@@ -577,13 +577,49 @@ reproduced against the real modules, not inferred.
    not being a function of the chain applies to everything in this section. The
    fixes above make each node behave correctly; they do not make two nodes agree.
 
-**Pattern worth noting across this whole audit.** Four separate defects were of
-the form *"this function exists, is correct, and nothing calls it"*:
-`withdrawVouch`, `resolveAppeal`, `markAssignmentMissed`,
-`markAssignmentComplete` (and earlier, `finalizeSupportiveTags` /
-`finalizeAmbientTags`). Each had tests that passed in isolation. A grep for
-exported functions whose only callers live in `tests/` is cheap and would have
-caught all of them.
+### The dominant defect shape: code that exists and is never called
+
+Six defects in this audit were all the same thing — an exported function that
+exists, is correct, has passing unit tests, and which no production code ever
+reaches: `withdrawVouch`, `resolveAppeal`, `markAssignmentMissed`,
+`markAssignmentComplete`, `finalizeSupportiveTags`, `finalizeAmbientTags`.
+
+`tests/no-orphan-exports.test.ts` now enforces this automatically: it walks
+`src/`, finds every `export function`, and fails if nothing in `src/` references
+it. New orphans break the build. Existing ones are baselined in `KNOWN_ORPHANS`
+with a reason each, and **removing an entry from that list is the definition of
+done** for the item.
+
+Running it for the first time found **34 orphans**. Most are benign (client-side
+signing, operator helpers, dead code superseded by `db/schema.ts`). These are
+not — each is a white-paper mechanism that does not happen on a running network:
+
+- **`fileAppeal`** — no route files an appeal, so the entire appeal system is
+  unreachable from both apps. (The appeal *settlement* bug fixed above was real,
+  but nothing can currently create an appeal to settle.)
+- **`runDecayForAll`** — percentHuman decay never runs. WP §"scores decay 10%
+  per 30 days without activity" does not happen.
+- **`recordHeartbeat`** / **`cleanOldHeartbeats`** — miner uptime is never
+  recorded, so the uptime figure every tier decision reads is meaningless.
+- **`evaluateMinerTier`** — miner tiers never change after registration. Tier 1
+  vs Tier 2 is whatever it was at signup, permanently.
+- **`applyAccuracyImpact`** — court verdicts never affect miner accuracy, so the
+  accountability loop the white paper relies on ("miner accuracy is measured
+  against court outcomes") is absent.
+- **`claimInheritance`** — inheritance cannot be claimed.
+- **`setPolicy`** — verification policy cannot be changed at runtime.
+- **`linkManufacturer`** — products cannot be linked to a manufacturer, which is
+  how supportive points are supposed to reach a maker.
+- **`distributeFees`** / **`distributeFromFeePool`** — needs checking against
+  `commitBlockSideEffects`, which may do fee distribution by another path.
+
+Smart contracts (`createSmartContract`, `overrideContract`,
+`resetDailyOverrides`) are already documented elsewhere as a placeholder, so
+those are expected.
+
+This list is the honest answer to "how much of the white paper actually runs?"
+The consensus, transaction, tagging and court paths do. Several of the
+incentive and accountability mechanisms are written but inert.
 
 ### Original repro notes (superseded by the audit above)
 
