@@ -635,6 +635,39 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 
 ## Known Issues
 
+### Open: the percent-human spend formula does not match the white paper
+
+Needs Matt's call, not a unilateral code change — it moves who bears the cost
+of being unverified.
+
+**White paper §7** grosses the payment UP and the seller is made whole:
+
+> "If a loaf of bread costs 20 points and the buyer is 90% human, they must pay
+> approximately 22.2 points (20 / 0.9) to deliver 20 points of value to the
+> seller."
+
+So: sender pays `amount / percentHuman`, recipient receives `amount`.
+
+**The code** discounts DOWN and the seller absorbs it
+(`core/transaction.ts`, `effectiveAmount = amount * percentHuman / 100`,
+remainder burned as `burn_unverified`): sender pays `amount`, recipient
+receives `amount * percentHuman`.
+
+Both implement "verification gates purchasing power," but they put the loss on
+opposite sides of the trade, and the UX differs sharply. Under the paper, a
+seller always gets their sticker price and low-percent buyers simply find
+everything more expensive. Under the code, a seller quoting 20 points silently
+receives 18 from a 90% buyer, which is likely to read as the system shorting
+them.
+
+The legacy folder's CLAUDE.md describes the current behaviour as a deliberate
+"Option B" choice, so this may be an intentional divergence that the paper has
+not caught up with. Either way the two should be reconciled before anyone
+outside the project reads both.
+
+Note the code is right about the other half of §7: an account at 0% receives
+its full daily allocation but cannot move value.
+
 ### Open: state is not yet purely a function of the chain
 
 A state-mutation audit (this session) mapped every writer of `active_balance`,

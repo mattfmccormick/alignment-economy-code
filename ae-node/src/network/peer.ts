@@ -9,6 +9,38 @@ import { logger } from '../node/logger.js';
 const HANDSHAKE_REPLAY_WINDOW_SEC = 300; // 5 minutes
 
 /**
+ * Strip the IPv4-mapped IPv6 prefix Node reports for IPv4 sockets.
+ *
+ * A dual-stack listener hands back `::ffff:127.0.0.1` rather than `127.0.0.1`.
+ * Left as-is it is neither a usable IPv4 literal nor a legal URL host (IPv6
+ * literals need brackets), so `ws://::ffff:127.0.0.1:9302` throws Invalid URL.
+ * Unwrapping to the plain IPv4 form is both correct and what an operator
+ * expects to see in a log line.
+ */
+export function normalizeHost(host: string): string {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(host);
+  if (mapped) return mapped[1];
+  return host;
+}
+
+/** Can this address actually be dialed? Guards the port-0 case above all. */
+export function isDialable(host: string, port: number): boolean {
+  if (!host) return false;
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return false;
+  return true;
+}
+
+/**
+ * Build a WebSocket URL, bracketing bare IPv6 literals. `ws://::1:9000` is
+ * invalid; `ws://[::1]:9000` is not.
+ */
+export function peerUrl(host: string, port: number): string {
+  const h = normalizeHost(host);
+  const needsBrackets = h.includes(':') && !h.startsWith('[');
+  return `ws://${needsBrackets ? `[${h}]` : h}:${port}`;
+}
+
+/**
  * Stable dedup key for a Proposal payload arriving over the wire.
  * (kind, height, round, proposer) uniquely identifies a proposer's slot.
  * Two proposals with the same key but different signed contents is
@@ -142,7 +174,17 @@ export class PeerManager extends EventEmitter {
   }
 
   connectToPeer(host: string, port: number): void {
-    const url = `ws://${host}:${port}`;
+    if (!isDialable(host, port)) {
+      // Almost always port 0, which is what an inbound peer's socket reports
+      // as its source port. That is an ephemeral client port, not the port the
+      // peer listens on, so dialing it can never succeed. Dropping it here
+      // stops a dead address from consuming a reconnect slot every interval
+      // while real peers go unconnected.
+      logger.debug('p2p', `skipping undialable peer address ${host}:${port}`);
+      return;
+    }
+
+    const url = peerUrl(host, port);
 
     try {
       const ws = new WebSocket(url);
@@ -201,9 +243,15 @@ export class PeerManager extends EventEmitter {
   }
 
   handleIncomingConnection(ws: WebSocket, remoteAddress: string): void {
+    // Port 0 is deliberate and means "we do not know this peer's listen port."
+    // The socket's source port is an ephemeral client port, not something any
+    // node can dial. isDialable() keeps such entries out of both the dial path
+    // and the gossiped peer list; the connection itself works fine either way,
+    // since it is already open and bidirectional.
+    const host = normalizeHost(remoteAddress);
     ws.on('message', (data) => {
       const msg = parseMessage(data.toString());
-      if (msg) this.handleMessage(msg, ws, remoteAddress, 0);
+      if (msg) this.handleMessage(msg, ws, host, 0);
     });
 
     ws.on('close', () => {
@@ -504,9 +552,17 @@ export class PeerManager extends EventEmitter {
     }
   }
 
+  /**
+   * Peers we advertise to others during peer exchange.
+   *
+   * Filtered to dialable addresses. A peer that connected TO us is recorded
+   * with port 0 (we know its source port, not its listen port), and gossiping
+   * that would hand every other node an address it can only fail to dial —
+   * one bad entry propagating across the whole mesh.
+   */
   getPeerList(): Array<{ host: string; port: number; nodeId: string; publicKey: string }> {
     return Array.from(this.peers.values())
-      .filter((p) => p.info.status === 'connected')
+      .filter((p) => p.info.status === 'connected' && isDialable(p.info.host, p.info.port))
       .map((p) => ({
         host: p.info.host,
         port: p.info.port,

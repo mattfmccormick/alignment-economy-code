@@ -1,4 +1,5 @@
 import type { PeerManager } from './peer.js';
+import { isDialable, normalizeHost } from './peer.js';
 
 export interface DiscoveryConfig {
   seedNodes: Array<{ host: string; port: number }>;
@@ -58,9 +59,15 @@ export class PeerDiscovery {
   }
 
   addAddress(host: string, port: number): void {
-    const key = `${host}:${port}`;
+    // Never remember an address we cannot dial. Port 0 arrives here through
+    // peer exchange (it is how a peer that connected TO us gets recorded) and
+    // would otherwise sit in knownAddresses forever, burning a reconnect
+    // attempt every interval while genuinely reachable peers went unconnected.
+    if (!isDialable(host, port)) return;
+    const normalized = normalizeHost(host);
+    const key = `${normalized}:${port}`;
     if (!this.knownAddresses.has(key)) {
-      this.knownAddresses.set(key, { host, port, lastAttempt: 0 });
+      this.knownAddresses.set(key, { host: normalized, port, lastAttempt: 0 });
     }
   }
 
