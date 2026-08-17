@@ -18,6 +18,17 @@ coverage/
 .nyc_output/
 *.log
 test-output*.log
+
+# Throwaway probe/scratch scripts. Investigation often means writing a quick
+# one-off script inside the package so it can import ../src directly. Those are
+# not source, and `git add -A` will happily commit one if it is still on disk —
+# which is exactly how probe-tmp.ts got committed once.
+probe-tmp.*
+probe-*.tmp.*
+scratch-*.ts
+scratch-*.mjs
+*.scratch.ts
+*.probe.ts
 phase*.log
 
 # Local DBs (SQLite + WAL/SHM sidecars). NEVER commit data.
