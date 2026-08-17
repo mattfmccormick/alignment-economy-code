@@ -12,6 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { getAccount, updateBalance } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
+import { addToFeePool } from '../core/fee-pool.js';
 import { runTransaction } from '../db/connection.js';
 import { NotFoundError, ValidationError, InsufficientBalanceError } from '../core/errors.js';
 import { getPolicy } from './policy.js';
@@ -134,6 +135,16 @@ export function burnVouch(db: DatabaseSync, vouchId: string): void {
     updateBalance(db, vouch.voucherId, 'locked_balance', newLocked);
     recordLog(db, vouch.voucherId, 'vouch_burn', 'earned', burnAmount, voucher.lockedBalance, newLocked, vouchId, now);
 
+    // Route the burn into the fee pool rather than destroying it.
+    //
+    // A burn that only decrements the voucher shrinks total supply, which on a
+    // small network is a visible deflation every time a vouching ring is
+    // punished — the value simply disappears from the economy. Sending it to
+    // the fee pool keeps supply conserved and redistributes it to miners over
+    // subsequent blocks, which is also what the court burn path does for
+    // defendant stakes.
+    addToFeePool(db, burnAmount);
+
     verif.markVouchInactive(vouchId, now);
   });
 }
@@ -181,12 +192,29 @@ export function rebalanceVouchLocks(db: DatabaseSync): void {
       // Safety: can't lock more than total holdings
       if (newTotalLocked > totalHoldings) continue;
 
-      // Apply the changes
-      const oldLocked = voucher.lockedBalance;
-      const delta = newTotalLocked - oldLocked;
+      // Apply the changes as a DELTA against the portion of locked_balance
+      // that vouching actually owns — never as an absolute write over the
+      // column.
+      //
+      // locked_balance is shared. Validator stake (consensus/registration.ts),
+      // court challenger and juror stakes (court/court.ts), and slashing all
+      // park value in the same column. Writing newTotalLocked (a vouch-only
+      // figure) over the whole column silently released every other
+      // subsystem's stake back into spendable earned_balance, once per day
+      // cycle. A validator who also vouched would keep their validators-table
+      // stake while the points backing it quietly returned to their wallet,
+      // and deregisterValidator would then underflow trying to unlock stake
+      // that was no longer there.
+      const vouchLockedBefore = vouches.reduce((sum, v) => sum + v.stakeAmount, 0n);
+      const delta = newTotalLocked - vouchLockedBefore;
       if (delta === 0n) continue;
 
-      updateBalance(db, voucherId, 'locked_balance', newTotalLocked);
+      // Locking more than the voucher can cover would push earned negative.
+      // Skip rather than clamp: the stored percentages stay authoritative and
+      // the next cycle retries once the balance supports it.
+      if (delta > voucher.earnedBalance) continue;
+
+      updateBalance(db, voucherId, 'locked_balance', voucher.lockedBalance + delta);
       updateBalance(db, voucherId, 'earned_balance', voucher.earnedBalance - delta);
 
       // Update each vouch's stakeAmount in the store

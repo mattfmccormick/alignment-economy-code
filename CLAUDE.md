@@ -635,7 +635,66 @@ The code should be correct at any scale, even if it only needs to handle 3 peopl
 
 ## Known Issues
 
+### Open: state is not yet purely a function of the chain
+
+A state-mutation audit (this session) mapped every writer of `active_balance`,
+`supportive_balance`, `ambient_balance`, `earned_balance`, `locked_balance`,
+`percent_human` and the fee pool, and classified each as chain-ordered or not.
+Transactions are now commit-time ordered. **These are not, and each one can
+fork the state root between honest nodes:**
+
+- **Vouching.** `createVouch` runs synchronously inside `POST /miners/vouches`
+  and moves earned → locked on whichever node received the HTTP request. No
+  vouch transaction type exists; `Block` has no field for it. One vouch
+  permanently diverges that node's state root from its peers.
+- **Court.** Challenger stakes, juror stakes, guilty-verdict burns, bounty
+  payouts and appeal clawbacks all mutate balances from API routes.
+- **Verification panels.** `submitPanelScore` writes `percent_human` directly,
+  and `percent_human` is inside the state root.
+
+Making these chain-ordered is the same shape of change transactions just went
+through: a signed operation type, mempool admission, deterministic apply at
+commit. Two determinism hazards recur at every site and must be fixed in the
+same change: `uuid()` for row ids (every node would store a different primary
+key) and `Date.now()` for timestamps (use the block timestamp).
+
+Until that lands, `computeStateRoot` stays diagnostic — it is carried in the
+block payload and logged on mismatch, but not enforced, because honest nodes
+can legitimately differ.
+
+**Not verified:** the audit's verification stage was cut short by a session
+usage limit, so 26 of 33 checks never ran. The vouching findings below were
+confirmed by hand. The court and panel findings above are from the mapping
+pass only and should be re-checked before anyone acts on them.
+
 ### Done (Fixed)
+
+- ~~**`rebalanceVouchLocks` silently released other subsystems' stake.**~~
+  `locked_balance` is shared by four subsystems (vouching, court challenger and
+  juror stakes, validator registration, slashing), but the daily rebalance
+  computed a vouch-only total and wrote it over the *whole column*
+  (`updateBalance(db, voucherId, 'locked_balance', newTotalLocked)`). A
+  validator who also vouched kept their `validators` row stake while the points
+  backing it quietly returned to spendable `earned_balance`, once per day cycle;
+  `deregisterValidator` would then underflow unlocking stake that was no longer
+  there. Now applies a delta scoped to the vouch rows
+  (`newTotalLocked - sum(vouch.stakeAmount)`) against the existing column value,
+  so other subsystems' stake is untouched. Also skips rather than clamps when
+  the delta would push `earned_balance` negative. `vouch-locked-balance.test.ts`
+  covers stake preservation, conservation across the rebalance, and convergence
+  on repeat runs (the absolute write oscillated).
+- ~~**Burned vouch stakes destroyed supply.**~~ `burnVouch` decremented
+  `locked_balance` and stopped, never calling `addToFeePool` — so punishing a
+  vouching ring shrank total supply outright, visibly deflationary on a small
+  network. (The legacy folder's CLAUDE.md claims Phase 62 routed voucher stakes
+  into the fee pool; that was not true of this repo.) Now routes the burn to the
+  fee pool, matching the court burn path, so supply is conserved and the value
+  redistributes to miners over subsequent blocks. Conservation is asserted in
+  `vouch-locked-balance.test.ts`.
+- **Known gap, not fixed:** `withdrawVouch` has no production caller. A
+  repo-wide grep finds only its definition and `phase3.test.ts`; `minerRoutes`
+  exposes no withdraw or DELETE endpoint. Locking points into a vouch is
+  currently a one-way ratchet whose only exit is a guilty verdict burning them.
 
 - ~~**Frontend types could silently drift from the API's real shapes.**~~ Fixed July 29 after the drift bit four times in one day (see honest status). `ae-node/tests/api-shape-contract.test.ts` boots the API and pins the exact wire shapes the frontends hand-declare: flat account balances (and asserts NO nested `balances` key), evidence score as a breakdown object, camelCase miner row, network status, ledger envelope, share-history points. A route shape change now fails this suite as the reminder to update `ae-app/src/lib/types.ts` and `ae-miner/src/lib/api.ts` in the same commit.
 - ~~**"Tests green" and "pages render" were different claims.**~~ `scripts/smoke-pages.mjs` (July 29) spawns a headless Edge/Chrome (spawn + `puppeteer.connect`, immune to the Edge-150 launcher handoff that breaks `puppeteer.launch`), creates a throwaway account on the running node, injects it into localStorage, loads all 12 wallet + 7 miner routes, and fails on blank pages or console errors. 19/19 green. Prereqs + usage in the script header; `puppeteer-core` is a devDependency of `ae-app`.
