@@ -477,7 +477,68 @@ were the largest piece, not the only one.
   stale — Phase 64 superseded it. **Lesson worth keeping: "the code does not do
   X" is not evidence that it should.**
 
-### Court defects found by audit repro, ordered by severity
+### Audit status (court + verification panels)
+
+A multi-agent audit with an adversarial refute stage confirmed **14 defects in
+court money paths** plus **4 in verification panels**. Every one below was
+reproduced against the real modules, not inferred.
+
+**Fixed and pinned by tests**
+
+- Court stakes now rescale with the daily rebase (`rebaseCourtStakes`, called
+  from `rebase()`). Correction to an earlier assumption of mine: a down-rebase
+  is **the steady state, not an edge case** — `rebase()` sets the pool to
+  exactly `targetTotal`, and spending converts minted active points into
+  recipients' *earned* balances, so `preRebaseTotal` exceeds `targetTotal` on
+  any day the network transacts at all. With 7-day arbitration and 7-day voting
+  windows, every case crosses at least one rebase. `court-rebase-stakes.test.ts`.
+- `updateBalance` refuses to write a negative balance. This whole class used to
+  land silently: the column is TEXT, so `-14744000000000` reads back as a valid
+  bigint and feeds `totalEarnedPool()`, shrinking the next day's rebase
+  denominator and perturbing **every other account on the network**. It also
+  dragged `rebalanceVouchLocks`'s `totalHoldings` down, under-collateralising
+  every vouch that account backed.
+- Free challenges rejected (`court-free-challenge.test.ts`); defendant excluded
+  from their own jury; one-juror juries refused; stalled cases dismissable via
+  `dismissStalledCase`, returning the stake and lifting escrow
+  (`court-jury-seating.test.ts`).
+- Vouch-then-withdraw is no longer a free score ratchet. **This one was mine**,
+  introduced earlier the same day implementing WP §7.2. `createVouch` never
+  raises `percentHuman` (only a completed panel writes it) and vouching needs no
+  consent, so an unconditional subtraction on withdrawal was pure downward
+  pressure at zero cost: verified attack taking a victim 100 → 75 → 50 → 25 → 0
+  in four round trips with the attacker's balance unchanged, leaving them
+  burning 100% of every daily-point spend. The drop now applies only when the
+  vouch predates the panel that set the score, so it could actually have counted
+  toward it. `vouch-withdraw-ratchet.test.ts`.
+
+**Still open, with the reasoning that makes each one urgent**
+
+1. **`phase64`'s conservation assertion cannot catch minted value.** The guilty
+   path over-credits spendable `earned` while the shortfall parks in negative
+   `locked`; the test sums the two, so the errors cancel. A green suite was
+   hiding real minting. Any conservation test needs to assert per-column, not on
+   the sum.
+2. **`resolveVerdict` has no idempotency guard** — a second call replays every
+   payout.
+3. **The vote route calls `resolveVerdict` for appeals instead of
+   `resolveAppeal`**, which has *zero* production callers. Appeal reversal
+   double-unlocks the challenger stake, mints compensation to the defendant, and
+   never reopens the defendant's account.
+4. **`arbitration_deadline` and `voting_deadline` are written and displayed but
+   never read by any code.** No timeout fires, so one silent juror freezes the
+   case, the defendant's account and every stake indefinitely. Escrow is
+   unbounded in time.
+5. **A fractional panel score is written straight into `percent_human`**, which
+   bricks daily-point spends (the multiplier expects an integer 0-100).
+6. **A completed panel keeps accepting scores** — a late miner silently rewrites
+   a finished verification.
+7. **No panel deadline enforcement** — one silent assigned miner strands an
+   applicant's panel forever.
+8. **The duplicate-account counterpart can still be seated on the jury.** The
+   defendant is now excluded; the counterpart is not.
+
+### Original repro notes (superseded by the audit above)
 
 An audit agent left a repro harness in the repo. Running it reproduced **six**
 distinct defects. These are real, observed outputs, not model claims. One is

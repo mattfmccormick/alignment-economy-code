@@ -16,6 +16,7 @@ import { recordLog, transactionStore } from './transaction.js';
 import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
 import { runTransaction } from '../db/connection.js';
 import { rebalanceVouchLocks } from '../verification/vouching.js';
+import { rebaseCourtStakes } from '../court/court.js';
 import { finalizeSupportiveTags } from '../tagging/supportive.js';
 import { finalizeAmbientTags } from '../tagging/ambient.js';
 import { logger } from '../node/logger.js';
@@ -293,6 +294,24 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
 
       rebasedRows.push({ id: acct.id, newEarned, newLocked });
       postRebaseSum += newEarned + newLocked;
+    }
+
+    // Court stakes are recorded as nominal amounts at filing/seating time and
+    // are paid out of locked_balance, which the loop above just rescaled. Move
+    // them by the same ratio, in the same transaction, or the verdict later
+    // subtracts a figure that no longer matches what is locked — driving
+    // balances negative when the multiplier is below 1, and stranding locked
+    // value when it is above.
+    //
+    // Gated on `!existing` because, unlike the per-account loop, this has no
+    // per-row "already done" marker to consult. The rebase_events row is
+    // written at the end of this same transaction, so `existing` being set
+    // means a previous run committed BOTH the balance changes and this
+    // rescale. Without the gate a resumed rebase scales stakes a second time
+    // against balances it correctly skips, which is a fresh way to produce the
+    // exact mismatch this call exists to prevent.
+    if (!existing) {
+      rebaseCourtStakes(db, targetTotal, preRebaseTotal);
     }
 
     // Dust pass. Conservation requires sum == targetTotal. Distribute any

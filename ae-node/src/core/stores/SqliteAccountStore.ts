@@ -118,6 +118,22 @@ export class SqliteAccountStore implements IAccountStore {
     if (!ALLOWED_BALANCE_FIELDS.has(field)) {
       throw new Error(`Invalid balance field: ${field}`);
     }
+    // A balance is never legitimately negative, and letting one through is
+    // worse than crashing. The court used to subtract a stake recorded before
+    // a rebase from a balance rescaled by it, writing values like
+    // -14744000000000 straight to disk. Nothing noticed, because the column is
+    // TEXT and reads back as a perfectly valid negative bigint — and it then
+    // feeds `totalEarnedPool()`, shrinking the denominator of the next day's
+    // rebase and quietly perturbing every other account on the network.
+    //
+    // Failing here turns that silent, spreading corruption into a loud stack
+    // trace at the exact line that caused it.
+    if (newValue < 0n) {
+      throw new Error(
+        `Refusing to write negative ${field} (${newValue}) for account ${accountId}. ` +
+          'A balance cannot go below zero; the caller subtracted more than was there.',
+      );
+    }
     this.db
       .prepare(`UPDATE accounts SET ${field} = ? WHERE id = ?`)
       .run(newValue.toString(), accountId);

@@ -23,6 +23,8 @@ import { createAccount, getAccount, updateBalance, updatePercentHuman } from '..
 import { createVouch, burnVouch, withdrawVouch, rebalanceVouchLocks } from '../src/verification/vouching.js';
 import { getFeePool } from '../src/core/fee-pool.js';
 import { generateKeyPair } from '../src/core/crypto.js';
+import { verificationStore } from '../src/verification/panel.js';
+import { randomUUID } from 'node:crypto';
 
 let db: DatabaseSync;
 
@@ -105,8 +107,22 @@ describe('vouching: withdrawal costs the vouched account its score', () => {
 
   // WP §7.2: "Vouchers may withdraw at any time, but doing so immediately
   // reduces the vouched account's percent-human score by the corresponding
-  // amount." Without this, a ring could park a stake just long enough to get
-  // someone verified, then reclaim it with the score left standing.
+  // amount."
+  //
+  // The reduction is conditional: it applies only when the vouch predates the
+  // completed panel that set the score, so it could actually have counted
+  // toward it. Withdrawal of a vouch created afterwards costs the account
+  // nothing — see vouch-withdraw-ratchet.test.ts for why that condition has to
+  // exist (without it, vouch-then-withdraw zeroes anyone's score for free).
+  // These tests therefore stage a completed panel AFTER the vouch.
+  function completedPanelNow(accountId: string, score: number) {
+    const verif = verificationStore(db);
+    const id = randomUUID();
+    const at = Math.floor(Date.now() / 1000) + 60;
+    verif.insertPanel({ id, accountId, status: 'pending', createdAt: at - 1 });
+    verif.completePanel(id, at, score);
+  }
+
   test('withdrawing returns the stake and drops percentHuman by the vouch weight', () => {
     const voucher = makeAccount();
     const vouched = makeAccount();
@@ -114,6 +130,7 @@ describe('vouching: withdrawal costs the vouched account its score', () => {
     updatePercentHuman(db, vouched, 40);
 
     const vouch = createVouch(db, voucher, vouched, 10);
+    completedPanelNow(vouched, 40); // the vouch was visible to this panel
     const staked = getAccount(db, voucher)!.lockedBalance;
     const voucherEarnedWhileStaked = getAccount(db, voucher)!.earnedBalance;
 
@@ -138,6 +155,7 @@ describe('vouching: withdrawal costs the vouched account its score', () => {
     updatePercentHuman(db, vouched, 5);
 
     const vouch = createVouch(db, voucher, vouched, 25);
+    completedPanelNow(vouched, 5);
     withdrawVouch(db, vouch.id);
 
     assert.strictEqual(getAccount(db, vouched)!.percentHuman, 0);

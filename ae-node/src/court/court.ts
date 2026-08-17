@@ -284,6 +284,93 @@ export function escalateToFull(db: DatabaseSync, caseId: string): CourtCase {
 
 // ========== Jury Selection ==========
 
+/**
+ * Statuses where court stake is still locked in someone's `locked_balance`.
+ * A resolved, withdrawn or closed case has already released (or burned) its
+ * stakes, so rescaling those would corrupt history.
+ */
+const OPEN_CASE_STATUSES = [
+  'arbitration_open',
+  'arbitration_response',
+  'court_open',
+  'court_waiting_jury',
+  'court_voting',
+  'appeal_open',
+  'appeal_voting',
+] as const;
+
+/**
+ * Rescale outstanding court stakes by the daily rebase multiplier.
+ *
+ * The rebase multiplies every account's `locked_balance` by
+ * `targetTotal / preRebaseTotal`, but court stakes were recorded as a fixed
+ * nominal amount at filing/seating time and never moved with it. Both
+ * directions broke:
+ *
+ *   - Multiplier below 1 (the steady state once the network has any size): the
+ *     recorded stake ends up LARGER than what is actually locked, and the
+ *     verdict subtracts the recorded figure anyway. Observed in the audit
+ *     repro: 12 accounts driven negative, one to -14744000000000. A negative
+ *     balance is supply corruption — every total computed from it is wrong.
+ *   - Multiplier above 1: the recorded stake is SMALLER than what is locked, so
+ *     the verdict releases less than it locked and the remainder is stranded
+ *     with nothing left that would ever free it. Observed: 2293823529411 still
+ *     locked after the case closed.
+ *
+ * Vouches already avoid this via `rebalanceVouchLocks`; court stakes had no
+ * equivalent. Runs inside the rebase transaction so stakes and balances move
+ * together or not at all.
+ */
+export function rebaseCourtStakes(
+  db: DatabaseSync,
+  targetTotal: bigint,
+  preRebaseTotal: bigint,
+): void {
+  if (preRebaseTotal <= 0n || targetTotal < 0n) return;
+
+  const placeholders = OPEN_CASE_STATUSES.map(() => '?').join(', ');
+  const scale = (raw: string): string =>
+    ((BigInt(raw) * targetTotal) / preRebaseTotal).toString();
+
+  const cases = db
+    .prepare(`SELECT id, challenger_stake FROM court_cases WHERE status IN (${placeholders})`)
+    .all(...OPEN_CASE_STATUSES) as Array<{ id: string; challenger_stake: string }>;
+  const setCase = db.prepare('UPDATE court_cases SET challenger_stake = ? WHERE id = ?');
+  for (const row of cases) {
+    setCase.run(scale(row.challenger_stake), row.id);
+  }
+
+  const jurors = db
+    .prepare(
+      `SELECT j.id, j.stake_amount FROM court_jury j
+         JOIN court_cases c ON c.id = j.case_id
+        WHERE c.status IN (${placeholders})`,
+    )
+    .all(...OPEN_CASE_STATUSES) as Array<{ id: string; stake_amount: string }>;
+  const setJuror = db.prepare('UPDATE court_jury SET stake_amount = ? WHERE id = ?');
+  for (const row of jurors) {
+    setJuror.run(scale(row.stake_amount), row.id);
+  }
+}
+
+/**
+ * A jury could not be seated. Thrown inside the seating transaction so the
+ * whole attempt rolls back — no juror keeps stake locked against a case that
+ * never opened. Caught by selectJury, which parks the case in
+ * `court_waiting_jury` instead of advancing it.
+ */
+class JurySeatingFailed extends Error {}
+
+/**
+ * Smallest jury that can actually decide anything. Three, and odd, so a
+ * majority exists and cannot tie.
+ *
+ * Below this the case waits rather than proceeding: a verdict burns 80% of the
+ * defendant's balance, and one or two people should not be able to do that
+ * because nobody else was available.
+ */
+const MIN_VIABLE_JURY = 3;
+
 export function selectJury(db: DatabaseSync, caseId: string, blockHash: string): string[] {
   const courtCase = getCase(db, caseId);
   if (!courtCase) throw new NotFoundError('Case not found');
@@ -296,8 +383,22 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
   // Get eligible Tier 2 miners, excluding conflicts
   let pool = getActiveMiners(db, 2);
 
-  // Exclude challenger's miner record
-  pool = pool.filter((m) => m.accountId !== courtCase.challengerId);
+  // Exclude everyone with a stake in the outcome. The challenger was already
+  // excluded; the defendant was not, so a defendant who happened to be an
+  // active tier-2 miner could be seated on the jury deciding their own case and
+  // vote in it. Observed directly in the audit repro ("defendant minerId in
+  // jury? true").
+  //
+  // The counterpart matters for the same reason on duplicate_account cases: it
+  // is the earlier account the defendant is alleged to be duplicating, so its
+  // holder is the other side of the dispute in everything but name and has an
+  // obvious interest in a guilty verdict.
+  const interested = new Set(
+    [courtCase.challengerId, courtCase.defendantId, courtCase.counterpartId].filter(
+      (id): id is string => typeof id === 'string' && id.length > 0,
+    ),
+  );
+  pool = pool.filter((m) => !interested.has(m.accountId));
 
   // Exclude miners with tx history with either party
   pool = pool.filter((m) => {
@@ -323,7 +424,23 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
   }
   pool = pool.filter((m) => !priorSet.has(m.id));
 
-  if (pool.length < 3) {
+  // Drop miners who cannot post the juror stake BEFORE sizing the jury.
+  //
+  // This filter used to live inside the seating loop as a bare `continue`,
+  // after the jury size had already been fixed from the unfiltered pool. So a
+  // pool of three where two held nothing produced a "jury" of one, and the case
+  // still advanced to voting — one juror then decided a verdict that burns 80%
+  // of the defendant's balance. Observed: "pool was 3, jurors actually seated:
+  // 1 | status: court_voting". Filtering here means the size reflects who can
+  // actually serve.
+  pool = pool.filter((m) => {
+    const acct = getAccount(db, m.accountId);
+    if (!acct) return false;
+    const stake = (acct.earnedBalance * BigInt(jurorStakePercent)) / 100n;
+    return stake > 0n && stake <= acct.earnedBalance;
+  });
+
+  if (pool.length < MIN_VIABLE_JURY) {
     store.setStatusWaitingJury(caseId);
     return [];
   }
@@ -341,15 +458,23 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
   }));
   indexed.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 
-  const jurorIds: string[] = [];
+  let jurorIds: string[] = [];
 
+  try {
   runTransaction(db, () => {
     for (let i = 0; i < actualSize; i++) {
       const miner = indexed[i].miner;
       const acct = getAccount(db, miner.accountId)!;
       const stake = (acct.earnedBalance * BigInt(jurorStakePercent)) / 100n;
 
-      if (stake === 0n || stake > acct.earnedBalance) continue; // skip if can't stake
+      // Every miner still in the pool was checked for stakeability above, so
+      // this should be unreachable. Throwing rather than silently skipping is
+      // the point: a silent skip is exactly how a one-juror jury got seated.
+      if (stake <= 0n || stake > acct.earnedBalance) {
+        throw new JurySeatingFailed(
+          `miner ${miner.id} became unstakeable between filtering and seating`,
+        );
+      }
 
       // Lock juror stake
       const newEarned = acct.earnedBalance - stake;
@@ -369,10 +494,80 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
       jurorIds.push(miner.id);
     }
 
+    // Only advance to voting once a viable jury is actually seated. This used
+    // to run unconditionally, so a case moved to court_voting even with an
+    // empty or one-member jury. Throwing rolls the whole seating back, so no
+    // juror is left with stake locked against a case that never opened.
+    if (jurorIds.length < MIN_VIABLE_JURY || jurorIds.length % 2 === 0) {
+      throw new JurySeatingFailed(
+        `seated ${jurorIds.length} juror(s); need at least ${MIN_VIABLE_JURY} and an odd count`,
+      );
+    }
+
     store.setStatusVoting(caseId, now + votingDays * 86400);
   });
+  } catch (err) {
+    if (!(err instanceof JurySeatingFailed)) throw err;
+    // The transaction rolled back, so nothing is locked and no juror rows
+    // exist. Reset the in-memory list to match the database and park the case.
+    jurorIds = [];
+    store.setStatusWaitingJury(caseId);
+    return [];
+  }
 
   return jurorIds;
+}
+
+/**
+ * Release a case that can never seat a jury.
+ *
+ * Without this, `court_waiting_jury` was a permanent trap. `escalateToFull`
+ * refuses to re-run ("Can only escalate from arbitration") and nothing else
+ * calls `selectJury`, so the defendant stayed escrowed and the challenger's
+ * stake stayed locked with no route out — observed directly in the audit
+ * repro. On a small network, where the eligible pool is routinely under three,
+ * that is not an edge case.
+ *
+ * Dismissal is deliberately neutral: no verdict, the challenger's stake is
+ * returned in full rather than burned, and the defendant is un-escrowed. The
+ * network failed to provide a jury; neither party did anything wrong, so
+ * neither should be punished for it.
+ */
+export function dismissStalledCase(db: DatabaseSync, caseId: string): void {
+  const store = courtStore(db);
+  const courtCase = getCase(db, caseId);
+  if (!courtCase) throw new NotFoundError('Case not found');
+  if (courtCase.status !== 'court_waiting_jury') {
+    throw new ValidationError(
+      `Only a case stuck waiting for a jury can be dismissed (status: ${courtCase.status})`,
+      'NOT_STALLED',
+    );
+  }
+
+  const challenger = getAccount(db, courtCase.challengerId);
+  const now = Math.floor(Date.now() / 1000);
+
+  runTransaction(db, () => {
+    if (challenger) {
+      // Clamp to what is actually locked. The daily rebase rescales
+      // locked_balance while the case sits open, so the nominal stake recorded
+      // at filing time can exceed it — subtracting blind is what drives
+      // balances negative elsewhere in this file.
+      const release =
+        courtCase.challengerStake > challenger.lockedBalance
+          ? challenger.lockedBalance
+          : courtCase.challengerStake;
+      updateBalance(db, courtCase.challengerId, 'locked_balance', challenger.lockedBalance - release);
+      updateBalance(db, courtCase.challengerId, 'earned_balance', challenger.earnedBalance + release);
+      recordLog(
+        db, courtCase.challengerId, 'vouch_unlock', 'earned', release,
+        challenger.earnedBalance, challenger.earnedBalance + release, caseId, now,
+      );
+    }
+
+    setEscrowed(db, courtCase.defendantId, false);
+    store.setVerdict(caseId, null, 'withdrawn', now);
+  });
 }
 
 // ========== Voting ==========

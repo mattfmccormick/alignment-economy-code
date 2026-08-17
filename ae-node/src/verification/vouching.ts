@@ -111,14 +111,38 @@ export function withdrawVouch(db: DatabaseSync, vouchId: string): void {
   // reduces the vouched account's percent-human score by the corresponding
   // amount."
   //
-  // "The corresponding amount" is this vouch's own contribution to the score.
-  // calculateScore credits vouches at their stakedPercentage (tier C), so
-  // pulling one back removes exactly that many points. Without this, withdrawal
-  // would be free for the voucher and costless to the vouched account, and a
-  // ring could park a stake just long enough to get someone verified and then
-  // reclaim it with the score left standing.
+  // The drop applies ONLY if this vouch could actually have contributed to the
+  // score being reduced — meaning it already existed when the panel that set
+  // that score completed.
+  //
+  // Subtracting unconditionally is a free, non-consensual ratchet, and it was
+  // live in this file for part of a day. createVouch never raises
+  // percentHuman (only a completed panel writes it, panel.ts), and vouching
+  // needs no consent from the vouched account, so "vouch then immediately
+  // withdraw" was pure subtraction at zero cost: an attacker with any balance
+  // could take a victim 100 → 75 → 50 → 25 → 0 in four round trips and get
+  // their whole stake back each time. At 0 the victim burns 100% of every
+  // daily-point spend. Verified as a working attack against the real modules.
+  //
+  // Keying on the panel timestamp closes it: an attacker's vouch is always
+  // newer than the victim's last panel, so it cannot have been counted and
+  // cannot be cashed in for a reduction. A voucher whose stake predates the
+  // panel — someone whose backing genuinely helped the miners reach that
+  // number — still costs the account when they pull out, which is the
+  // behaviour the white paper asks for.
   const vouched = getAccount(db, vouch.vouchedId);
-  const scoreDrop = Math.round(vouch.stakedPercentage);
+  const lastPanel = verif
+    .findPanelsByAccount(vouch.vouchedId)
+    .filter((p) => p.status === 'complete' && p.completedAt !== null)
+    .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))[0];
+
+  // No completed panel means percentHuman was never set by verification at
+  // all (a fresh account, or a dev-seeded one), so nothing here earned it and
+  // nothing here can take it away.
+  const vouchPredatesScore =
+    lastPanel !== undefined && vouch.createdAt <= (lastPanel.completedAt ?? 0);
+
+  const scoreDrop = vouchPredatesScore ? Math.round(vouch.stakedPercentage) : 0;
   const newPercentHuman = vouched ? Math.max(0, vouched.percentHuman - scoreDrop) : 0;
 
   runTransaction(db, () => {

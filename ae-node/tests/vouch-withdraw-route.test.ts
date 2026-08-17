@@ -18,6 +18,8 @@ import { createAccount, getAccount, updateBalance } from '../src/core/account.js
 import { createVouch } from '../src/verification/vouching.js';
 import { signPayload, generateKeyPair } from '../src/core/crypto.js';
 import { resetRateLimits } from '../src/api/middleware/rateLimit.js';
+import { verificationStore } from '../src/verification/panel.js';
+import { randomUUID } from 'node:crypto';
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -73,6 +75,22 @@ function envelope(accountId: string, privateKey: string, vouchId: string) {
   return { accountId, timestamp, signature: signPayload(payload, timestamp, privateKey), payload };
 }
 
+/**
+ * Give the account a completed panel dated after the vouch was created.
+ *
+ * The score drop applies only to a vouch that predates the panel which set the
+ * score, so it could actually have counted toward it. Without that condition,
+ * vouch-then-withdraw zeroes anyone's score for free — see
+ * vouch-withdraw-ratchet.test.ts.
+ */
+function completedPanelAfterVouch(db: DatabaseSync, accountId: string, score: number) {
+  const verif = verificationStore(db);
+  const id = randomUUID();
+  const at = Math.floor(Date.now() / 1000) + 60;
+  verif.insertPanel({ id, accountId, status: 'pending', createdAt: at - 1 });
+  verif.completePanel(id, at, score);
+}
+
 describe('POST /miners/vouches/:id/withdraw', () => {
   beforeEach(() => resetRateLimits());
 
@@ -83,6 +101,7 @@ describe('POST /miners/vouches/:id/withdraw', () => {
     updateBalance(db, voucher.accountId, 'earned_balance', 10_000n);
 
     const vouch = createVouch(db, voucher.accountId, vouched.accountId, 10);
+    completedPanelAfterVouch(db, vouched.accountId, 40);
     const staked = getAccount(db, voucher.accountId)!.lockedBalance;
 
     const res = await request(
