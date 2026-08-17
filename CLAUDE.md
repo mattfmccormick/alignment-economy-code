@@ -428,6 +428,21 @@ were the largest piece, not the only one.
   screen under the shape-contract suite. Worth noting `npx tsc --noEmit` did
   **not** catch the missing field; `npm run build` did (different tsconfig), so
   the build is the real gate for the frontends.
+- **`dev-bump-ph.mjs` can now prove two machines agree.** The two-laptop guide
+  tells the operator to run it on both nodes, and it writes account state
+  outside consensus, so it is a way to fork the network — either by running it
+  on one node only, or by running it on both at different moments (it touches
+  only the accounts that exist locally at that instant, so nodes with different
+  account sets bump different rows). Since block-apply now fail-stops, that
+  shows up as a halted chain rather than silent drift. The script now prints a
+  `STATE ROOT` after bumping, and takes `--check` to print it without changing
+  anything, so operators can compare the two machines directly. It imports the
+  node's own `computeStateRoot` rather than re-deriving it — a drifted second
+  copy would make disagreeing nodes print matching roots, which is worse than
+  no check. Verified: two DBs with the same account set converge to an
+  identical root, a DB with one extra account does not. The old header warning
+  claiming "blocks carry no state root, so divergence cannot be detected" was
+  stale and is corrected in both the script and `README.md`.
 - **`authMiddleware` returned 500 instead of 401 on every protected route.** It
   destructured `req.body` directly, and `express.json()` leaves that undefined
   when there is no parseable JSON body (no Content-Type, empty body, or a

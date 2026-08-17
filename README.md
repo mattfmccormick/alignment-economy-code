@@ -68,7 +68,11 @@ from `ae-node/`:
 ```bash
 node scripts/dev-bump-ph.mjs            # uses ./data/ae-node.db
 node scripts/dev-bump-ph.mjs path.db    # explicit DB path
+node scripts/dev-bump-ph.mjs --check    # print the state root, change nothing
 ```
+
+Requires `npm run build` first — the script reuses the node's own state-root
+code so the cross-machine comparison below is meaningful.
 
 It opens the DB in WAL mode, sets every individual account's `percentHuman`
 to 100, and sets each earned balance to 5,000 points so you have something
@@ -78,12 +82,31 @@ idempotent, so it doubles as a top-up when you spend a test account dry).
 Run it from `ae-node/` or pass an explicit path. It refuses to run against a
 missing DB rather than silently creating an empty one.
 
-**Single-node use only.** This writes account state directly to one node's
-SQLite file, outside consensus. Blocks carry no state root, so a
-multi-validator network cannot detect the resulting divergence: `percentHuman`
-drift is silent forever, and balance drift surfaces only as a
-`Replay: insufficient <type> balance` throw on the un-bumped node the first
-time a seeded account spends. Run it on every node of a network, or none.
+**On a multi-node network, follow the procedure below.** This writes account
+state directly to one node's SQLite file, outside consensus, and nothing
+replicates it. There are two ways to fork state with it: run it on one node
+only, or run it on every node but at different moments (it only touches
+accounts that exist locally at that instant, so if one node has not yet learned
+about an account the other has, the two bump different sets). Either way the
+first block touching a divergent account cannot be applied by somebody and
+consensus fail-stops.
+
+Safe procedure:
+
+1. Stop every node.
+2. Run the script on every node.
+3. Compare the `STATE ROOT` each run prints. Identical means the nodes agree.
+   Different means **do not start the chain** — fix the account sets first.
+4. Restart every node.
+
+To compare two machines without changing anything:
+
+```bash
+node scripts/dev-bump-ph.mjs --check          # prints STATE ROOT only
+```
+
+The state root is computed by the node's own `computeStateRoot`, not a copy, so
+a match is meaningful rather than cosmetic.
 
 The miner dashboard picks up the change within 30 seconds (it polls). The
 wallet does not poll and a raw SQL write emits no `balance:updated` event, so
