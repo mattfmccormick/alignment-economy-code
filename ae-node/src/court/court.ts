@@ -719,6 +719,19 @@ export function resolveVerdict(db: DatabaseSync, caseId: string): Verdict {
     } else {
       applyInnocentVerdict(db, courtCase, jurors, now);
     }
+
+    // Feed the outcome back to the miners who verified this account.
+    //
+    // applyAccuracyImpact had no production caller, so a court finding that an
+    // account was not human never reflected on the miners who had passed it.
+    // That is the accountability loop the whole proof-of-human model rests on
+    // — the white paper's "miner accuracy is measured against court outcomes"
+    // — and without it a miner could wave through fraudulent accounts forever
+    // at no cost to their tier or their standing.
+    //
+    // `courtCase` was read before the verdict was written, so its `verdict` is
+    // still null; pass the decided value or the function returns immediately.
+    applyAccuracyImpact(db, { ...courtCase, verdict });
   });
 
   return verdict;

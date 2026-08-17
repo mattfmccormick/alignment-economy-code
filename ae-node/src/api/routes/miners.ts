@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { registerMiner, getMinerByAccount } from '../../mining/registration.js';
 import { getAccount } from '../../core/account.js';
@@ -6,6 +6,8 @@ import { submitEvidence } from '../../verification/evidence.js';
 import { calculateScore } from '../../verification/scoring.js';
 import { createVouch, getActiveVouchesForAccount, withdrawVouch } from '../../verification/vouching.js';
 import { verificationStore } from '../../verification/panel.js';
+import { recordHeartbeat } from '../../mining/heartbeat.js';
+import { getLatestBlock } from '../../core/block.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
@@ -111,9 +113,38 @@ export function minerRoutes(db: DatabaseSync) {
     }
   });
 
+  // POST /miners/heartbeat - "I am online and available for assignments."
+  //
+  // recordHeartbeat existed with a comment saying the protocol records one
+  // every block, and nothing called it. So countHeartbeatsSince always
+  // returned 0, calculateUptime always returned 0%, and the tier1 uptime
+  // threshold (90%) could never be met by anyone. Uptime was not a low number;
+  // it was an unmeasured one.
+  //
+  // A miner here is an API client, not necessarily a validator, so the honest
+  // signal is the client saying so on its poll rather than anything derived
+  // from block production. mining.heartbeat_interval_seconds (60) is the
+  // cadence calculateUptime expects.
+  router.post('/heartbeat', authMiddleware(db), (req, res) => {
+    const miner = getMinerByAccount(db, req.accountId!);
+    if (!miner || !miner.isActive) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_A_MINER', message: 'No active miner for this account' },
+      });
+    }
+    const height = getLatestBlock(db)?.number ?? 0;
+    recordHeartbeat(db, miner.id, height);
+    return res.json({
+      success: true,
+      data: { minerId: miner.id, blockHeight: height },
+      meta: { timestamp: Math.floor(Date.now() / 1000) },
+    });
+  });
+
   // POST /vouches/:id/withdraw - withdraw a vouch you gave.
   //
-  // WP §7.2 says vouchers may withdraw at any time. Until this route existed
+  // WP Â§7.2 says vouchers may withdraw at any time. Until this route existed
   // there was no production caller for withdrawVouch at all, so locking points
   // into a vouch was a one-way ratchet whose only exit was a guilty verdict
   // burning them. Withdrawing returns the stake and drops the vouched

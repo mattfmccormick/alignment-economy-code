@@ -1,10 +1,10 @@
-// Guard against the single most common defect shape in this codebase.
+﻿// Guard against the single most common defect shape in this codebase.
 //
 // Six separate bugs found in one audit were all the same thing: an exported
 // function that exists, is correct, has passing unit tests, and which no
 // production code ever calls.
 //
-//   withdrawVouch            - WP §7.2 said vouchers may withdraw; no route
+//   withdrawVouch            - WP Â§7.2 said vouchers may withdraw; no route
 //   resolveAppeal            - appeals settled through the wrong function
 //   markAssignmentMissed     - panel deadlines never enforced
 //   markAssignmentComplete   - miner reliability stuck at zero for everyone
@@ -34,7 +34,7 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
  * reason has to be "something outside src/ calls it", not "we might need it".
  */
 const KNOWN_ORPHANS: Record<string, string> = {
-  // ── Genuine external surface: called from outside src/ ────────────────
+  // â”€â”€ Genuine external surface: called from outside src/ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   createApp: 'server entry, started by cli.ts / tests',
   buildOpenApiSpec: 'served at /api/v1/openapi.json',
   signPayload: 'client-side signing; ae-node only ever verifies',
@@ -46,39 +46,35 @@ const KNOWN_ORPHANS: Record<string, string> = {
   checkpointWAL: 'operator helper, invoked manually',
   pruneChain: 'operator helper, invoked manually',
 
-  // ── Dead code superseded by db/schema.ts ──────────────────────────────
+  // â”€â”€ Dead code superseded by db/schema.ts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // These predate the unified schema and are no longer reachable. Deleting
   // them is safe and should happen; kept listed so the guard stays green.
-  initializeCourtSchema: 'superseded by db/schema.ts — delete',
-  initializeMiningSchema: 'superseded by db/schema.ts — delete',
-  initializeVerificationSchema: 'superseded by db/schema.ts — delete',
-  validateBlock: 'superseded by network/block-validator.ts — delete',
-  validateChain: 'superseded by network/block-validator.ts — delete',
+  initializeCourtSchema: 'superseded by db/schema.ts â€” delete',
+  initializeMiningSchema: 'superseded by db/schema.ts â€” delete',
+  initializeVerificationSchema: 'superseded by db/schema.ts â€” delete',
+  validateBlock: 'superseded by network/block-validator.ts â€” delete',
+  validateChain: 'superseded by network/block-validator.ts â€” delete',
 
-  // ── UNWIRED: real gaps, documented in CLAUDE.md ───────────────────────
+  // â”€â”€ UNWIRED: real gaps, documented in CLAUDE.md â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Each of these implements a white-paper mechanism that therefore does not
   // happen on a running network. Listed so the guard protects against NEW
   // orphans; removing an entry from this list is the definition of done.
-  fileAppeal: 'UNWIRED — no route files an appeal, so appeals are unreachable',
-  runDecayForAll: 'UNWIRED — percentHuman decay never runs',
-  recordHeartbeat: 'UNWIRED — miner uptime is never recorded',
-  cleanOldHeartbeats: 'UNWIRED — companion to recordHeartbeat',
-  evaluateMinerTier: 'UNWIRED — miner tiers never change after registration',
-  applyAccuracyImpact: 'UNWIRED — court verdicts never affect miner accuracy',
-  claimInheritance: 'UNWIRED — inheritance cannot be claimed',
-  distributeFees: 'UNWIRED — check against commitBlockSideEffects',
-  distributeFromFeePool: 'UNWIRED — companion to distributeFees',
-  setPolicy: 'UNWIRED — verification policy cannot be changed at runtime',
-  linkManufacturer: 'UNWIRED — products cannot be linked to a manufacturer',
-  createSmartContract: 'UNWIRED — smart-contract layer is a documented placeholder',
-  overrideContract: 'UNWIRED — same',
-  resetDailyOverrides: 'UNWIRED — same',
-  getPanelForAccount: 'UNWIRED — no route exposes it',
-  getVouchesGivenBy: 'UNWIRED — route uses the store directly',
-  getEvidenceType: 'UNWIRED — no caller',
-  getAccountByPublicKey: 'UNWIRED — no caller',
-  isInProtectionWindow: 'UNWIRED — fileChallenge inlines the check',
-  pendingValidatorChangeCount: 'UNWIRED — diagnostics only',
+  fileAppeal: 'UNWIRED â€” no route files an appeal, so appeals are unreachable',
+  runDecayForAll: 'UNWIRED â€” percentHuman decay never runs',
+  claimInheritance: 'UNWIRED â€” inheritance cannot be claimed',
+  distributeFees: 'UNWIRED â€” check against commitBlockSideEffects',
+  distributeFromFeePool: 'UNWIRED â€” companion to distributeFees',
+  setPolicy: 'UNWIRED â€” verification policy cannot be changed at runtime',
+  linkManufacturer: 'UNWIRED â€” products cannot be linked to a manufacturer',
+  createSmartContract: 'UNWIRED â€” smart-contract layer is a documented placeholder',
+  overrideContract: 'UNWIRED â€” same',
+  resetDailyOverrides: 'UNWIRED â€” same',
+  getPanelForAccount: 'UNWIRED â€” no route exposes it',
+  getVouchesGivenBy: 'UNWIRED â€” route uses the store directly',
+  getEvidenceType: 'UNWIRED â€” no caller',
+  getAccountByPublicKey: 'UNWIRED â€” no caller',
+  isInProtectionWindow: 'UNWIRED â€” fileChallenge inlines the check',
+  pendingValidatorChangeCount: 'UNWIRED â€” diagnostics only',
   signValidatorChangeRegister: 'client-side signing for validator onboarding',
   signValidatorChangeDeregister: 'client-side signing for validator onboarding',
   signNodeMessage: 'network handshake signing, reached via messages.ts helpers',

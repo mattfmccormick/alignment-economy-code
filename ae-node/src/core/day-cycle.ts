@@ -18,6 +18,7 @@ import { runTransaction } from '../db/connection.js';
 import { rebalanceVouchLocks } from '../verification/vouching.js';
 import { rebaseCourtStakes, expireCourtDeadlines } from '../court/court.js';
 import { expireOverdueAssignments } from '../mining/fifo-queue.js';
+import { runMinerTierEvaluation } from '../mining/tiers.js';
 import { finalizeSupportiveTags } from '../tagging/supportive.js';
 import { finalizeAmbientTags } from '../tagging/ambient.js';
 import { logger } from '../node/logger.js';
@@ -402,6 +403,13 @@ export function runExpireAndRebase(db: DatabaseSync): RebaseEvent | null {
   // queue held an applicant at their existing percentHuman indefinitely â€” zero
   // for a new joiner, which means every spend burns.
   expireOverdueAssignments(db, nowSec);
+  // Re-evaluate miner tiers on the rolling window, and prune heartbeats past
+  // it. evaluateMinerTier had no production caller, so a miner's tier was
+  // whatever it was at registration, permanently — nobody promoted for doing
+  // the work well, nobody demoted for going dark. Tier 2 is who gets seated on
+  // juries, so an inert tier system means jury composition never reflects
+  // conduct.
+  runMinerTierEvaluation(db);
   expireDaily(db);                  // phase: expiring
   const event = rebase(db);         // phase: rebasing
   rebalanceVouchLocks(db);          // WP v2: percentage-based locks scale with balance

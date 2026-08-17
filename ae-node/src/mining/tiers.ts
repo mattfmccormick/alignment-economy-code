@@ -1,10 +1,11 @@
-import { DatabaseSync } from 'node:sqlite';
+﻿import { DatabaseSync } from 'node:sqlite';
 import { getParam } from '../config/params.js';
 import { getAccount } from '../core/account.js';
 import { NotFoundError } from '../core/errors.js';
-import { getMiner, setMinerTier, deactivateMiner } from './registration.js';
-import { calculateUptime } from './heartbeat.js';
+import { getMiner, setMinerTier, deactivateMiner, getActiveMiners } from './registration.js';
+import { calculateUptime, cleanOldHeartbeats } from './heartbeat.js';
 import { getCompositeAccuracy, getJuryAttendanceRate, getCompletedAssignments } from './accuracy.js';
+import { logger } from '../node/logger.js';
 
 export interface TierEvaluation {
   minerId: string;
@@ -95,4 +96,60 @@ export function evaluateMinerTier(
   }
 
   return { minerId, currentTier: miner.tier, newTier, changed, reason, metrics };
+}
+
+/**
+ * Re-evaluate every active miner's tier, and drop heartbeats past the window.
+ *
+ * `evaluateMinerTier` had no production caller, so a miner's tier was whatever
+ * it was at registration, permanently. Nobody was ever promoted for doing the
+ * work well and nobody was demoted for going dark â€” the entire tier mechanism
+ * was inert, which matters because tier 2 is who gets seated on juries.
+ *
+ * Runs once per day cycle. A single miner's evaluation throwing must not stop
+ * the rest of the network's rollover, so failures are contained and logged;
+ * that miner keeps its current tier until tomorrow.
+ *
+ * `cleanOldHeartbeats` runs alongside because heartbeats are append-only at
+ * one row per minute per miner. Nothing pruned them, so the table grew without
+ * bound: ~525k rows per miner per year, all of it outside the rolling window
+ * and useless to `calculateUptime`. Retention is twice the window so a
+ * boundary evaluation always has full history.
+ */
+export function runMinerTierEvaluation(
+  db: DatabaseSync,
+  networkStartTime?: number,
+): { evaluated: number; changed: TierEvaluation[]; failed: number } {
+  const windowDays = getParam<number>(db, 'mining.rolling_window_days');
+  cleanOldHeartbeats(db, windowDays * 2 * 86400);
+
+  const changed: TierEvaluation[] = [];
+  let evaluated = 0;
+  let failed = 0;
+
+  for (const miner of getActiveMiners(db)) {
+    try {
+      const result = evaluateMinerTier(db, miner.id, networkStartTime);
+      evaluated++;
+      if (result.changed) changed.push(result);
+    } catch (err) {
+      failed++;
+      logger.error(
+        'mining',
+        `Tier evaluation failed for miner ${miner.id}; it keeps tier ${miner.tier} for now. ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+    }
+  }
+
+  if (changed.length > 0 || failed > 0) {
+    logger.info(
+      'mining',
+      `Tier evaluation: ${evaluated} miner(s) checked, ${changed.length} changed` +
+        (failed > 0 ? `, ${failed} failed` : ''),
+    );
+  }
+
+  return { evaluated, changed, failed };
 }

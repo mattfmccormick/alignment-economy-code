@@ -599,13 +599,46 @@ not — each is a white-paper mechanism that does not happen on a running networ
   but nothing can currently create an appeal to settle.)
 - **`runDecayForAll`** — percentHuman decay never runs. WP §"scores decay 10%
   per 30 days without activity" does not happen.
-- **`recordHeartbeat`** / **`cleanOldHeartbeats`** — miner uptime is never
-  recorded, so the uptime figure every tier decision reads is meaningless.
-- **`evaluateMinerTier`** — miner tiers never change after registration. Tier 1
-  vs Tier 2 is whatever it was at signup, permanently.
-- **`applyAccuracyImpact`** — court verdicts never affect miner accuracy, so the
-  accountability loop the white paper relies on ("miner accuracy is measured
-  against court outcomes") is absent.
+- ~~**`recordHeartbeat`** / **`cleanOldHeartbeats`** / **`evaluateMinerTier`**~~
+  **FIXED — the miner incentive system now has feedback.** `recordHeartbeat`
+  carried a comment saying "the protocol records a heartbeat every block" and
+  nothing called it, so `countHeartbeatsSince` always returned 0 and
+  `calculateUptime` always returned 0%. Uptime was not a low number, it was an
+  unmeasured one — and the tier-1 threshold is 90%, so nobody could ever meet
+  it. `evaluateMinerTier` then had no caller either, so a tier was whatever it
+  was at registration, permanently.
+
+  New `POST /miners/heartbeat` (auth-gated, 60s cadence to match
+  `mining.heartbeat_interval_seconds`); a miner here is an API client rather
+  than necessarily a validator, so the honest signal is the client saying it is
+  available, not something inferred from block production. New
+  `runMinerTierEvaluation` runs once per day cycle over every active miner,
+  with per-miner failures contained so one bad row cannot stop the network's
+  rollover, and prunes heartbeats past twice the rolling window — the table is
+  append-only at one row per minute per miner, roughly 525k rows per miner per
+  year, and nothing pruned it. `miner-tier-heartbeat.test.ts` covers demotion
+  for going dark, promotion on merit, and the pruning.
+
+  Worth stating plainly: tier 2 is who gets seated on juries, so while this was
+  inert, jury composition never reflected conduct.
+- ~~**`applyAccuracyImpact`**~~ **FIXED, and it hid a second bug.** Wiring it
+  into `resolveVerdict`'s guilty path was not enough, because
+  `getVerificationAccuracy` was a stub that returned 100% for every miner
+  unconditionally:
+
+  ```ts
+  // For now, every completed verification counts as correct. Phase 5 (court)
+  // retroactively decrements this when fraud is found.
+  const correct = completed;
+  ```
+
+  Nothing ever did. `applyAccuracyImpact` writes a court-contradicted
+  verification back with `missed = 1`, and that flag was never read — so a
+  miner who waved through fraudulent accounts kept a perfect record and could
+  never be demoted no matter how many of their calls the court overturned. Now
+  counts `completed AND NOT missed` via `countMinerAssignmentsCorrect`.
+  `court-accuracy-impact.test.ts` proves a tier-2 miner who passed an account
+  the court finds guilty loses tier 2, and that being right costs nothing.
 - **`claimInheritance`** — inheritance cannot be claimed.
 - **`setPolicy`** — verification policy cannot be changed at runtime.
 - **`linkManufacturer`** — products cannot be linked to a manufacturer, which is

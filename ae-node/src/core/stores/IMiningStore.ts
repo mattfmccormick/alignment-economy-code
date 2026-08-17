@@ -118,6 +118,16 @@ export interface IMiningStore {
   /** Count of completed (scored) assignments for this miner. */
   countMinerAssignmentsCompleted(minerId: string): number;
 
+  /**
+   * Completed assignments a court has NOT since contradicted.
+   *
+   * `applyAccuracyImpact` writes a verification back with `missed = 1` when the
+   * court finds the account was not human after all, so this is the count that
+   * survived scrutiny. Without it, verification accuracy was hardcoded to 100%
+   * and no miner could ever be demoted for being wrong.
+   */
+  countMinerAssignmentsCorrect(minerId: string): number;
+
   // ── miner_jury_service ─────────────────────────────────────────
 
   /** Append a jury-service audit row. */

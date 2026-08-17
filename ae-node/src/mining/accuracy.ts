@@ -12,9 +12,16 @@ export function getVerificationAccuracy(db: DatabaseSync, minerId: string): numb
   const completed = store.countMinerAssignmentsCompleted(minerId);
   if (completed === 0) return -1; // no data
 
-  // For now, every completed verification counts as correct. Phase 5 (court)
-  // retroactively decrements this when fraud is found.
-  const correct = completed;
+  // Count the verifications a court has NOT since contradicted.
+  //
+  // This used to read `const correct = completed`, i.e. it returned 100% for
+  // every miner unconditionally, with a comment saying the court would
+  // "retroactively decrement this when fraud is found." Nothing did.
+  // applyAccuracyImpact writes a contradicted verification back with
+  // `missed = 1`, and that flag was never read, so a miner who waved through
+  // fraudulent accounts kept a perfect record and could never be demoted no
+  // matter how many of their calls the court overturned.
+  const correct = store.countMinerAssignmentsCorrect(minerId);
   return (correct / completed) * 100;
 }
 

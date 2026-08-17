@@ -176,6 +176,19 @@ export class SqliteMiningStore implements IMiningStore {
     return row.cnt;
   }
 
+  countMinerAssignmentsCorrect(minerId: string): number {
+    // A completed verification that a court later contradicted is written back
+    // by applyAccuracyImpact with missed = 1, so "completed and not missed" is
+    // the count that survived scrutiny.
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM miner_verification_assignments
+          WHERE miner_id = ? AND completed = 1 AND missed = 0`,
+      )
+      .get(minerId) as { cnt: number };
+    return row.cnt;
+  }
+
   // ── miner_jury_service ─────────────────────────────────────────
 
   recordJuryService(input: JuryServiceInsert): void {
