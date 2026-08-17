@@ -419,6 +419,15 @@ were the largest piece, not the only one.
   body, `express.json()` leaves `req.body` undefined for DELETE here, and
   intermediaries may strip a DELETE body. Every other auth-gated route in this
   API is a signed POST/PUT.
+- **The wallet can withdraw too, and a duplicated type is gone.** `ae-app`'s
+  Verify screen listed "Your Vouches for Others" with no way to release one.
+  Same two-step confirm as the miner. Fixing it surfaced why it had never been
+  built: Verify.tsx declared its own local `Vouch` interface that omitted `id`,
+  so nothing on the screen could reference a specific vouch. Replaced with an
+  alias to the canonical `VouchData` in `lib/types.ts`, which also brings the
+  screen under the shape-contract suite. Worth noting `npx tsc --noEmit` did
+  **not** catch the missing field; `npm run build` did (different tsconfig), so
+  the build is the real gate for the frontends.
 - **`authMiddleware` returned 500 instead of 401 on every protected route.** It
   destructured `req.body` directly, and `express.json()` leaves that undefined
   when there is no parseable JSON body (no Content-Type, empty body, or a
@@ -464,17 +473,13 @@ were the largest piece, not the only one.
    users at self-custody, which is a fix for the confusion, not for the missing
    service. Either bundle it in `extraResources` and spawn it from
    `main.cjs`, or drop the hosted track from onboarding until it is real.
-3. **The wallet has no vouch-withdrawal UI.** `ae-miner` has it; `ae-app` does
-   not. A participant who vouched from the wallet cannot release that stake
-   without opening the miner app. Same shape as the miner implementation: a
-   button on the Verify screen plus the confirm dialog stating the percentHuman
-   cost to the person vouched for.
-4. **Vouching, court and panel scores still mutate state at API time.** See the
+3. **Vouching, court and panel scores still mutate state at API time.** See the
    state-mutation audit section above. This is the same root cause as blocker 1:
    until every balance and `percentHuman` write is a function of committed
-   blocks, the state root cannot be enforced. Adding
-   `DELETE /miners/vouches/:id` in this pass adds one more such writer, which is
-   consistent with `createVouch` next to it but does move the wrong way.
+   blocks, the state root cannot be enforced. The
+   `POST /miners/vouches/:id/withdraw` route adds one more such writer,
+   consistent with `createVouch` beside it but moving the wrong way.
+
 ### Real multi-node check
 
 `node scripts/test-lan-multi-validator.mjs` was run after all of the above and

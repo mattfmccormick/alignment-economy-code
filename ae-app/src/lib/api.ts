@@ -202,6 +202,26 @@ export const api = {
   getVouches: (accountId: string) =>
     request<{ received: VouchData[]; given: VouchData[] }>('GET', `/miners/vouches/${accountId}`),
 
+  // Withdraw a vouch you gave (WP §7.2: vouchers may withdraw at any time).
+  // Returns your locked stake AND immediately drops the vouched account's
+  // percentHuman by this vouch's weight, so the UI must state that cost before
+  // calling it. Auth-gated server-side to the voucher.
+  withdrawVouch: (
+    vouchId: string,
+    envelope: {
+      accountId: string;
+      timestamp: number;
+      signature: string;
+      payload: { vouchId: string };
+    },
+  ) =>
+    request<{
+      withdrawn: string;
+      vouchedId: string;
+      returnedStake: string;
+      percentHumanReduction: number;
+    }>('POST', `/miners/vouches/${vouchId}/withdraw`, envelope),
+
   // Vouch Requests
   // Auth-required: the requestor (signed account) is the fromId.
   createVouchRequest: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; message: string } }) =>

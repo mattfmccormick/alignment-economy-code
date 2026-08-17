@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, type ChangeEvent } from 'react';
 import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
-import type { PanelSummary } from '../lib/types';
+import type { PanelSummary, VouchData } from '../lib/types';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { truncateId, displayPoints } from '../lib/formatting';
@@ -18,12 +18,11 @@ interface VouchRequest {
   status: string;
 }
 
-interface Vouch {
-  voucherId: string;
-  vouchedId: string;
-  stakeAmount: string; // API serializes the bigint stake as a string
-  stakedPercentage?: number;
-}
+// Use the canonical wire shape rather than a local re-declaration. The local
+// copy that used to live here omitted `id`, so nothing on this screen could
+// reference a specific vouch — which is why withdrawal had no way in. Aliasing
+// the shared type means the shape-contract suite guards this screen too.
+type Vouch = VouchData;
 
 export function Verify() {
   const wallet = loadWallet();
@@ -52,6 +51,11 @@ export function Verify() {
   const [outgoingRequests, setOutgoingRequests] = useState<VouchRequest[]>([]);
   const [receivedVouches, setReceivedVouches] = useState<Vouch[]>([]);
   const [givenVouches, setGivenVouches] = useState<Vouch[]>([]);
+  // Withdrawal is two-step on purpose: it lowers someone else's score, so the
+  // consequence gets stated before the tap rather than discovered after it.
+  const [withdrawConfirming, setWithdrawConfirming] = useState<string | null>(null);
+  const [withdrawBusy, setWithdrawBusy] = useState<string | null>(null);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const [vouchScore, setVouchScore] = useState<{ totalScore: number; breakdown: { tierA: number; tierB: number; tierC: number }; vouchCount: number } | null>(null);
 
   // Verification panels (the real proof-of-human flow)
@@ -78,6 +82,35 @@ export function Verify() {
     return () => { offComplete(); offScore(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet?.accountId]);
+
+  async function handleWithdrawVouch(v: Vouch) {
+    if (!wallet?.accountId || !wallet.privateKey) return;
+    setWithdrawError(null);
+    setWithdrawBusy(v.id);
+    try {
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { vouchId: v.id };
+      const signature = signPayload(payload, ts, wallet.privateKey);
+      const res = await api.withdrawVouch(v.id, {
+        accountId: wallet.accountId,
+        timestamp: ts,
+        signature,
+        payload,
+      });
+      if (!res.success) {
+        setWithdrawError(res.error?.message ?? 'Could not take that stake back.');
+        return;
+      }
+      setWithdrawConfirming(null);
+      // Reload rather than splice locally: the stake returning to the balance
+      // and the other account's score dropping both happened server-side.
+      loadVouchData();
+    } catch (e) {
+      setWithdrawError(e instanceof Error ? e.message : 'Network error.');
+    } finally {
+      setWithdrawBusy(null);
+    }
+  }
 
   async function loadVouchData() {
     if (!wallet?.accountId) return;
@@ -445,15 +478,55 @@ export function Verify() {
           <h3 className="text-sm font-medium text-gray-300 mb-2">Your Vouches for Others</h3>
           <div className="space-y-2">
             {givenVouches.map((v, i) => (
-              <div key={i} className="bg-navy rounded-xl p-3 border border-navy-light flex items-center justify-between">
-                <p className="text-sm text-white font-mono">{truncateId(v.vouchedId)}</p>
-                <div className="text-right">
-                  <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '—'}%</p>
-                  <p className="text-[11px] text-gray-500 tabular-nums">{displayPoints(String(v.stakeAmount))} pts</p>
+              <div key={i} className="bg-navy rounded-xl p-3 border border-navy-light">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-white font-mono">{truncateId(v.vouchedId)}</p>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '—'}%</p>
+                    <p className="text-[11px] text-gray-500 tabular-nums">{displayPoints(String(v.stakeAmount))} pts</p>
+                  </div>
                 </div>
+
+                {withdrawConfirming === v.id ? (
+                  <div className="mt-3 pt-3 border-t border-navy-light">
+                    {/* Say the cost out loud before the tap. The person who
+                        loses the score is not here to object, and the drop is
+                        immediate — it can take them below what they need to
+                        spend at all. */}
+                    <p className="text-xs text-red-400">
+                      Taking back your {displayPoints(String(v.stakeAmount))} points drops{' '}
+                      {truncateId(v.vouchedId)}'s human score by {v.stakedPercentage ?? 0} points
+                      right away. They may not be able to spend afterwards.
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => setWithdrawConfirming(null)}
+                        disabled={withdrawBusy === v.id}
+                        className="flex-1 text-xs py-2 rounded-lg border border-navy-light text-gray-300 disabled:opacity-50"
+                      >
+                        Keep vouching
+                      </button>
+                      <button
+                        onClick={() => handleWithdrawVouch(v)}
+                        disabled={withdrawBusy === v.id}
+                        className="flex-1 text-xs py-2 rounded-lg bg-red-600 text-white disabled:opacity-50"
+                      >
+                        {withdrawBusy === v.id ? 'Taking back…' : 'Take back stake'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setWithdrawError(null); setWithdrawConfirming(v.id); }}
+                    className="mt-2 text-xs text-gray-400 underline underline-offset-2"
+                  >
+                    Take back this stake
+                  </button>
+                )}
               </div>
             ))}
           </div>
+          {withdrawError && <p className="text-xs text-red-400 mt-2">{withdrawError}</p>}
         </div>
       )}
 
