@@ -594,11 +594,47 @@ Running it for the first time found **34 orphans**. Most are benign (client-side
 signing, operator helpers, dead code superseded by `db/schema.ts`). These are
 not — each is a white-paper mechanism that does not happen on a running network:
 
-- **`fileAppeal`** — no route files an appeal, so the entire appeal system is
-  unreachable from both apps. (The appeal *settlement* bug fixed above was real,
-  but nothing can currently create an appeal to settle.)
-- **`runDecayForAll`** — percentHuman decay never runs. WP §"scores decay 10%
-  per 30 days without activity" does not happen.
+- ~~**`fileAppeal`**~~ **FIXED.** No route filed an appeal, so the entire appeal
+  system was unreachable from both apps — a verdict was final regardless of what
+  the white paper says, and the appeal settlement fixed earlier could never run
+  because nothing could create an appeal to settle. New
+  `POST /court/cases/:id/appeal`.
+
+  `fileAppeal` checks that the case is appealable but says nothing about **who**
+  may appeal, so standing is enforced in the route: only the losing party has it
+  (guilty → the defendant's to appeal, innocent → the challenger's). Without
+  that, either side could appeal a result they won, or an uninvolved account
+  could drag a settled case back open. `court-appeal-route.test.ts` covers the
+  winner and the stranger both getting 403.
+- **`runDecayForAll`** — **DO NOT WIRE THIS UNTIL IT IS REDESIGNED.** Decay
+  never runs, so the white paper's "scores decay 10% per 30 days without
+  activity" does not happen. But wiring it as written would be far worse than
+  leaving it off, and this was measured, not reasoned about:
+
+  ```
+  account joined day 1, percentHuman 100, no inactivity
+    after day-cycle run 1: percentHuman = 26
+    after day-cycle run 2: percentHuman = 7
+    after day-cycle run 3: percentHuman = 5
+  ```
+
+  Two compounding mistakes. It passes `daysSinceJoin` where `applyDecay`
+  expects `daysSinceActivity`, so a long-standing **active** account is treated
+  as having been idle since the day it joined. And `applyDecay` recomputes the
+  full decay from that number on every call rather than applying only the
+  periods elapsed since the last run, so the same 13 windows are re-applied
+  daily. `periods = floor(399/30) = 13`, `score × 0.9^13 ≈ 25%`, every single
+  day.
+
+  Since `percentHuman` is the multiplier on every daily-point spend, running
+  this on a live network would take the entire population to ~5% within three
+  day cycles — 95% of everyone's spending burning — while looking like a
+  correctly-scheduled maintenance job.
+
+  A correct version needs a real last-activity signal (the transaction store
+  has no `lastActivityAt`; it would have to be added) and a
+  `decayed_through_day` marker on the account so each run applies only new
+  periods. That is a schema change plus a redesign, not a wiring job.
 - ~~**`recordHeartbeat`** / **`cleanOldHeartbeats`** / **`evaluateMinerTier`**~~
   **FIXED — the miner incentive system now has feedback.** `recordHeartbeat`
   carried a comment saying "the protocol records a heartbeat every block" and

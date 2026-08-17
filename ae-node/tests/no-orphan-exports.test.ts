@@ -59,7 +59,6 @@ const KNOWN_ORPHANS: Record<string, string> = {
   // Each of these implements a white-paper mechanism that therefore does not
   // happen on a running network. Listed so the guard protects against NEW
   // orphans; removing an entry from this list is the definition of done.
-  fileAppeal: 'UNWIRED â€” no route files an appeal, so appeals are unreachable',
   runDecayForAll: 'UNWIRED â€” percentHuman decay never runs',
   claimInheritance: 'UNWIRED â€” inheritance cannot be claimed',
   distributeFees: 'UNWIRED â€” check against commitBlockSideEffects',

@@ -15,6 +15,7 @@ import {
   courtStore,
   submitArgument,
   getArgumentsForCase,
+  fileAppeal,
 } from '../../court/court.js';
 import { getLatestBlock } from '../../core/block.js';
 import { getMiner } from '../../mining/registration.js';
@@ -189,6 +190,73 @@ export function courtRoutes(db: DatabaseSync): Router {
       res.json({
         success: true,
         data: { case: serializeCase(updated), juryMinerIds: jurorMinerIds },
+        meta: { timestamp: Math.floor(Date.now() / 1000) },
+      });
+    } catch (e) { next(e); }
+  });
+
+  // POST /cases/:id/appeal - the losing party asks for a second jury.
+  //
+  // fileAppeal existed and had no production caller, so the entire appeal
+  // system was unreachable from both apps: a verdict was final regardless of
+  // what the white paper says, and the appeal settlement logic could never run
+  // because nothing could create an appeal to settle.
+  //
+  // fileAppeal itself checks the case is appealable but says nothing about WHO
+  // may appeal, so standing is enforced here. Only the party that lost has it:
+  // a guilty verdict is the defendant's to appeal, an innocent one the
+  // challenger's. Without this, either side could appeal a result they won, or
+  // an uninvolved account could drag a settled case back open.
+  router.post('/cases/:id/appeal', authMiddleware(db), (req, res, next) => {
+    try {
+      const caseId = req.params.id as string;
+      const original = getCase(db, caseId);
+      if (!original) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Case not found' } });
+        return;
+      }
+      if (!original.verdict) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'NO_VERDICT', message: 'Case has no verdict to appeal' },
+        });
+        return;
+      }
+
+      const losingParty =
+        original.verdict === 'guilty' ? original.defendantId : original.challengerId;
+      if (req.accountId !== losingParty) {
+        res.status(403).json({
+          success: false,
+          error: {
+            code: 'NO_STANDING',
+            message: `Only the losing party may appeal (verdict: ${original.verdict})`,
+          },
+        });
+        return;
+      }
+
+      const latest = getLatestBlock(db);
+      const appeal = fileAppeal(db, caseId, latest?.hash ?? 'genesis');
+
+      // Tell the other side their win is being contested, and call the new jury.
+      const otherParty =
+        losingParty === original.defendantId ? original.challengerId : original.defendantId;
+      eventBus.emit('court:appeal', { accountId: otherParty, caseId, appealId: appeal.id });
+      for (const juror of courtStore(db).findJurorsByCase(appeal.id)) {
+        const miner = getMiner(db, juror.minerId);
+        if (miner) {
+          eventBus.emit('jury:called', {
+            accountId: miner.accountId,
+            minerId: juror.minerId,
+            caseId: appeal.id,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: { case: serializeCase(appeal), appealOf: caseId },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });
     } catch (e) { next(e); }
