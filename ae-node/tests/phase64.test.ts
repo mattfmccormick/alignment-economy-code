@@ -41,14 +41,42 @@ function pts(n: number): bigint {
 }
 
 function totalSupply(db: DatabaseSync): bigint {
+  const { earned, locked } = supplyByColumn(db);
+  return earned + locked;
+}
+
+/**
+ * Supply split by column, because the summed figure hid a real defect.
+ *
+ * The audit found the guilty path over-crediting spendable `earned` while the
+ * shortfall parked in negative `locked`. Every assertion in this file summed
+ * the two, so those errors cancelled exactly and the suite stayed green over
+ * genuinely minted value. `updateBalance` now refuses to write a negative,
+ * which closes that specific hole — but the assertion *shape* is why it went
+ * unseen, so these tests now check each column and check for negatives
+ * directly rather than trusting a total.
+ */
+function supplyByColumn(db: DatabaseSync): { earned: bigint; locked: bigint } {
   const rows = db.prepare(
     'SELECT earned_balance, locked_balance FROM accounts',
   ).all() as Array<{ earned_balance: string; locked_balance: string }>;
-  let total = 0n;
+  let earned = 0n;
+  let locked = 0n;
   for (const r of rows) {
-    total += BigInt(r.earned_balance) + BigInt(r.locked_balance);
+    earned += BigInt(r.earned_balance);
+    locked += BigInt(r.locked_balance);
   }
-  return total;
+  return { earned, locked };
+}
+
+/** Accounts holding a negative balance. Must always be empty. */
+function negativeHolders(db: DatabaseSync): string[] {
+  const rows = db.prepare(
+    'SELECT id, earned_balance, locked_balance FROM accounts',
+  ).all() as Array<{ id: string; earned_balance: string; locked_balance: string }>;
+  return rows
+    .filter((r) => BigInt(r.earned_balance) < 0n || BigInt(r.locked_balance) < 0n)
+    .map((r) => `${r.id.slice(0, 10)} earned=${r.earned_balance} locked=${r.locked_balance}`);
 }
 
 function createMinerAccount(
@@ -75,6 +103,7 @@ describe('Phase 64: Court burns are true burns (WP v2)', () => {
     for (let i = 0; i < 13; i++) juryMiners.push(createMinerAccount(db, 2, 5000));
 
     const supplyBefore = totalSupply(db);
+    const byColumnBefore = supplyByColumn(db);
     const poolBefore = getFeePool(db).currentBalance;
 
     const courtCase = fileChallenge(db, challenger.accountId, def.account.id, 'not_human', 5);
@@ -88,10 +117,23 @@ describe('Phase 64: Court burns are true burns (WP v2)', () => {
     assert.equal(verdict, 'guilty');
 
     const supplyAfter = totalSupply(db);
+    const byColumnAfter = supplyByColumn(db);
     const poolAfter = getFeePool(db).currentBalance;
 
     assert.ok(supplyAfter < supplyBefore, 'total supply must decrease after guilty verdict burns');
     assert.equal(poolAfter, poolBefore, 'fee pool must not change from court burns');
+
+    // Per-column, not just the total. The bug this guards against credited
+    // spendable `earned` beyond what was burned while the shortfall sat in
+    // negative `locked` — equal and opposite, so the summed assertion above
+    // passed over genuinely minted value.
+    assert.deepEqual(negativeHolders(db), [], 'no account may hold a negative balance');
+    assert.ok(
+      byColumnAfter.earned <= byColumnBefore.earned + courtCase.challengerStake,
+      `spendable earned grew beyond what the settlement can justify: ` +
+        `${byColumnBefore.earned} -> ${byColumnAfter.earned}`,
+    );
+    assert.ok(byColumnAfter.locked >= 0n, 'locked supply must never go negative');
 
     db.close();
   });

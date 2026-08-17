@@ -46,14 +46,18 @@ const KNOWN_ORPHANS: Record<string, string> = {
   checkpointWAL: 'operator helper, invoked manually',
   pruneChain: 'operator helper, invoked manually',
 
-  // â”€â”€ Dead code superseded by db/schema.ts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // These predate the unified schema and are no longer reachable. Deleting
-  // them is safe and should happen; kept listed so the guard stays green.
-  initializeCourtSchema: 'superseded by db/schema.ts â€” delete',
-  initializeMiningSchema: 'superseded by db/schema.ts â€” delete',
-  initializeVerificationSchema: 'superseded by db/schema.ts â€” delete',
-  validateBlock: 'superseded by network/block-validator.ts â€” delete',
-  validateChain: 'superseded by network/block-validator.ts â€” delete',
+  // -- Superseded in production, but still exercised by tests ------------
+  // I first listed these as "delete". That was wrong: production no longer
+  // reaches them, but the test suite does (validateChain has 8 references,
+  // validateBlock 2, each initialize*Schema 1). Removing them would delete
+  // real coverage of block-validation and schema-setup behaviour. Whether
+  // block-validator.ts and db/schema.ts already cover the same ground needs
+  // checking before anything is deleted, not assuming.
+  initializeCourtSchema: 'superseded by db/schema.ts in production; tests still use it',
+  initializeMiningSchema: 'superseded by db/schema.ts in production; tests still use it',
+  initializeVerificationSchema: 'superseded by db/schema.ts in production; tests still use it',
+  validateBlock: 'superseded by network/block-validator.ts in production; 2 test refs',
+  validateChain: 'superseded by network/block-validator.ts in production; 8 test refs',
 
   // â”€â”€ UNWIRED: real gaps, documented in CLAUDE.md â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Each of these implements a white-paper mechanism that therefore does not

@@ -567,12 +567,14 @@ reproduced against the real modules, not inferred.
 
 **Still open**
 
-1. **`phase64`'s conservation assertion cannot catch minted value.** The guilty
-   path over-credits spendable `earned` while the shortfall parks in negative
-   `locked`; the test sums the two, so the errors cancel. A green suite was
-   hiding real minting. Largely defused now that `updateBalance` rejects
-   negatives, but the assertion should be per-column, not on the sum. Treat this
-   as a lesson about the tests, not only the code.
+1. ~~**`phase64`'s conservation assertion cannot catch minted value.**~~ Fixed.
+   The guilty path over-credited spendable `earned` while the shortfall parked
+   in negative `locked`, and the test summed the two, so the errors cancelled
+   exactly and the suite stayed green over genuinely minted value. It now
+   asserts per column, plus a direct `negativeHolders()` check. The code hole
+   was already closed by `updateBalance` rejecting negatives; this closes the
+   *assertion shape* that let it hide. **Worth generalising: a conservation
+   test that sums across columns can only catch errors that do not cancel.**
 2. **Court and panel state is still node-local** — the point below about state
    not being a function of the chain applies to everything in this section. The
    fixes above make each node behave correctly; they do not make two nodes agree.
