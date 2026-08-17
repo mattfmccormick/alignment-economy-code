@@ -544,30 +544,7 @@ export function dismissStalledCase(db: DatabaseSync, caseId: string): void {
     );
   }
 
-  const challenger = getAccount(db, courtCase.challengerId);
-  const now = Math.floor(Date.now() / 1000);
-
-  runTransaction(db, () => {
-    if (challenger) {
-      // Clamp to what is actually locked. The daily rebase rescales
-      // locked_balance while the case sits open, so the nominal stake recorded
-      // at filing time can exceed it — subtracting blind is what drives
-      // balances negative elsewhere in this file.
-      const release =
-        courtCase.challengerStake > challenger.lockedBalance
-          ? challenger.lockedBalance
-          : courtCase.challengerStake;
-      updateBalance(db, courtCase.challengerId, 'locked_balance', challenger.lockedBalance - release);
-      updateBalance(db, courtCase.challengerId, 'earned_balance', challenger.earnedBalance + release);
-      recordLog(
-        db, courtCase.challengerId, 'vouch_unlock', 'earned', release,
-        challenger.earnedBalance, challenger.earnedBalance + release, caseId, now,
-      );
-    }
-
-    setEscrowed(db, courtCase.defendantId, false);
-    store.setVerdict(caseId, null, 'withdrawn', now);
-  });
+  dismissCase(db, caseId, Math.floor(Date.now() / 1000));
 }
 
 // ========== Voting ==========
@@ -583,10 +560,143 @@ export function submitVote(db: DatabaseSync, caseId: string, minerId: string, vo
 
 // ========== Verdict ==========
 
+/**
+ * Close out cases whose deadlines have passed.
+ *
+ * `arbitration_deadline` and `voting_deadline` were written at filing and
+ * seating, returned by the API, and rendered in both apps — and no code
+ * anywhere compared them to a clock. Nothing expired. A single juror who never
+ * voted therefore froze the case, the defendant's escrowed earned balance and
+ * every juror's stake, permanently: `resolveVerdict` throws `NO_VOTES` with
+ * zero votes, and with a partial set it was simply never called.
+ *
+ * Two outcomes, both deliberately conservative:
+ *
+ *   - Voting deadline passed with at least one vote → resolve on the votes
+ *     actually cast. Jurors who stayed silent forfeit their say, not the case.
+ *   - Voting deadline passed with no votes at all, or arbitration deadline
+ *     passed while still waiting for a jury → dismiss neutrally. Nobody proved
+ *     anything, so the challenger's stake comes back and the defendant is
+ *     un-escrowed rather than either side being punished for the network's
+ *     failure to produce jurors.
+ *
+ * `nowSec` is passed in rather than read from the clock so the caller decides
+ * the reference time. Returns what it did, for logging.
+ *
+ * NOTE: court state is still node-local (see the state-mutation section in
+ * CLAUDE.md), so this expires each node's own view. When court moves onto the
+ * chain this belongs in the same ordered path as the rest of it.
+ */
+export function expireCourtDeadlines(
+  db: DatabaseSync,
+  nowSec: number,
+): { resolved: string[]; dismissed: string[] } {
+  const store = courtStore(db);
+  const resolved: string[] = [];
+  const dismissed: string[] = [];
+
+  const rows = db
+    .prepare(
+      `SELECT id, status, voting_deadline, arbitration_deadline
+         FROM court_cases
+        WHERE verdict IS NULL
+          AND status IN ('court_voting', 'court_waiting_jury', 'arbitration_open', 'arbitration_response')`,
+    )
+    .all() as Array<{
+      id: string;
+      status: string;
+      voting_deadline: number | null;
+      arbitration_deadline: number | null;
+    }>;
+
+  for (const row of rows) {
+    const votingExpired = row.voting_deadline !== null && row.voting_deadline <= nowSec;
+    const arbExpired = row.arbitration_deadline !== null && row.arbitration_deadline <= nowSec;
+
+    if (row.status === 'court_voting' && votingExpired) {
+      const votes = store.findJurorsByCase(row.id).filter((j) => j.vote !== null);
+      if (votes.length > 0) {
+        // resolveCase, not resolveVerdict — an expiring appeal needs the
+        // appeal settlement (reopen the account, claw back the bounty).
+        resolveCase(db, row.id);
+        resolved.push(row.id);
+      } else {
+        dismissCase(db, row.id, nowSec);
+        dismissed.push(row.id);
+      }
+      continue;
+    }
+
+    // Waiting for a jury that never arrived, or a defendant who never
+    // responded and no jury was ever seated. Either way there is nothing to
+    // decide and no reason to keep the defendant's balance frozen.
+    if (
+      (row.status === 'court_waiting_jury' && (arbExpired || votingExpired)) ||
+      ((row.status === 'arbitration_open' || row.status === 'arbitration_response') && arbExpired)
+    ) {
+      dismissCase(db, row.id, nowSec);
+      dismissed.push(row.id);
+    }
+  }
+
+  return { resolved, dismissed };
+}
+
+/**
+ * Neutral close: return the challenger's stake, lift the defendant's escrow,
+ * record no verdict. Shared by `dismissStalledCase` and the deadline sweep.
+ *
+ * The stake release is clamped to what is actually locked. The daily rebase
+ * rescales `locked_balance` while a case sits open, so the nominal figure
+ * recorded at filing can exceed it — subtracting blind is what used to drive
+ * balances negative.
+ */
+function dismissCase(db: DatabaseSync, caseId: string, nowSec: number): void {
+  const store = courtStore(db);
+  const courtCase = getCase(db, caseId);
+  if (!courtCase || courtCase.verdict !== null) return;
+
+  const challenger = getAccount(db, courtCase.challengerId);
+
+  runTransaction(db, () => {
+    if (challenger) {
+      const release =
+        courtCase.challengerStake > challenger.lockedBalance
+          ? challenger.lockedBalance
+          : courtCase.challengerStake;
+      if (release > 0n) {
+        updateBalance(db, courtCase.challengerId, 'locked_balance', challenger.lockedBalance - release);
+        updateBalance(db, courtCase.challengerId, 'earned_balance', challenger.earnedBalance + release);
+        recordLog(
+          db, courtCase.challengerId, 'vouch_unlock', 'earned', release,
+          challenger.earnedBalance, challenger.earnedBalance + release, caseId, nowSec,
+        );
+      }
+    }
+    setEscrowed(db, courtCase.defendantId, false);
+    store.setVerdict(caseId, null, 'withdrawn', nowSec);
+  });
+}
+
 export function resolveVerdict(db: DatabaseSync, caseId: string): Verdict {
   const store = courtStore(db);
   const courtCase = getCase(db, caseId);
   if (!courtCase) throw new NotFoundError('Case not found');
+
+  // Resolve exactly once.
+  //
+  // Every payout in applyGuiltyVerdict / applyInnocentVerdict is an
+  // unconditional balance move, so a second call ran the whole settlement
+  // again: burning the defendant twice, paying the bounty twice, unlocking
+  // juror stakes that were already unlocked. Nothing downstream deduplicated
+  // it, and the route is reachable from an ordinary HTTP retry or a
+  // double-clicked button.
+  if (courtCase.verdict !== null) {
+    throw new ConflictError(
+      `Case ${caseId} already resolved as ${courtCase.verdict}`,
+      'ALREADY_RESOLVED',
+    );
+  }
 
   const jurors = store.findJurorsByCase(caseId);
   const votes = jurors.filter((j) => j.vote !== null);
@@ -809,11 +919,40 @@ export function fileAppeal(db: DatabaseSync, caseId: string, blockHash: string):
   return getCase(db, id)!;
 }
 
+/**
+ * Resolve a case, appeal or not.
+ *
+ * Use this from every call site instead of picking a function by hand. The
+ * vote route called `resolveVerdict` unconditionally, so an appeal never ran
+ * its own settlement — `resolveAppeal` had zero production callers. A reversal
+ * therefore never reopened the defendant's account, never clawed back the
+ * bounty, and unlocked the challenger's stake through the ordinary path on top
+ * of whatever the original verdict had already done.
+ *
+ * The two settlements are genuinely different, so the choice belongs here
+ * rather than in each caller.
+ */
+export function resolveCase(db: DatabaseSync, caseId: string): Verdict {
+  const courtCase = getCase(db, caseId);
+  if (!courtCase) throw new NotFoundError('Case not found');
+  return courtCase.level === 'appeal' ? resolveAppeal(db, caseId) : resolveVerdict(db, caseId);
+}
+
 export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
   const store = courtStore(db);
   const appealCase = getCase(db, appealCaseId);
   if (!appealCase) throw new NotFoundError('Appeal case not found');
   if (appealCase.level !== 'appeal') throw new ValidationError('Not an appeal case', 'NOT_APPEAL');
+
+  // Same once-only rule as resolveVerdict: every branch below is an
+  // unconditional balance move, so a repeat would claw back the bounty twice
+  // and re-run the reversal.
+  if (appealCase.verdict !== null) {
+    throw new ConflictError(
+      `Appeal ${appealCaseId} already resolved as ${appealCase.verdict}`,
+      'ALREADY_RESOLVED',
+    );
+  }
 
   const originalCase = getCase(db, appealCase.appealOf!)!;
 

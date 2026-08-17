@@ -512,31 +512,55 @@ reproduced against the real modules, not inferred.
   vouch predates the panel that set the score, so it could actually have counted
   toward it. `vouch-withdraw-ratchet.test.ts`.
 
-**Still open, with the reasoning that makes each one urgent**
+**Also fixed since**
+
+- **Deadlines are enforced.** `arbitration_deadline` and `voting_deadline` were
+  written at filing and seating, returned by the API and rendered in both apps,
+  and no code anywhere compared them to a clock. Nothing expired, so one juror
+  who never voted froze the case, the defendant's escrowed balance and every
+  juror's stake permanently — `resolveVerdict` throws `NO_VOTES` on an empty
+  set, and with a partial set nothing called it at all. `expireCourtDeadlines`
+  now runs at the top of `runExpireAndRebase`, *before* the rebase, so a case
+  already over settles against the balances it was decided on. Votes cast →
+  resolve on those votes (silent jurors forfeit their say, not the case); no
+  votes, or no jury ever seated → dismiss neutrally, stake returned in full and
+  escrow lifted, because the network failing to produce jurors is nobody's
+  fault. `court-deadlines.test.ts`.
+- **A verdict resolves exactly once.** Every payout in the settlement is an
+  unconditional balance move, so a second `resolveVerdict` burned the defendant
+  twice, paid the bounty twice, and unlocked juror stakes already unlocked —
+  reachable from an HTTP retry. Same guard on `resolveAppeal`.
+- **Appeals settle through the appeal path.** The vote route called
+  `resolveVerdict` for every case, so `resolveAppeal` had *zero* production
+  callers and a reversal never reopened the defendant's account or clawed back
+  the bounty. New `resolveCase` dispatches on `level`; every call site uses it.
+  `court-appeal-routing.test.ts`.
+- **Panel scores are whole numbers, and final.** An odd-sized panel took
+  `sorted[mid]` verbatim, so a miner submitting `87.5` wrote `87.5` into
+  `percent_human` — SQLite stores a real in an INTEGER column happily. Every
+  daily-point spend then calls `BigInt(percentHuman)`, which throws `RangeError`
+  on a non-integer, permanently bricking that account's ability to spend with
+  the error surfacing nowhere near its cause. Now rejected at input, and the
+  median rounds on both branches for rows written before the check existed. A
+  completed panel also refuses further scores; a late miner used to recompute
+  the median and silently rewrite a published verification.
+- **The duplicate-account counterpart is excluded from the jury**, alongside the
+  defendant and challenger.
+
+**Still open**
 
 1. **`phase64`'s conservation assertion cannot catch minted value.** The guilty
    path over-credits spendable `earned` while the shortfall parks in negative
    `locked`; the test sums the two, so the errors cancel. A green suite was
-   hiding real minting. Any conservation test needs to assert per-column, not on
-   the sum.
-2. **`resolveVerdict` has no idempotency guard** — a second call replays every
-   payout.
-3. **The vote route calls `resolveVerdict` for appeals instead of
-   `resolveAppeal`**, which has *zero* production callers. Appeal reversal
-   double-unlocks the challenger stake, mints compensation to the defendant, and
-   never reopens the defendant's account.
-4. **`arbitration_deadline` and `voting_deadline` are written and displayed but
-   never read by any code.** No timeout fires, so one silent juror freezes the
-   case, the defendant's account and every stake indefinitely. Escrow is
-   unbounded in time.
-5. **A fractional panel score is written straight into `percent_human`**, which
-   bricks daily-point spends (the multiplier expects an integer 0-100).
-6. **A completed panel keeps accepting scores** — a late miner silently rewrites
-   a finished verification.
-7. **No panel deadline enforcement** — one silent assigned miner strands an
-   applicant's panel forever.
-8. **The duplicate-account counterpart can still be seated on the jury.** The
-   defendant is now excluded; the counterpart is not.
+   hiding real minting. Largely defused now that `updateBalance` rejects
+   negatives, but the assertion should be per-column, not on the sum. Treat this
+   as a lesson about the tests, not only the code.
+2. **No panel deadline enforcement** — same shape as the court deadline bug that
+   was just fixed: one silent assigned miner strands an applicant's panel
+   forever. `expireCourtDeadlines` is the pattern to copy.
+3. **Court and panel state is still node-local** — the point below about state
+   not being a function of the chain applies to everything in this section. The
+   fixes above make each node behave correctly; they do not make two nodes agree.
 
 ### Original repro notes (superseded by the audit above)
 

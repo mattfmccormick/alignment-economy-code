@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
 import { sha256 } from '../core/crypto.js';
 import { updatePercentHuman } from '../core/account.js';
-import { NotFoundError, ValidationError } from '../core/errors.js';
+import { NotFoundError, ValidationError, ConflictError } from '../core/errors.js';
 import { miningStore } from '../mining/registration.js';
 import { SqliteVerificationStore } from '../core/stores/SqliteVerificationStore.js';
 import type { IVerificationStore } from '../core/stores/IVerificationStore.js';
@@ -43,9 +43,37 @@ export function submitPanelScore(
 ): { recorded: boolean; panelComplete: boolean; medianScore: number | null } {
   if (score < 0 || score > 100) throw new ValidationError('Score must be 0-100', 'INVALID_SCORE');
 
+  // The score must be a whole number, and this is not cosmetic validation.
+  //
+  // An odd-sized panel takes the median as `sorted[mid]` verbatim, so a miner
+  // submitting 87.5 wrote 87.5 into `percent_human`. SQLite is dynamically
+  // typed and stores a real in an INTEGER column happily. Every daily-point
+  // spend then does `BigInt(sender.percentHuman)`, which throws RangeError on a
+  // non-integer — so a single fractional score permanently bricks that
+  // account's ability to spend, and the error surfaces nowhere near its cause.
+  if (!Number.isInteger(score)) {
+    throw new ValidationError(
+      `Score must be a whole number, got ${score}. Fractional scores corrupt percentHuman.`,
+      'INVALID_SCORE',
+    );
+  }
+
   const verif = verificationStore(db);
   const now = Math.floor(Date.now() / 1000);
   const reviewHash = sha256(`${panelId}:${minerId}:${score}:${now}`);
+
+  // A finished panel is finished. Without this a late miner's score was
+  // accepted, recomputed the median over the larger set, and silently rewrote
+  // a verification that had already been published — moving someone's
+  // percentHuman after the fact with no record that the number had changed.
+  const existing = verif.findPanelById(panelId);
+  if (!existing) throw new NotFoundError(`Panel not found: ${panelId}`);
+  if (existing.status === 'complete') {
+    throw new ConflictError(
+      `Panel ${panelId} already completed with a median of ${existing.medianScore}`,
+      'PANEL_COMPLETE',
+    );
+  }
 
   // Transition pending → in_progress on first score (idempotent if already
   // in_progress).
@@ -79,9 +107,13 @@ export function submitPanelScore(
   if (panelComplete) {
     const sorted = [...scores].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
-    medianScore = sorted.length % 2 === 0
-      ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
-      : sorted[mid];
+    // Rounded on BOTH branches. The even branch always was; the odd branch
+    // passed sorted[mid] through untouched, which is how a fractional score
+    // reached percent_human. Belt and braces alongside the integer check above:
+    // rows written before that check existed can still be in the database.
+    medianScore = Math.round(
+      sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid],
+    );
 
     verif.completePanel(panelId, now, medianScore);
 

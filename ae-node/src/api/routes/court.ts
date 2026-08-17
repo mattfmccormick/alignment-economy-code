@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { authMiddleware, minerAuthMiddleware } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
@@ -10,7 +10,7 @@ import {
   escalateToFull,
   selectJury,
   submitVote,
-  resolveVerdict,
+  resolveCase,
   getActiveCases,
   courtStore,
   submitArgument,
@@ -213,7 +213,7 @@ export function courtRoutes(db: DatabaseSync): Router {
 
       let verdict: string | null = null;
       if (remaining === 0) {
-        verdict = resolveVerdict(db, caseId);
+        verdict = resolveCase(db, caseId);
         const courtCase = getCase(db, caseId);
         if (courtCase) {
           eventBus.emit('court:verdict', {

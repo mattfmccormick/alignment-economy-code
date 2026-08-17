@@ -16,7 +16,7 @@ import { recordLog, transactionStore } from './transaction.js';
 import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
 import { runTransaction } from '../db/connection.js';
 import { rebalanceVouchLocks } from '../verification/vouching.js';
-import { rebaseCourtStakes } from '../court/court.js';
+import { rebaseCourtStakes, expireCourtDeadlines } from '../court/court.js';
 import { finalizeSupportiveTags } from '../tagging/supportive.js';
 import { finalizeAmbientTags } from '../tagging/ambient.js';
 import { logger } from '../node/logger.js';
@@ -389,6 +389,12 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
 
 export function runExpireAndRebase(db: DatabaseSync): RebaseEvent | null {
   finalizeDailyTags(db);            // pay supportive/ambient BEFORE expiry zeroes them
+  // Close out court cases whose deadlines have passed, BEFORE the rebase, so a
+  // case that is already over settles against the balances it was decided on
+  // rather than against rescaled ones. Until this existed nothing ever read
+  // arbitration_deadline or voting_deadline, so a single juror who never voted
+  // froze the defendant's escrowed balance and every juror's stake forever.
+  expireCourtDeadlines(db, Math.floor(Date.now() / 1000));
   expireDaily(db);                  // phase: expiring
   const event = rebase(db);         // phase: rebasing
   rebalanceVouchLocks(db);          // WP v2: percentage-based locks scale with balance
