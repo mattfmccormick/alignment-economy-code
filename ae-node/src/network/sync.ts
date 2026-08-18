@@ -11,6 +11,32 @@ import type { PeerManager } from './peer.js';
 import type { IConsensusEngine } from '../core/consensus/IConsensusEngine.js';
 import type { IValidatorSet } from '../core/consensus/IValidatorSet.js';
 
+/**
+ * Is this validation failure a transient ordering race rather than misbehaviour?
+ *
+ * Two honest nodes on a live chain constantly disagree by a block or two: the
+ * height is checked before validation runs, and the chain can advance in
+ * between. The peer that answers a moment late is not dishonest, and banning
+ * them permanently partitions the network — the ban list is memory-only with no
+ * expiry, so it outlives the race by hours.
+ *
+ * Kept as a narrow allowlist matched on the validator's own message text. Only
+ * height and parent-linkage failures qualify; anything cryptographic (hash,
+ * signature, certificate, merkle root) falls through and still bans, because
+ * those cannot happen by accident.
+ */
+export function isOrderingFailure(error?: string): boolean {
+  if (!error) return false;
+  const e = error.toLowerCase();
+  return (
+    e.includes('height gap') ||
+    e.includes('previous hash mismatch') ||
+    e.includes('previous block') ||
+    e.includes('already') ||
+    e.includes('parent')
+  );
+}
+
 const BATCH_SIZE = 100;
 
 export interface SyncState {
@@ -224,7 +250,15 @@ export class ChainSync {
           // previous (late) reply. Skip them: validating a stale block against
           // our now-advanced head would fail and wrongly ban an honest peer
           // that simply answered our retry.
-          if (blockData.number <= this.state.currentHeight) continue;
+          // Compare against the LIVE chain head, not the height captured when
+          // this sync began. Gossip keeps committing while a batch is in
+          // flight — a healthy two-node chain can advance seven blocks in under
+          // a second — so `this.state.currentHeight` goes stale inside this very
+          // loop. A block we already hold then slips past this guard, fails
+          // validation with "Height gap: expected N+1, got N", and the peer is
+          // banned for answering a question we had already answered ourselves.
+          const liveHead = getLatestBlock(this.db)?.number ?? this.state.currentHeight;
+          if (blockData.number <= liveHead) continue;
 
           const result = validateIncomingBlock(
             this.db,
@@ -246,8 +280,21 @@ export class ChainSync {
             },
           );
           if (!result.valid) {
-            // Bad block from sync peer — abort and ban them. Their key
-            // signed something invalid; we shouldn't trust them again.
+            // Only ban for failures that mean the peer is actually dishonest.
+            //
+            // A height or ordering mismatch means the two of us are momentarily
+            // out of step. That is routine on a live chain and says nothing
+            // about their honesty. Banning on it partitions the network over a
+            // transient race, and the ban outlives its cause because the list
+            // is memory-only with no expiry — the peer is healthy again seconds
+            // later but stays locked out until somebody restarts the node.
+            //
+            // Cryptographic failures are different: a bad hash, signature or
+            // certificate cannot happen by accident.
+            if (isOrderingFailure(result.error)) {
+              this.finishSync();
+              return;
+            }
             this.peerManager.banPeer(senderPublicKey, `bad sync block: ${result.error ?? 'unknown'}`);
             this.finishSync();
             return;
@@ -384,8 +431,12 @@ export class ChainSync {
           { bftValidatorSet: this.validatorSet },
         );
         if (!result.valid) {
-          // A next-height block that still fails validation is genuinely bad
-          // (bad signature, wrong hash, bad cert). That IS a ban.
+          // A next-height block that fails on signature, hash or cert is
+          // genuinely bad and IS a ban. An ordering failure is not: the two
+          // height guards above are checked before validation, so the chain can
+          // still advance underneath us in between, and punishing that race
+          // permanently partitions two honest nodes.
+          if (isOrderingFailure(result.error)) return;
           this.peerManager.banPeer(
             senderPublicKey,
             `bad gossip block: ${result.error ?? 'unknown'}`,
