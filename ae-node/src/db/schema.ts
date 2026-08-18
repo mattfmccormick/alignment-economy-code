@@ -543,24 +543,86 @@ export function initializeSchema(db: DatabaseSync): void {
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")
     .all() as Array<{ name: string }>;
 
-  if (rows.length === 0) {
-    db.exec(TABLES);
-    db.exec(INDEXES);
-    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
-    db.prepare(
-      "INSERT OR IGNORE INTO fee_pool (id, total_accumulated, total_distributed, current_balance) VALUES (1, '0', '0', '0')"
-    ).run();
-    db.prepare(
-      "INSERT OR IGNORE INTO day_cycle_state (id, current_day, cycle_phase, phase_started_at) VALUES (1, 1, 'idle', ?)"
-    ).run(Math.floor(Date.now() / 1000));
+  // The version row, if the table exists at all. Read as possibly-undefined:
+  // a table that exists does NOT guarantee a row in it.
+  const current =
+    rows.length === 0
+      ? undefined
+      : (db.prepare('SELECT version FROM schema_version').get() as
+          | { version: number }
+          | undefined);
+
+  if (current === undefined) {
+    // Either a genuinely fresh database, or a half-initialised one where the
+    // tables exist but the version row does not.
+    //
+    // That second state is reachable: the init below creates every table and
+    // only then inserts the version, so a process that dies in between leaves
+    // exactly this. It used to crash on `undefined.version` with a TypeError
+    // pointing into schema.ts, which tells an operator nothing about what is
+    // wrong or how to fix it — and it recurs on every subsequent start, so the
+    // node is permanently unbootable until someone deletes the file.
+    //
+    // Distinguish the two cases before assuming it is safe to stamp the
+    // current version. A database carrying real data with no version row is
+    // NOT something to guess at: claiming SCHEMA_VERSION would skip every
+    // migration and silently leave the schema behind the code.
+    if (rows.length > 0 && hasUserData(db)) {
+      throw new Error(
+        'Database has tables and data but no schema_version row, so its schema ' +
+          'version cannot be determined. Migrating blind would skip migrations ' +
+          'and corrupt the schema. This usually means the file was edited or ' +
+          'restored by hand. Restore a known-good backup, or start from a fresh ' +
+          'database if there is nothing worth keeping.',
+      );
+    }
+
+    // Atomic: a crash partway through leaves no tables at all rather than the
+    // half-initialised state described above, so a retry takes the clean path.
+    db.exec('BEGIN');
+    try {
+      db.exec(TABLES);
+      db.exec(INDEXES);
+      // DELETE first so a retry after a partial init cannot leave two rows.
+      db.prepare('DELETE FROM schema_version').run();
+      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
+      db.prepare(
+        "INSERT OR IGNORE INTO fee_pool (id, total_accumulated, total_distributed, current_balance) VALUES (1, '0', '0', '0')"
+      ).run();
+      db.prepare(
+        "INSERT OR IGNORE INTO day_cycle_state (id, current_day, cycle_phase, phase_started_at) VALUES (1, 1, 'idle', ?)"
+      ).run(Math.floor(Date.now() / 1000));
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
     return;
   }
 
-  const current = db.prepare('SELECT version FROM schema_version').get() as { version: number };
   if (current.version < SCHEMA_VERSION) {
     runMigrations(db, current.version, SCHEMA_VERSION);
     db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
   }
+}
+
+/**
+ * Does this database hold anything an operator would miss?
+ *
+ * Used only to tell "half-initialised, safe to set up" apart from "real data
+ * with a missing version row, do not touch". Checks accounts and blocks
+ * because either being non-empty means the node has real history.
+ */
+function hasUserData(db: DatabaseSync): boolean {
+  for (const table of ['accounts', 'blocks']) {
+    const exists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
+      .get(table);
+    if (!exists) continue;
+    const row = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number };
+    if (row.c > 0) return true;
+  }
+  return false;
 }
 
 function runMigrations(db: DatabaseSync, from: number, _to: number): void {
