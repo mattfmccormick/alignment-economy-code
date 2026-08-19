@@ -40,3 +40,24 @@ export function formatNumber(n: number): string {
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return n.toLocaleString();
 }
+
+/**
+ * Block height for a status bar.
+ *
+ * At roughly a block a second the chain passes 31 million in a year and 315
+ * million in a decade, so a raw grouped number stops being readable long before
+ * it stops being wrong. Abbreviate past a million.
+ *
+ * Deliberately more precise than formatNumber (two decimals, and no K step): a
+ * height is an identifier people compare between machines, so "2.85M" carries
+ * useful signal where "2.8M" hides a 50,000-block gap. Below a million the exact
+ * grouped number is still the most useful thing to show.
+ *
+ * Exact values stay reachable — callers put the full number in a `title`, one
+ * hover away for anyone debugging.
+ */
+export function formatBlockHeight(n: number): string {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + 'B';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+  return n.toLocaleString();
+}

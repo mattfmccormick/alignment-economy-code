@@ -28,6 +28,11 @@ export function Send() {
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
+  // Optional attestation that the recipient is a real person. Rides in the
+  // signed transaction payload and feeds the human-tag credits that offset
+  // percentHuman decay for the recipient. Defaults to false — an attestation
+  // nobody consciously made is worth nothing.
+  const [recipientIsHuman, setRecipientIsHuman] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -147,15 +152,21 @@ export function Send() {
       // JSON.stringify with no canonicalization, so a missing or reordered key
       // changes the bytes and the signature fails. The node verifies
       // { from, to, amount, pointType, isInPerson, recipientIsHuman, memo }
-      // (core/transaction.ts), defaulting recipientIsHuman to false when the
-      // wire payload omits it, so we sign false here to match.
+      // (core/transaction.ts).
+      //
+      // recipientIsHuman MUST appear in both objects below with the same value.
+      // The node reads it off the wire payload and verifies the signature over
+      // its own reconstruction, so signing one value and sending another —
+      // including sending nothing, which defaults to false — produces
+      // INVALID_SIGNATURE on every send. That exact mismatch broke sending
+      // entirely once already.
       const internalPayload = {
         from,
         to,
         amount: storageAmount,
         pointType,
         isInPerson: false,
-        recipientIsHuman: false,
+        recipientIsHuman,
         memo: memo || '',
       };
 
@@ -169,6 +180,7 @@ export function Send() {
           amount: storageAmount,
           pointType,
           isInPerson: false,
+          recipientIsHuman,
           memo: memo || '',
         },
         accountId: from,
@@ -282,6 +294,28 @@ export function Send() {
             placeholder="What's this for?"
             className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm placeholder-gray-600 focus:border-teal focus:outline-none"
           />
+        </div>
+
+        {/* Human attestation. Optional and off by default — the whole value of
+            the signal is that someone chose to make it. It is folded into the
+            signed payload, so it is an attestation the sender cannot later
+            deny, and it credits the recipient against percentHuman decay. */}
+        <div>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={recipientIsHuman}
+              onChange={(e) => setRecipientIsHuman(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded border-navy-light bg-navy text-teal focus:ring-teal focus:ring-offset-0"
+            />
+            <span className="text-xs text-gray-400 leading-relaxed">
+              I know this account belongs to a real person
+              <span className="block text-[11px] text-gray-500 mt-0.5">
+                Optional. Signed with the payment, and helps their verification
+                score hold up over time.
+              </span>
+            </span>
+          </label>
         </div>
 
         {/* Fee preview */}

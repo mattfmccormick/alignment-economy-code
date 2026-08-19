@@ -238,3 +238,62 @@ describe('Send flow', () => {
     expect((screen.getByPlaceholderText('0.00') as HTMLInputElement).value).toBe('22.22');
   });
 });
+
+// The human attestation must appear in BOTH payloads with the same value.
+//
+// signPayload/verifyPayload hash a raw JSON.stringify with no canonicalization.
+// The node reads recipientIsHuman off the wire payload and verifies the
+// signature over its own reconstruction, so signing one value and sending
+// another — including omitting it, which defaults to false — yields
+// INVALID_SIGNATURE on every send. That mismatch broke sending outright once
+// already, which is why this is asserted rather than assumed.
+describe('Send human attestation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getContacts.mockResolvedValue({ success: true, data: { contacts: [] } });
+    mockApi.searchAccounts.mockResolvedValue({ success: true, data: { accounts: [] } });
+    mockApi.getTransactions.mockResolvedValue({
+      success: true,
+      data: { transactions: [], total: 0, page: 1, limit: 20 },
+    });
+  });
+
+  afterEach(() => cleanup());
+
+  it('defaults to false and sends false in both payloads', async () => {
+    mockApi.sendTransaction.mockResolvedValue({
+      success: true,
+      data: { transaction: fakeTx, newBalance: '0' },
+    });
+
+    render(<Send />);
+    selectRecipientAndEnterAmount('recipient-xyz', '10.00');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockApi.sendTransaction).toHaveBeenCalledTimes(1));
+    const arg = mockApi.sendTransaction.mock.calls[0][0] as {
+      payload: { recipientIsHuman: boolean };
+    };
+    expect(arg.payload.recipientIsHuman).toBe(false);
+  });
+
+  it('sends true on the wire when the box is ticked', async () => {
+    mockApi.sendTransaction.mockResolvedValue({
+      success: true,
+      data: { transaction: fakeTx, newBalance: '0' },
+    });
+
+    render(<Send />);
+    selectRecipientAndEnterAmount('recipient-xyz', '10.00');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mockApi.sendTransaction).toHaveBeenCalledTimes(1));
+    const arg = mockApi.sendTransaction.mock.calls[0][0] as {
+      payload: { recipientIsHuman: boolean };
+    };
+    // If this is true but the SIGNED payload still said false, the node would
+    // reject the send. The two are built from one variable for that reason.
+    expect(arg.payload.recipientIsHuman).toBe(true);
+  });
+});

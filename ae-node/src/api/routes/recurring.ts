@@ -89,7 +89,8 @@ export function recurringRoutes(db: DatabaseSync) {
   router.put('/:id', authMiddleware(db), (req, res) => {
     const id = req.params.id as string;
     if (!ownsRecurring(id, req.accountId!, res)) return;
-    const { amount, pointType, schedule, isActive } = req.body.payload || req.body;
+    const { amount, pointType, schedule, isActive, lastExecutedDay } =
+      req.body.payload || req.body;
 
     if (amount !== undefined) {
       db.prepare('UPDATE recurring_transfers SET amount = ? WHERE id = ?').run(amount.toString(), id);
@@ -102,6 +103,18 @@ export function recurringRoutes(db: DatabaseSync) {
     }
     if (isActive !== undefined) {
       db.prepare('UPDATE recurring_transfers SET is_active = ? WHERE id = ?').run(isActive ? 1 : 0, id);
+    }
+    // The wallet CLAIMS a day here before it sends, so a reload mid-send, or a
+    // second device opening the app the same morning, cannot pay the same
+    // person twice. Server-side rather than localStorage precisely so the claim
+    // is shared across a user's devices.
+    //
+    // The trade is deliberate: claim-then-send can drop a day if the send
+    // fails, while send-then-claim can double-pay. Missing a scheduled transfer
+    // is recoverable by sending manually; paying someone twice is not.
+    if (lastExecutedDay !== undefined) {
+      db.prepare('UPDATE recurring_transfers SET last_executed_day = ? WHERE id = ?')
+        .run(Number(lastExecutedDay), id);
     }
 
     res.json({ success: true });

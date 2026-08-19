@@ -152,6 +152,12 @@ export interface RecurringTransferData {
   is_active: number;
   created_at: number;
   to_public_key?: string;
+  /**
+   * Day this transfer last fired, or null if never. The wallet claims the
+   * current day here BEFORE sending, so a reload mid-send — or a second device
+   * opening the app the same morning — cannot pay the same person twice.
+   */
+  last_executed_day?: number | null;
 }
 
 // ─── Tagging (durable goods & spaces) ─────────────────────────────────────

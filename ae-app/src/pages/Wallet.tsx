@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom';
 import { useAccount } from '../hooks/useAccount';
 import { loadWallet, clearWallet } from '../lib/keys';
 import { api } from '../lib/api';
+import { runDueRecurringTransfers } from '../lib/recurring';
 import { ShareDisplay } from '../components/wallet/ShareDisplay';
 import { BalanceCard } from '../components/wallet/BalanceCard';
 import { AllocationBar } from '../components/wallet/AllocationBar';
-import { displayPoints, timeAgo } from '../lib/formatting';
+import { displayPoints, timeAgo, truncateId } from '../lib/formatting';
 import type { TransactionData, NetworkStatus } from '../lib/types';
 
 export function Wallet() {
@@ -16,7 +17,30 @@ export function Wallet() {
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
 
   useEffect(() => {
-    api.getNetworkStatus().then((r) => { if (r.success) setNetwork(r.data); });
+    api.getNetworkStatus().then((r) => {
+      if (!r.success) return;
+      setNetwork(r.data);
+
+      // Fire any scheduled transfers due today.
+      //
+      // This runs in the WALLET, not the node, because every transaction needs
+      // the user's ML-DSA signature and the node neither holds that key nor
+      // should. See lib/recurring.ts for the full reasoning, including the cost:
+      // transfers only fire while the app is open.
+      if (wallet?.accountId && wallet.privateKey && r.data.currentDay) {
+        runDueRecurringTransfers(wallet.accountId, wallet.privateKey, r.data.currentDay)
+          .then((out) => {
+            // Refresh the list so a transfer that just fired shows up rather
+            // than appearing on the next visit.
+            if (out.executed > 0 && wallet.accountId) {
+              api.getTransactions(wallet.accountId, 1, 5).then((tr) => {
+                if (tr.success) setTransactions(tr.data.transactions);
+              });
+            }
+          })
+          .catch(() => { /* scheduled sends must never block the wallet loading */ });
+      }
+    });
     if (wallet?.accountId) {
       api.getTransactions(wallet.accountId, 1, 5).then((r) => {
         if (r.success) setTransactions(r.data.transactions);
@@ -122,19 +146,43 @@ export function Wallet() {
           <p className="text-xs text-gray-500 text-center py-4">No transactions yet</p>
         ) : (
           <div className="space-y-1">
-            {transactions.map((tx) => (
-              <div key={tx.id} className="bg-navy rounded-lg p-3 flex items-center justify-between border border-navy-light">
-                <div>
-                  <p className="text-sm text-white">
-                    {tx.from === wallet.accountId ? 'Sent' : 'Received'}
+            {/* Each row opens the full detail: counterparty, exact time, memo,
+                and for an outgoing payment the gap between what you paid and
+                what actually arrived. All of that already came back from the
+                API and was being discarded here.
+
+                Received rows show netAmount, not amount: the recipient never
+                saw the sender's fee or verification burn, so `amount` would
+                overstate what landed in their balance. */}
+            {transactions.map((tx) => {
+              const outgoing = tx.from === wallet.accountId;
+              return (
+                <Link
+                  key={tx.id}
+                  to={`/tx/${tx.id}`}
+                  className="bg-navy rounded-lg p-3 flex items-center justify-between border border-navy-light hover:border-teal/40 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-white">
+                      {outgoing ? 'Sent' : 'Received'}
+                      <span className="text-gray-500">
+                        {' · '}
+                        {truncateId(outgoing ? tx.to : tx.from)}
+                      </span>
+                    </p>
+                    <p className="text-xs text-gray-500">{timeAgo(tx.timestamp)}</p>
+                  </div>
+                  <p
+                    className={`text-sm tabular-nums shrink-0 ${
+                      outgoing ? 'text-red-400' : 'text-teal'
+                    }`}
+                  >
+                    {outgoing ? '-' : '+'}
+                    {displayPoints(outgoing ? tx.amount : tx.netAmount)}
                   </p>
-                  <p className="text-xs text-gray-500">{timeAgo(tx.timestamp)}</p>
-                </div>
-                <p className={`text-sm tabular-nums ${tx.from === wallet.accountId ? 'text-red-400' : 'text-teal'}`}>
-                  {tx.from === wallet.accountId ? '-' : '+'}{displayPoints(tx.amount)}
-                </p>
-              </div>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

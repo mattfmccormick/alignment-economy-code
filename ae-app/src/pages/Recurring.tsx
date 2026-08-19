@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
-import { truncateId } from '../lib/formatting';
+import { truncateId, toBaseUnits, displayPoints } from '../lib/formatting';
 
 // Centralize the ts/sig/payload envelope shape so all four recurring
 // mutations look the same. Auth-required routes (auth-fix round 4)
@@ -99,7 +99,18 @@ export function Recurring() {
     setCreateError(null);
     try {
       const env = signEnvelope(
-        { toId: newToId.trim(), amount: Number(newAmount), pointType: newPointType, schedule: newSchedule },
+        {
+          toId: newToId.trim(),
+          // BASE UNITS on the wire, matching every other money value.
+          // This form used to send display units into a column nothing read,
+          // so the unit was never pinned down. Base units is also the safe
+          // direction to settle on: a legacy display-unit row now reads as a
+          // negligibly small amount, where the reverse would have multiplied
+          // every stored transfer by 100,000,000.
+          amount: Number(toBaseUnits(Number(newAmount))),
+          pointType: newPointType,
+          schedule: newSchedule,
+        },
         wallet.accountId,
         wallet.privateKey,
       );
@@ -293,7 +304,7 @@ export function Recurring() {
                       <p className="text-xs text-gray-500 font-mono">{truncateId(t.toId)}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm text-white tabular-nums">{t.amount.toFixed(2)} pts</p>
+                      <p className="text-sm text-white tabular-nums">{displayPoints(String(t.amount))} pts</p>
                       <p className="text-xs text-gray-500 capitalize">{t.pointType} / {t.schedule}</p>
                     </div>
                   </div>

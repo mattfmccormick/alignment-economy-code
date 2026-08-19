@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { api, type NetworkStatus, type NodeStatus } from '../../lib/api';
+import { formatBlockHeight } from '../../lib/formatting';
 
 export default function DashboardShell() {
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
@@ -88,17 +89,28 @@ export default function DashboardShell() {
               </span>
             </div>
 
-            {/* Block height */}
-            {blockHeight !== undefined && (
-              <div className="text-xs text-muted hidden sm:block">
-                Block <span className="text-white font-mono">#{blockHeight.toLocaleString()}</span>
-              </div>
-            )}
-
-            {/* Current Day */}
+            {/* Day first, then height.
+                The day is the unit that means something in this economy —
+                minting, expiry and rebasing are all scoped to it — while the
+                height is a machine identifier that grows without bound (~31M a
+                year at a block a second). Leading with the day keeps the bar
+                readable in year ten; the height abbreviates past a million and
+                keeps its exact value one hover away. */}
             {currentDay !== undefined && (
               <div className="text-xs text-muted hidden sm:block">
                 Day <span className="text-gold font-mono">{currentDay}</span>
+              </div>
+            )}
+
+            {blockHeight !== undefined && (
+              <div
+                className="text-xs text-muted hidden sm:block"
+                title={`Block ${blockHeight.toLocaleString()}`}
+              >
+                block{' '}
+                <span className="text-white font-mono">
+                  {formatBlockHeight(blockHeight)}
+                </span>
               </div>
             )}
           </div>

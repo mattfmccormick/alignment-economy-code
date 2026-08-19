@@ -172,7 +172,7 @@ export const api = {
     request<{ id: string; fromId: string; toId: string; amount: string; pointType: string; schedule: string; isActive: boolean }>('POST', '/recurring', envelope),
 
   // Auth + ownership-checked: only the recurring-transfer creator can modify.
-  updateRecurring: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { amount?: number; pointType?: string; schedule?: string; isActive?: boolean } }) =>
+  updateRecurring: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { amount?: number; pointType?: string; schedule?: string; isActive?: boolean; lastExecutedDay?: number } }) =>
     request<SuccessResponse>('PUT', `/recurring/${id}`, envelope),
 
   deleteRecurring: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>

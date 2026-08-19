@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { displayPoints, displayPercent, truncateId, countdown, formatNumber } from './formatting';
+import { displayPoints, displayPercent, truncateId, countdown, formatNumber, formatBlockHeight } from './formatting';
 
 describe('displayPoints', () => {
   it('renders base units (10^8) as display points', () => {
@@ -41,5 +41,27 @@ describe('formatNumber', () => {
     expect(formatNumber(500)).toBe('500');
     expect(formatNumber(1500)).toBe('1.5K');
     expect(formatNumber(2_300_000)).toBe('2.3M');
+  });
+});
+
+describe('formatBlockHeight', () => {
+  // A block a second means ~31M blocks a year. The exact grouped number stops
+  // being readable long before the chain stops being correct.
+  it('shows the exact grouped number below a million', () => {
+    expect(formatBlockHeight(0)).toBe('0');
+    expect(formatBlockHeight(29_071)).toBe('29,071');
+    expect(formatBlockHeight(999_999)).toBe('999,999');
+  });
+
+  it('abbreviates millions and billions', () => {
+    expect(formatBlockHeight(2_850_000)).toBe('2.85M');
+    expect(formatBlockHeight(31_536_000)).toBe('31.54M');   // one year
+    expect(formatBlockHeight(1_400_000_000)).toBe('1.40B'); // ~44 years
+  });
+
+  // Two decimals rather than one: a height is an identifier people compare
+  // across machines, and "2.8M" would hide a 50,000-block gap.
+  it('keeps enough precision to compare two nodes', () => {
+    expect(formatBlockHeight(2_800_000)).not.toBe(formatBlockHeight(2_850_000));
   });
 });

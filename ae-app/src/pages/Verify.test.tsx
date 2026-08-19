@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { Verify } from './Verify';
 import { api } from '../lib/api';
-import type { ScoreBreakdownData } from '../lib/types';
+import type { ScoreBreakdownData, VouchData, VouchRequestData } from '../lib/types';
 
 // The Verify page lets a participant ask a friend to vouch for their humanity.
 // This flow test guards the request path: the app must POST the recipient's
@@ -130,7 +130,7 @@ describe('Verify vouch-request flow', () => {
 // The old code would pass any test that only asserted "the button did
 // something", so these assert the ORDER and the payload specifically.
 describe('Verify incoming vouch requests', () => {
-  const incoming = {
+  const incoming: VouchRequestData = {
     id: 'req-1',
     fromId: 'friend-abc',
     toId: 'me',
@@ -138,6 +138,17 @@ describe('Verify incoming vouch requests', () => {
     message: 'please vouch for me',
     createdAt: 0,
     respondedAt: null,
+  };
+
+  const fakeVouch: VouchData = {
+    id: 'v1',
+    voucherId: 'me',
+    vouchedId: 'friend-abc',
+    stakeAmount: '5000000000',
+    stakedPercentage: 5,
+    isActive: true,
+    createdAt: 0,
+    withdrawnAt: null,
   };
 
   beforeEach(() => {
@@ -157,8 +168,8 @@ describe('Verify incoming vouch requests', () => {
   afterEach(() => cleanup());
 
   it('locks a stake before marking the request accepted', async () => {
-    mockApi.createVouch.mockResolvedValue({ success: true, data: { vouch: {} } });
-    mockApi.updateVouchRequest.mockResolvedValue({ success: true, data: {} });
+    mockApi.createVouch.mockResolvedValue({ success: true, data: { vouch: fakeVouch } });
+    mockApi.updateVouchRequest.mockResolvedValue({ success: true, data: { success: true } });
 
     render(<Verify />);
     const accept = await screen.findByRole('button', { name: /Accept & stake/ });
@@ -180,7 +191,7 @@ describe('Verify incoming vouch requests', () => {
   it('leaves the request pending when the stake is rejected', async () => {
     mockApi.createVouch.mockResolvedValue({
       success: false,
-      data: { vouch: {} },
+      data: { vouch: fakeVouch },
       error: { code: 'STAKE_TOO_SMALL', message: 'stakePercent 1% below minimum 5%' },
     });
 
@@ -196,7 +207,7 @@ describe('Verify incoming vouch requests', () => {
   });
 
   it('declines without staking anything', async () => {
-    mockApi.updateVouchRequest.mockResolvedValue({ success: true, data: {} });
+    mockApi.updateVouchRequest.mockResolvedValue({ success: true, data: { success: true } });
 
     render(<Verify />);
     fireEvent.click(await screen.findByRole('button', { name: 'Decline' }));

@@ -20,6 +20,7 @@ import { History } from './pages/History';
 import { Network } from './pages/Network';
 import { Court } from './pages/Court';
 import { CaseDetail } from './pages/CaseDetail';
+import { TransactionDetail } from './pages/TransactionDetail';
 import { Contacts } from './pages/Contacts';
 import { Recurring } from './pages/Recurring';
 import { Receive } from './pages/Receive';
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="/network" element={<Network />} />
           <Route path="/court" element={<Court />} />
           <Route path="/court/:id" element={<CaseDetail />} />
+          <Route path="/tx/:id" element={<TransactionDetail />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/recurring" element={<Recurring />} />
         </Route>
