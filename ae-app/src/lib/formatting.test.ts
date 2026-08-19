@@ -6,6 +6,7 @@ import {
   displayPercent,
   truncateId,
   countdown,
+  secondsUntilDailyExpiry,
 } from './formatting';
 
 describe('toBaseUnits', () => {
@@ -118,5 +119,26 @@ describe('countdown', () => {
     expect(countdown(0)).toBe('Expired');
     expect(countdown(90)).toBe('1m');
     expect(countdown(3720)).toBe('1h 2m');
+  });
+});
+
+describe('secondsUntilDailyExpiry', () => {
+  // Points expire at 08:59 UTC daily. The wallet used to render a hardcoded
+  // "Expires in 14h" regardless of the actual time.
+  it('counts down to today 08:59 UTC when we are before it', () => {
+    const now = new Date('2026-08-19T06:59:00Z'); // two hours before
+    expect(secondsUntilDailyExpiry(now)).toBe(2 * 3600);
+  });
+
+  it('rolls to tomorrow once today has passed', () => {
+    const now = new Date('2026-08-19T09:00:00Z'); // one minute after
+    expect(secondsUntilDailyExpiry(now)).toBe(24 * 3600 - 60);
+  });
+
+  it('never returns a negative, which would render as "Expired" forever', () => {
+    for (const h of [0, 8, 9, 12, 23]) {
+      const now = new Date(`2026-08-19T${String(h).padStart(2, '0')}:30:00Z`);
+      expect(secondsUntilDailyExpiry(now)).toBeGreaterThan(0);
+    }
   });
 });

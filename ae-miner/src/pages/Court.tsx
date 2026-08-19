@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, type JuryAssignment, type ActiveCaseSummary } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
 import { signPayload } from '../lib/crypto';
+import { displayPoints } from '../lib/formatting';
 import { wsClient } from '../lib/websocket';
 
 type Tab = 'jury' | 'cases' | 'file';
@@ -167,7 +168,7 @@ export default function Court() {
                   </div>
                   <p className="text-xs text-muted mb-1">Defendant: {a.defendantId.slice(0, 20)}…</p>
                   <p className="text-xs text-muted mb-1">Challenger: {a.challengerId.slice(0, 20)}…</p>
-                  <p className="text-xs text-muted">Your stake: {a.stakeAmount}</p>
+                  <p className="text-xs text-muted">Your stake: {displayPoints(a.stakeAmount)} pts</p>
                   <p className="text-[11px] text-teal mt-2">View arguments and vote →</p>
                 </Link>
                 {a.myVote ? (

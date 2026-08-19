@@ -94,8 +94,16 @@ export function History() {
                         : timeAgo(tx.timestamp)}
                     </p>
                   </div>
+                  {/* Incoming shows netAmount, outgoing shows amount.
+                      A recipient never saw the sender's fee or verification
+                      burn, so `amount` overstates what actually landed. Using
+                      it for both meant tapping "See all" from the home screen
+                      changed the number beside a transaction the user had just
+                      looked at — +40.00 there and +100.00 here, same event. */}
                   <p className={`text-sm tabular-nums ${tx.from === wallet?.accountId ? 'text-red-400' : 'text-teal'}`}>
-                    {tx.from === wallet?.accountId ? '-' : '+'}{displayPoints(tx.amount)}
+                    {tx.from === wallet?.accountId
+                      ? `-${displayPoints(tx.amount)}`
+                      : `+${displayPoints(tx.netAmount)}`}
                   </p>
                 </div>
               </div>

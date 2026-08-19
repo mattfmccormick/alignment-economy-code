@@ -740,6 +740,51 @@ Common threads worth fixing at the root rather than one at a time: court stakes
 are not rebase-aware (1 and 2), and jury selection reports success without
 checking that it actually seated a viable jury (3, 4, 5).
 
+### Roadmap: protocol features, not scheduling or UI work
+
+These are not bugs. Each needs a protocol capability that does not exist yet, so
+none can be closed by wiring up what is already there.
+
+**Scheduled transfers need a signed standing mandate.** The recurring-transfer
+executor lives in the wallet (`ae-app/src/lib/recurring.ts`) and fires only
+while the app is open. That is a constraint, not laziness: every transaction
+carries an ML-DSA signature made with the user's private key, the node does not
+hold that key and must never hold it, and `recurring_transfers` rows are not
+replicated between nodes — so a node-side scheduler would have to either forge
+an unsigned transfer or move balances from state its peers cannot see.
+
+For points that expire every 24 hours, "only fires when you open the app" is a
+real limitation. Closing it properly means a **signed standing mandate**: the
+user signs an authorisation once ("up to N points/day to account X until I
+revoke"), it rides on-chain like a validator change, and any node can execute
+against it without ever holding the key. That is a new operation type with its
+own canonical bytes, replay rules and revocation path.
+
+**Internationalisation is a picker with nothing behind it.** Both apps ship 12
+locale files (`src/locales/`), both depend on `i18next`, both render a language
+selector — and there are **zero `t()` calls in either app**. Every visible
+string is hardcoded English. `More.tsx` and the miner `Sidebar.tsx` call
+`i18n.changeLanguage()`; nothing reads the result. A user picks Español and the
+app stays entirely in English.
+
+Same defect shape as the orphaned exports: translations written, picker built,
+wiring never done. Scope is 43 components across both apps. Sequence matters —
+do the copy pass FIRST, then extract and wire, or you translate strings you are
+about to rewrite. Until then the picker promises something the app cannot
+deliver and should be hidden.
+
+**Displayed amounts need an audit, not a spot fix.** The activity list showed
+received transactions using `amount` (what the sender paid) rather than
+`netAmount` (what arrived). Those differ on every transaction from a
+partially-verified sender, because the percentHuman discount burns the
+difference — so every incoming payment in a user's history was overstated.
+Fixed in Wallet.tsx and TransactionDetail.tsx.
+
+The lesson generalises: `amount`, `fee`, `netAmount` and the implied burn are
+four different numbers, and which one is correct depends on whose screen it is.
+Every surface showing a transaction amount needs checking against that question,
+including History.tsx, the explorer, and anything added later.
+
 ### Open blockers (not fixed, ordered by severity)
 
 1. **The state root is diagnostic, and must stay that way for now.** It travels

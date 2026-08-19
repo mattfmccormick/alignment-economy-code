@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
@@ -35,6 +36,11 @@ export function Send() {
   const [recipientIsHuman, setRecipientIsHuman] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Post-send offer to save the recipient as a contact. Holds their account id
+  // while the prompt is showing, null when there is nothing to offer.
+  const [offerSaveContact, setOfferSaveContact] = useState<string | null>(null);
+  const [contactNickname, setContactNickname] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
 
   // Contact list
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -201,6 +207,13 @@ export function Send() {
             ? `Sending ${amountText}. It confirms when the next block commits, usually a few seconds.`
             : `Sent ${amountText}`,
         });
+        // Offer to save them, unless they are already a contact. Sending is
+        // the moment you know you want to keep an address — asking later means
+        // retyping a 40-character hex id from memory.
+        if (!contacts.some((c) => c.contactAccountId === to)) {
+          setOfferSaveContact(to);
+          setContactNickname('');
+        }
         setAmount('');
         setMemo('');
         setRecipient(null);
@@ -212,6 +225,40 @@ export function Send() {
       setResult({ success: false, message });
     } finally {
       setSending(false);
+    }
+  }
+
+  async function saveAsContact() {
+    if (!wallet?.accountId || !wallet.privateKey || !offerSaveContact) return;
+    setSavingContact(true);
+    try {
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = {
+        contactAccountId: offerSaveContact,
+        // A nickname is the entire point — an unnamed contact is just the hex
+        // id again. Falls back to a short label rather than an empty string so
+        // the contacts list never shows a blank row.
+        nickname: contactNickname.trim() || `Saved ${truncateId(offerSaveContact)}`,
+      };
+      const res = await api.addContact({
+        accountId: wallet.accountId,
+        timestamp: ts,
+        signature: signPayload(payload, ts, wallet.privateKey),
+        payload,
+      });
+      if (res.success) {
+        setOfferSaveContact(null);
+        // Reload so a second send to the same person does not re-offer.
+        const list = await api.getContacts(wallet.accountId);
+        if (list.success) setContacts(list.data.contacts as unknown as Contact[]);
+      }
+    } catch {
+      // Saving a contact is a convenience on top of a payment that already
+      // succeeded. Failing quietly is right — do not stain a successful send
+      // with an error about an address book.
+      setOfferSaveContact(null);
+    } finally {
+      setSavingContact(false);
     }
   }
 
@@ -296,24 +343,25 @@ export function Send() {
           />
         </div>
 
-        {/* Human attestation. Optional and off by default — the whole value of
-            the signal is that someone chose to make it. It is folded into the
-            signed payload, so it is an attestation the sender cannot later
-            deny, and it credits the recipient against percentHuman decay. */}
+        {/* Human attestation. Optional and off by default — the value of the
+            signal is that someone chose to make it. Folded into the signed
+            payload, so it is an attestation the sender cannot later deny, and
+            it credits the recipient against percentHuman decay.
+
+            A checkbox rather than a type dropdown on purpose: the protocol
+            field is boolean, and asking a sender to classify someone as
+            human/business/bot is more work and invites a wrong answer on a
+            screen whose job is sending money. */}
         <div>
-          <label className="flex items-start gap-3 cursor-pointer">
+          <label className="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
               checked={recipientIsHuman}
               onChange={(e) => setRecipientIsHuman(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded border-navy-light bg-navy text-teal focus:ring-teal focus:ring-offset-0"
+              className="w-4 h-4 rounded border-navy-light bg-navy text-teal focus:ring-teal focus:ring-offset-0"
             />
-            <span className="text-xs text-gray-400 leading-relaxed">
-              I know this account belongs to a real person
-              <span className="block text-[11px] text-gray-500 mt-0.5">
-                Optional. Signed with the payment, and helps their verification
-                score hold up over time.
-              </span>
+            <span className="text-xs text-gray-400">
+              This account is a human (optional)
             </span>
           </label>
         </div>
@@ -342,10 +390,28 @@ export function Send() {
           </div>
         )}
 
-        {/* Gross-up nudge: at <100% human, part of an active spend burns to
-            verification, so the recipient gets less than the typed amount.
-            Offer to raise the amount so they receive the full intended value. */}
-        {isDiscounted && amountNum > 0 && (
+        {/* At 0% verified there is no amount that delivers anything — the whole
+            payment burns. The gross-up maths divides by percentHuman, so it
+            fell back to the typed amount and the button read "tap to send 50.00
+            so they receive the full 50.00" while the preview directly above
+            correctly said the recipient gets 0.00. Tapping was a no-op. That is
+            the state EVERY new joiner is in on day one, so it needs to be a
+            blocker, not a nudge. */}
+        {pointType === 'active' && percentHuman === 0 && amountNum > 0 && (
+          <div className="w-full text-xs bg-red-900/20 border border-red-500/40 rounded-lg py-2 px-3 text-red-300">
+            You're not verified yet, so none of this reaches them — every point
+            burns.{' '}
+            <Link to="/verify" className="underline">
+              Get verified first
+            </Link>
+            .
+          </div>
+        )}
+
+        {/* Gross-up nudge, only where grossing up actually works: partially
+            verified. Part of an active spend burns, so offer to raise the
+            amount until the recipient gets what was intended. */}
+        {isDiscounted && percentHuman > 0 && amountNum > 0 && (
           <button
             onClick={() => setAmount(grossedUp.toFixed(2))}
             className="w-full text-xs text-teal bg-teal/10 rounded-lg py-2 px-3 hover:bg-teal/20 transition-colors text-left"
@@ -366,6 +432,39 @@ export function Send() {
         {result && (
           <div className={`text-sm text-center p-3 rounded-xl ${result.success ? 'bg-teal/10 text-teal' : 'bg-red-900/20 text-red-400'}`}>
             {result.message}
+          </div>
+        )}
+
+        {/* Save-the-recipient prompt, shown only after a successful send to
+            someone not already saved. Sending is the moment a person knows they
+            want to keep an address; asking later means retyping 40 hex
+            characters they no longer have in front of them. */}
+        {offerSaveContact && (
+          <div className="bg-navy rounded-xl p-3 border border-navy-light space-y-2">
+            <p className="text-xs text-gray-300">
+              Save {truncateId(offerSaveContact)} to contacts?
+            </p>
+            <input
+              value={contactNickname}
+              onChange={(e) => setContactNickname(e.target.value)}
+              placeholder="Name (optional)"
+              className="w-full bg-navy-light border border-navy-light rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-teal focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOfferSaveContact(null)}
+                className="flex-1 py-2 rounded-lg border border-navy-light text-xs text-gray-400"
+              >
+                Not now
+              </button>
+              <button
+                onClick={saveAsContact}
+                disabled={savingContact}
+                className="flex-1 py-2 rounded-lg bg-teal/20 text-teal text-xs disabled:opacity-50"
+              >
+                {savingContact ? 'Saving…' : 'Save contact'}
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -157,7 +157,7 @@ export default function Audit() {
                 {vouches.received.map((v) => (
                   <div key={v.id} className="flex justify-between items-center py-2 border-b border-border/50">
                     <span className="text-xs font-mono">{v.voucherId.slice(0, 16)}...</span>
-                    <span className="text-xs text-gold">{Number(v.stakeAmount).toLocaleString()} staked</span>
+                    <span className="text-xs text-gold">{displayPoints(v.stakeAmount)} staked</span>
                   </div>
                 ))}
               </div>
@@ -172,7 +172,7 @@ export default function Audit() {
                 {vouches.given.map((v) => (
                   <div key={v.id} className="flex justify-between items-center py-2 border-b border-border/50">
                     <span className="text-xs font-mono">{v.vouchedId.slice(0, 16)}...</span>
-                    <span className="text-xs text-gold">{Number(v.stakeAmount).toLocaleString()} staked</span>
+                    <span className="text-xs text-gold">{displayPoints(v.stakeAmount)} staked</span>
                   </div>
                 ))}
               </div>

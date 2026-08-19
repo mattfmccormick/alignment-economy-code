@@ -7,7 +7,7 @@ import { runDueRecurringTransfers } from '../lib/recurring';
 import { ShareDisplay } from '../components/wallet/ShareDisplay';
 import { BalanceCard } from '../components/wallet/BalanceCard';
 import { AllocationBar } from '../components/wallet/AllocationBar';
-import { displayPoints, timeAgo, truncateId } from '../lib/formatting';
+import { displayPoints, timeAgo, truncateId, countdown, secondsUntilDailyExpiry } from '../lib/formatting';
 import type { TransactionData, NetworkStatus } from '../lib/types';
 
 export function Wallet() {
@@ -15,6 +15,16 @@ export function Wallet() {
   const { account, loading, error } = useAccount(wallet?.accountId ?? null);
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
+  // Real countdown to the 08:59 UTC expiry boundary. This was the literal
+  // string "Expires in 14h", shown at every hour of every day — so someone
+  // opening the app ten minutes before the boundary was told they had
+  // fourteen hours to spend points that were about to vanish.
+  const [secsToExpiry, setSecsToExpiry] = useState(() => secondsUntilDailyExpiry());
+
+  useEffect(() => {
+    const t = setInterval(() => setSecsToExpiry(secondsUntilDailyExpiry()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     api.getNetworkStatus().then((r) => {
@@ -130,8 +140,16 @@ export function Wallet() {
       <div className="bg-navy rounded-xl p-4 mx-4 border border-navy-light space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-gray-300">Daily Allocations</h3>
-          <span className="text-xs text-gray-500">Expires in 14h</span>
+          <span className={`text-xs ${secsToExpiry < 7200 ? 'text-amber-400' : 'text-gray-500'}`}>
+            {secsToExpiry < 7200
+              ? `Resets in ${countdown(secsToExpiry)} — spend or lose`
+              : `Resets in ${countdown(secsToExpiry)}`}
+          </span>
         </div>
+        <p className="text-[11px] text-gray-500 -mt-1">
+          Unspent Active, Supportive and Ambient points reset every night.
+          Earned points never expire.
+        </p>
         <AllocationBar label="Active" total={String(144_000_000_000)} remaining={account.activeBalance} />
         <AllocationBar label="Supportive" total={String(14_400_000_000)} remaining={account.supportiveBalance} />
         <AllocationBar label="Ambient" total={String(1_440_000_000)} remaining={account.ambientBalance} />
@@ -191,7 +209,6 @@ export function Wallet() {
 }
 
 function VerificationStatus({ percentHuman }: { percentHuman: number }) {
-  const multiplier = (percentHuman / 100).toFixed(2);
   const fullyVerified = percentHuman >= 100;
   const unverified = percentHuman === 0;
 
@@ -213,8 +230,14 @@ function VerificationStatus({ percentHuman }: { percentHuman: number }) {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-red-300">Not verified yet</p>
+            {/* Said "your daily mint accumulates", which is the opposite of
+                what the node does. expireDaily zeroes every non-zero daily
+                balance each night regardless of verification, so an unverified
+                user was told their points were piling up while they evaporated
+                nightly. */}
             <p className="text-xs text-gray-400 mt-0.5">
-              Your daily mint accumulates, but spends transfer 0 until a miner verifies you.
+              You get points every day, but they transfer as 0 until a miner
+              verifies you — and unspent points reset each night either way.
             </p>
           </div>
           <span className="text-red-300 text-xl">→</span>
@@ -231,8 +254,14 @@ function VerificationStatus({ percentHuman }: { percentHuman: number }) {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-gold">{percentHuman}% verified</p>
+          {/* The discount applies to DAILY points only. Earned points transfer
+              at full value (core/transaction.ts gates on isDailyPointType), and
+              the Send screen has always said so — leaving this card claiming a
+              flat multiplier meant the two screens told the same user different
+              things about the same money. */}
           <p className="text-xs text-gray-400 mt-0.5">
-            Spend multiplier {multiplier}× — recipients get {percentHuman}% of what you send.
+            {percentHuman}% of a daily-point payment reaches them; the rest
+            burns. Earned points always send in full.
           </p>
         </div>
         <span className="text-gold text-xl">→</span>

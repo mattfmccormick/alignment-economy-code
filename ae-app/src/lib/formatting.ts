@@ -94,3 +94,26 @@ export function timeAgo(timestamp: number): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
 }
+
+/**
+ * Seconds until the next daily expiry boundary (08:59 UTC).
+ *
+ * The protocol expires unspent Active, Supportive and Ambient points at 08:59
+ * UTC every day — a fixed global clock, deliberately not shifted by daylight
+ * saving. Everything in this economy is scoped to that boundary, and it is the
+ * single most surprising mechanic for a new user, so the number in front of
+ * them has to be real.
+ *
+ * It was not: the wallet rendered the literal string "Expires in 14h" at every
+ * hour of every day. Someone opening the app ten minutes before the boundary
+ * was told they had fourteen hours.
+ */
+export function secondsUntilDailyExpiry(now: Date = new Date()): number {
+  const boundary = new Date(now);
+  boundary.setUTCHours(8, 59, 0, 0);
+  // Already past today's boundary — the next one is tomorrow.
+  if (boundary.getTime() <= now.getTime()) {
+    boundary.setUTCDate(boundary.getUTCDate() + 1);
+  }
+  return Math.floor((boundary.getTime() - now.getTime()) / 1000);
+}
