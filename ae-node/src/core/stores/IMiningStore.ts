@@ -17,6 +17,14 @@ export interface MinerInsert {
   accountId: string;
   tier: 1 | 2;
   registeredAt: number;
+  /**
+   * True when this miner was admitted under the bootstrap exemption — below the
+   * 50% percentHuman floor, because the network had too few miners to run a
+   * verification panel yet. Recorded so the tier evaluator can tell a
+   * deliberate exemption apart from a miner who once cleared the floor and has
+   * since fallen below it. Those deserve opposite treatment.
+   */
+  bootstrapAdmitted?: boolean;
 }
 
 export interface AssignmentInsert {
@@ -65,6 +73,13 @@ export interface IMiningStore {
 
   /** Mark a miner inactive at the given timestamp. */
   deactivateMiner(minerId: string, deactivatedAt: number): void;
+
+  /**
+   * End a miner's bootstrap grace period. Called the first time they reach the
+   * percentHuman floor under their own steam, so an exemption granted to get
+   * the network started does not shield them forever.
+   */
+  clearBootstrapAdmitted(minerId: string): void;
 
   /** Update a miner's tier (promotion or demotion). */
   setMinerTier(minerId: string, newTier: 1 | 2): void;

@@ -1,11 +1,15 @@
+// A miner account is a business: it earns from fees and verification work, and
+// receives no daily allocation. This card used to show an "Active" figure
+// alongside earnings, which read as a daily airdrop the miner does not get —
+// on the live network it displayed 1,440 Active while earned sat at 0.00, which
+// is exactly backwards from what a miner should be watching.
 interface IncomeCardProps {
-  activeBalance: string;
   earnedBalance: string;
   lockedBalance: string;
   percentHuman: number;
 }
 
-export default function IncomeCard({ activeBalance, earnedBalance, lockedBalance, percentHuman }: IncomeCardProps) {
+export default function IncomeCard({ earnedBalance, lockedBalance, percentHuman }: IncomeCardProps) {
   return (
     <div className="bg-panel border border-border rounded-lg p-5">
       <div className="flex items-center justify-between mb-4">
@@ -20,13 +24,9 @@ export default function IncomeCard({ activeBalance, earnedBalance, lockedBalance
       </div>
       <div className="text-xs text-muted mb-4">earned (saveable)</div>
 
-      <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border">
+      <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
         <div>
-          <div className="text-xs text-muted mb-0.5">Active</div>
-          <div className="text-sm font-semibold text-teal">{activeBalance}</div>
-        </div>
-        <div>
-          <div className="text-xs text-muted mb-0.5">Locked</div>
+          <div className="text-xs text-muted mb-0.5">Locked (stake)</div>
           <div className="text-sm font-semibold text-gold-dim">{lockedBalance}</div>
         </div>
         <div>

@@ -18,6 +18,7 @@ function rowToMiner(row: Record<string, unknown>): Miner {
     isActive: (row.is_active as number) === 1,
     registeredAt: row.registered_at as number,
     deactivatedAt: row.deactivated_at as number | null,
+    bootstrapAdmitted: (row.bootstrap_admitted as number) === 1,
   };
 }
 
@@ -64,10 +65,20 @@ export class SqliteMiningStore implements IMiningStore {
   insertMiner(input: MinerInsert): void {
     this.db
       .prepare(
-        `INSERT INTO miners (id, account_id, tier, is_active, registered_at, deactivated_at)
-         VALUES (?, ?, ?, 1, ?, NULL)`,
+        `INSERT INTO miners (id, account_id, tier, is_active, registered_at, deactivated_at, bootstrap_admitted)
+         VALUES (?, ?, ?, 1, ?, NULL, ?)`,
       )
-      .run(input.id, input.accountId, input.tier, input.registeredAt);
+      .run(
+        input.id,
+        input.accountId,
+        input.tier,
+        input.registeredAt,
+        input.bootstrapAdmitted ? 1 : 0,
+      );
+  }
+
+  clearBootstrapAdmitted(minerId: string): void {
+    this.db.prepare('UPDATE miners SET bootstrap_admitted = 0 WHERE id = ?').run(minerId);
   }
 
   deactivateMiner(minerId: string, deactivatedAt: number): void {

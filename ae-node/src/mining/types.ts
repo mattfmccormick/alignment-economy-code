@@ -5,6 +5,16 @@ export interface Miner {
   isActive: boolean;
   registeredAt: number;
   deactivatedAt: number | null;
+  /**
+   * Admitted below the percentHuman floor under the bootstrap exemption, and
+   * has not yet reached that floor on their own.
+   *
+   * While this is true the tier evaluator will not deactivate them for a low
+   * score. Without it, evaluation immediately revoked the exemption that
+   * registration had just granted, and the miner app reported only "Not
+   * registered as a miner" with no mention of a score or a way back.
+   */
+  bootstrapAdmitted?: boolean;
 }
 
 export interface MinerHeartbeat {

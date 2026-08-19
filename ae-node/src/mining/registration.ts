@@ -55,9 +55,25 @@ export function registerMiner(db: DatabaseSync, accountId: string): Miner {
 
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);
-  store.insertMiner({ id, accountId, tier: 1, registeredAt: now });
 
-  return { id, accountId, tier: 1, isActive: true, registeredAt: now, deactivatedAt: null };
+  // Record WHETHER the exemption was actually used, not merely that it existed.
+  // The tier evaluator needs to tell "admitted below the floor on purpose" from
+  // "cleared the floor once and has since fallen below it" — the first should
+  // keep mining, the second should be deactivated. Inferring it later is
+  // impossible, so it is written down here.
+  const bootstrapAdmitted = acct.percentHuman < 50;
+
+  store.insertMiner({ id, accountId, tier: 1, registeredAt: now, bootstrapAdmitted });
+
+  return {
+    id,
+    accountId,
+    tier: 1,
+    isActive: true,
+    registeredAt: now,
+    deactivatedAt: null,
+    bootstrapAdmitted,
+  };
 }
 
 export function getMiner(db: DatabaseSync, minerId: string): Miner | null {

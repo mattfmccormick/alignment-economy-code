@@ -3,6 +3,7 @@ import { getParam } from '../config/params.js';
 import { getAccount, updateBalance } from '../core/account.js';
 import { recordLog } from '../core/transaction.js';
 import { runTransaction } from '../db/connection.js';
+import { getFeePool, distributeFromFeePool } from '../core/fee-pool.js';
 import { sha256 } from '../core/crypto.js';
 import { getActiveMiners } from './registration.js';
 import { selectLotteryWinner } from './vrf.js';
@@ -274,8 +275,44 @@ export function commitBlockSideEffects(
   blockHash: string,
 ): void {
   if (blockNumber === 0) return;
-  const totalFees = getBlockTotalFees(db, blockNumber);
-  if (totalFees > 0n) {
-    distributeFeesPublicLottery(db, blockNumber, blockHash, totalFees);
+
+  // Distribute the whole undistributed pool, not just this block's fees.
+  //
+  // Using getBlockTotalFees alone stranded money permanently. A block whose
+  // fees arrive when no miner is active pays nobody — distributeFeesPublicLottery
+  // returns null at the `tier1Count === 0 && tier2Count === 0` guard — and
+  // because the amount was scoped to that one block, nothing ever revisited it.
+  // The fee had already been taken from the sender by addToFeePool, so those
+  // points were removed from circulation and delivered to no one.
+  //
+  // Observed on the live two-laptop network: 4.75 points collected across four
+  // transactions, total_distributed still 0, because the only miner had been
+  // deactivated by the bootstrap/tier contradiction fixed alongside this.
+  //
+  // The pool balance already includes this block's fees (addToFeePool runs
+  // during transaction application, before this), so paying out the balance
+  // covers the current block and anything previously stranded.
+  const pool = getFeePool(db);
+  if (pool.currentBalance === 0n) return;
+
+  const paid = distributeFeesPublicLottery(db, blockNumber, blockHash, pool.currentBalance);
+
+  // Draw the pool down by exactly what was paid, and only if a payout happened.
+  //
+  // The decrement belongs here rather than inside distributeFeesPublicLottery:
+  // that function is a pure "pay these miners this amount" and is called
+  // directly by tests with amounts no pool backs. Putting the decrement inside
+  // it made those calls throw on the balance check.
+  //
+  // It also has to be conditional. distributeFeesPublicLottery returns null
+  // when there is no one to pay (no active miners) or when this block was
+  // already distributed — in both cases nothing left any account, so
+  // decrementing would destroy the fees a second time, which is the exact bug
+  // being fixed.
+  //
+  // Without the decrement the pool would re-pay the same fees on every
+  // subsequent block, turning a stranded-money bug into a money-printing one.
+  if (paid !== null) {
+    distributeFromFeePool(db, pool.currentBalance);
   }
 }

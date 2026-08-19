@@ -2,7 +2,7 @@
 import { getParam } from '../config/params.js';
 import { getAccount } from '../core/account.js';
 import { NotFoundError } from '../core/errors.js';
-import { getMiner, setMinerTier, deactivateMiner, getActiveMiners } from './registration.js';
+import { getMiner, setMinerTier, deactivateMiner, getActiveMiners, miningStore } from './registration.js';
 import { calculateUptime, cleanOldHeartbeats } from './heartbeat.js';
 import { getCompositeAccuracy, getJuryAttendanceRate, getCompletedAssignments } from './accuracy.js';
 import { logger } from '../node/logger.js';
@@ -35,8 +35,32 @@ export function evaluateMinerTier(
   const acct = getAccount(db, miner.accountId);
   if (!acct) throw new NotFoundError(`Miner account not found: ${miner.accountId}`);
 
-  // Force-deactivate if percentHuman dropped below 50
-  if (acct.percentHuman < 50) {
+  // A miner who has reached the floor under their own steam has graduated:
+  // clear the bootstrap flag so the exemption cannot shield them later if their
+  // score falls again. The grace period ends at real verification, not never.
+  if (miner.bootstrapAdmitted && acct.percentHuman >= 50) {
+    miningStore(db).clearBootstrapAdmitted(minerId);
+  }
+
+  // Force-deactivate if percentHuman is below 50 — unless this miner was
+  // ADMITTED below it under the bootstrap exemption and has not graduated yet.
+  //
+  // registerMiner lets the first `mining.bootstrap_miner_count` miners join
+  // below the floor, because a new network cannot raise a score without a
+  // panel, run a panel without a miner, or have a miner without a score. This
+  // function did not know that exemption existed and revoked it the moment it
+  // ran: a bootstrap miner registered at percentHuman 0 was deactivated on the
+  // next evaluation, and the miner app said only "Not registered as a miner" —
+  // no mention of a score, a threshold, or a route back. Latent until
+  // evaluateMinerTier was given a production caller; the two rules had never
+  // both run before.
+  //
+  // The check is on the RECORDED admission reason, not on how many miners
+  // happen to be active now. Counting the window instead would also exempt a
+  // miner who cleared the floor long ago and has since fallen below it — the
+  // opposite of what should happen — and that is precisely the case phase4's
+  // "force-deactivates miner when percentHuman drops below 50" pins.
+  if (acct.percentHuman < 50 && !miner.bootstrapAdmitted) {
     deactivateMiner(db, minerId, `percentHuman dropped to ${acct.percentHuman}`);
     return {
       minerId, currentTier: miner.tier, newTier: miner.tier,

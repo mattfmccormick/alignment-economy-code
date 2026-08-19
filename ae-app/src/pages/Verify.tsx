@@ -10,6 +10,13 @@ import { hashFileSHA256 } from '../lib/hash';
 
 type Modal = null | 'request-vouch' | 'submit-evidence';
 
+/**
+ * Server minimum for a vouch stake (`minStakePercent` on the vouch evidence
+ * type). Below this the API rejects with STAKE_TOO_SMALL, so the UI must not
+ * offer less.
+ */
+const MIN_STAKE_PERCENT = 5;
+
 interface VouchRequest {
   id: string;
   fromId: string;
@@ -51,6 +58,11 @@ export function Verify() {
   const [outgoingRequests, setOutgoingRequests] = useState<VouchRequest[]>([]);
   const [receivedVouches, setReceivedVouches] = useState<Vouch[]>([]);
   const [givenVouches, setGivenVouches] = useState<Vouch[]>([]);
+  // Stake percentage per incoming request, keyed by request id. Defaults to the
+  // server's minimum; anything lower is rejected with STAKE_TOO_SMALL.
+  const [stakePercents, setStakePercents] = useState<Record<string, number>>({});
+  const [vouchActionBusy, setVouchActionBusy] = useState<string | null>(null);
+  const [vouchActionError, setVouchActionError] = useState<string | null>(null);
   // Withdrawal is two-step on purpose: it lowers someone else's score, so the
   // consequence gets stated before the tap rather than discovered after it.
   const [withdrawConfirming, setWithdrawConfirming] = useState<string | null>(null);
@@ -224,20 +236,93 @@ export function Verify() {
     setEvidenceLoading(false);
   }
 
-  async function handleVouchRequestAction(id: string, status: 'accepted' | 'declined') {
-    if (!wallet?.accountId) return;
+  /**
+   * Accept a vouch request: LOCK THE STAKE FIRST, then mark the request handled.
+   *
+   * This used to be a single PUT that only flipped the row to 'accepted'. No
+   * stake was locked, no vouch row was written, and the friend who asked got
+   * nothing — while the request vanished from both inboxes forever, because the
+   * server only returns rows with status='pending'. Silent, and unrecoverable
+   * through the UI.
+   *
+   * Order matters and is the same as ae-miner's: if the stake fails we must
+   * leave the request pending so it can be retried. Marking it accepted first
+   * would strand it exactly the way the old code did.
+   */
+  async function acceptVouchRequest(req: VouchRequest, stakePercent: number) {
+    if (!wallet?.accountId || !wallet.privateKey) return;
+    setVouchActionError(null);
+    setVouchActionBusy(req.id);
     try {
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { status };
-      const signature = signPayload(payload, ts, wallet.privateKey);
-      await api.updateVouchRequest(id, {
+      const vouchPayload = { vouchedId: req.fromId, stakePercent };
+      const vouchRes = await api.createVouch({
         accountId: wallet.accountId,
         timestamp: ts,
-        signature,
-        payload,
+        signature: signPayload(vouchPayload, ts, wallet.privateKey),
+        payload: vouchPayload,
+      });
+      if (!vouchRes.success) {
+        // Server rejects a stake below the minimum, above the balance, or one
+        // that rounds to zero. Surface it — the old code swallowed everything.
+        setVouchActionError(vouchRes.error?.message ?? 'Could not lock the stake.');
+        return;
+      }
+
+      const ts2 = Math.floor(Date.now() / 1000);
+      const statusPayload = { status: 'accepted' as const };
+      await api.updateVouchRequest(req.id, {
+        accountId: wallet.accountId,
+        timestamp: ts2,
+        signature: signPayload(statusPayload, ts2, wallet.privateKey),
+        payload: statusPayload,
       });
       loadVouchData();
-    } catch { /* ignore */ }
+    } catch (e) {
+      setVouchActionError(e instanceof Error ? e.message : 'Network error.');
+    } finally {
+      setVouchActionBusy(null);
+    }
+  }
+
+  /**
+   * What a given percentage would lock, as base units.
+   *
+   * Matches the server's computeStakeFromPercent: the percentage applies to
+   * TOTAL holdings (earned + already-locked), not just spendable earned. Using
+   * earned alone here would under-report the cost on any account that already
+   * has a vouch out.
+   */
+  function previewStake(pct: number): string {
+    if (!account) return '0';
+    const holdings = BigInt(account.earnedBalance) + BigInt(account.lockedBalance);
+    return ((holdings * BigInt(Math.max(0, Math.round(pct)))) / 100n).toString();
+  }
+
+  /** Decline stays a single PUT — nothing is staked, so there is nothing to undo. */
+  async function declineVouchRequest(req: VouchRequest) {
+    if (!wallet?.accountId || !wallet.privateKey) return;
+    setVouchActionError(null);
+    setVouchActionBusy(req.id);
+    try {
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = { status: 'declined' as const };
+      const res = await api.updateVouchRequest(req.id, {
+        accountId: wallet.accountId,
+        timestamp: ts,
+        signature: signPayload(payload, ts, wallet.privateKey),
+        payload,
+      });
+      if (!res.success) {
+        setVouchActionError(res.error?.message ?? 'Could not decline that request.');
+        return;
+      }
+      loadVouchData();
+    } catch (e) {
+      setVouchActionError(e instanceof Error ? e.message : 'Network error.');
+    } finally {
+      setVouchActionBusy(null);
+    }
   }
 
   // Request a verification panel — signed with the wallet's private key.
@@ -398,6 +483,9 @@ export function Verify() {
       {incomingRequests.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-300 mb-2">Incoming Vouch Requests</h3>
+          {vouchActionError && (
+            <p className="text-xs text-red-400 mb-2">{vouchActionError}</p>
+          )}
           <div className="space-y-2">
             {incomingRequests.map(req => (
               <div key={req.id} className="bg-navy rounded-xl p-3 border border-navy-light">
@@ -411,20 +499,54 @@ export function Verify() {
                 </div>
                 {req.message && <p className="text-xs text-gray-400 mb-2">{req.message}</p>}
                 {req.status === 'pending' && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleVouchRequestAction(req.id, 'accepted')}
-                      className="flex-1 py-2 bg-teal/20 text-teal rounded-lg text-xs hover:bg-teal/30 transition-colors"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => handleVouchRequestAction(req.id, 'declined')}
-                      className="flex-1 py-2 bg-red-900/20 text-red-400 rounded-lg text-xs hover:bg-red-900/30 transition-colors"
-                    >
-                      Decline
-                    </button>
-                  </div>
+                  <>
+                    {/* Vouching stakes real points. The card had no stake
+                        control at all, which is part of why Accept did nothing
+                        — the server requires a percentage and rejects anything
+                        below the 5% minimum. Say what it costs before the tap. */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <label className="text-xs text-gray-400 shrink-0">Stake</label>
+                      <input
+                        type="number"
+                        min={MIN_STAKE_PERCENT}
+                        max={100}
+                        value={stakePercents[req.id] ?? MIN_STAKE_PERCENT}
+                        onChange={(e) =>
+                          setStakePercents((m) => ({ ...m, [req.id]: Number(e.target.value) }))
+                        }
+                        className="w-16 bg-navy-light border border-navy-light rounded px-2 py-1 text-xs text-white tabular-nums focus:border-teal focus:outline-none"
+                      />
+                      <span className="text-xs text-gray-400">
+                        % · locks ≈{' '}
+                        {displayPoints(
+                          previewStake(stakePercents[req.id] ?? MIN_STAKE_PERCENT),
+                        )}{' '}
+                        pts
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 mb-2">
+                      You get this back if they turn out to be real. You lose it if a
+                      court finds they are not.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() =>
+                          acceptVouchRequest(req, stakePercents[req.id] ?? MIN_STAKE_PERCENT)
+                        }
+                        disabled={vouchActionBusy === req.id}
+                        className="flex-1 py-2 bg-teal/20 text-teal rounded-lg text-xs hover:bg-teal/30 transition-colors disabled:opacity-50"
+                      >
+                        {vouchActionBusy === req.id ? 'Staking…' : 'Accept & stake'}
+                      </button>
+                      <button
+                        onClick={() => declineVouchRequest(req)}
+                        disabled={vouchActionBusy === req.id}
+                        className="flex-1 py-2 bg-red-900/20 text-red-400 rounded-lg text-xs hover:bg-red-900/30 transition-colors disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             ))}

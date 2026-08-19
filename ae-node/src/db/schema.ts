@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -220,6 +220,21 @@ const TABLES = `
     is_active INTEGER NOT NULL DEFAULT 1,
     registered_at INTEGER NOT NULL,
     deactivated_at INTEGER,
+    -- Was this miner admitted under the bootstrap exemption? (schema v15)
+    --
+    -- registerMiner lets the first "mining.bootstrap_miner_count" miners join
+    -- below the 50% percentHuman floor, because a new network cannot raise a
+    -- score without a panel, run a panel without a miner, or have a miner
+    -- without a score. Nothing recorded WHY a miner was admitted, so the tier
+    -- evaluator could not tell "never cleared the floor, admitted deliberately"
+    -- apart from "cleared it once and has since fallen below" — and those two
+    -- deserve opposite treatment. It deactivated both, which silently undid the
+    -- exemption registration had just granted.
+    --
+    -- Set to 1 only when the exemption was actually used. Cleared the first
+    -- time the miner reaches 50, so the grace ends at real verification rather
+    -- than lasting forever.
+    bootstrap_admitted INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (account_id) REFERENCES accounts(id)
   );
 
@@ -782,6 +797,17 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
     `);
+  }
+  if (from < 15) {
+    // miners.bootstrap_admitted. Existing rows default to 0, which is the safe
+    // reading: they are treated as ordinary miners and the percentHuman floor
+    // applies to them normally. A miner genuinely admitted under the exemption
+    // before this column existed will be deactivated once and can re-register,
+    // which is preferable to blanket-exempting every historical miner.
+    const cols = db.prepare('PRAGMA table_info(miners)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'bootstrap_admitted')) {
+      db.exec('ALTER TABLE miners ADD COLUMN bootstrap_admitted INTEGER NOT NULL DEFAULT 0');
+    }
   }
   if (from < 14) {
     // transactions.applied, for commit-time execution.

@@ -19,6 +19,7 @@ import { rebalanceVouchLocks } from '../verification/vouching.js';
 import { rebaseCourtStakes, expireCourtDeadlines } from '../court/court.js';
 import { expireOverdueAssignments } from '../mining/fifo-queue.js';
 import { runMinerTierEvaluation } from '../mining/tiers.js';
+import { getActiveMiners } from '../mining/registration.js';
 import { finalizeSupportiveTags } from '../tagging/supportive.js';
 import { finalizeAmbientTags } from '../tagging/ambient.js';
 import { logger } from '../node/logger.js';
@@ -184,9 +185,22 @@ export function mintDaily(db: DatabaseSync): void {
   // Single query, faster than per-account lookups, and idempotent on resume.
   const alreadyMinted = transactionStore(db).findLogAccountIds(refId, 'mint');
 
+  // A miner account is a business, not a person.
+  //
+  // It earns from the fee pool for verification work; it does not receive a
+  // daily allocation. A human who also verifies keeps a separate personal
+  // account — the daily points follow the person, not the service they run.
+  //
+  // This is not in tension with the white paper's "every verified human
+  // receives a daily allocation": the allocation follows the human's personal
+  // account. What it stops is one person drawing a second allocation by also
+  // operating a miner, which is a duplicate-account vector in all but name.
+  const minerAccountIds = new Set(getActiveMiners(db).map((m) => m.accountId));
+
   runTransaction(db, () => {
     for (const acct of eligible) {
       if (alreadyMinted.has(acct.id)) continue; // resumed: skip, already credited
+      if (minerAccountIds.has(acct.id)) continue; // business account: earns, is not allocated
 
       updateBalance(db, acct.id, 'active_balance', DAILY_ACTIVE_POINTS);
       recordLog(db, acct.id, 'mint', 'active', DAILY_ACTIVE_POINTS, 0n, DAILY_ACTIVE_POINTS, refId, now);

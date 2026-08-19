@@ -15,7 +15,15 @@ vi.mock('../lib/keys', () => ({
 
 vi.mock('../hooks/useAccount', () => ({
   useAccount: () => ({
-    account: { percentHuman: 0, activeBalance: '0', earnedBalance: '0', isEscrowed: false },
+    account: {
+      percentHuman: 0,
+      activeBalance: '0',
+      // Non-zero so the stake preview and the server-side minimum are
+      // exercised: a vouch stakes a percentage of total holdings.
+      earnedBalance: '100000000000',
+      lockedBalance: '0',
+      isEscrowed: false,
+    },
     loading: false,
     error: null,
     refresh: () => {},
@@ -33,6 +41,8 @@ vi.mock('../lib/api', () => ({
     getVouchRequests: vi.fn(),
     getEvidenceScore: vi.fn(),
     createVouchRequest: vi.fn(),
+    createVouch: vi.fn(),
+    updateVouchRequest: vi.fn(),
   },
 }));
 
@@ -107,5 +117,92 @@ describe('Verify vouch-request flow', () => {
     expect(
       await screen.findByText('You already requested a vouch from this account'),
     ).toBeTruthy();
+  });
+});
+
+// Accepting a vouch request must LOCK A STAKE, not just flip a flag.
+//
+// The wallet used to fire a single PUT marking the request 'accepted'. No stake
+// was locked, no vouch row was created, and the friend who asked got nothing —
+// while the request disappeared from both inboxes forever, because the server
+// only returns rows with status='pending'. Silent and unrecoverable.
+//
+// The old code would pass any test that only asserted "the button did
+// something", so these assert the ORDER and the payload specifically.
+describe('Verify incoming vouch requests', () => {
+  const incoming = {
+    id: 'req-1',
+    fromId: 'friend-abc',
+    toId: 'me',
+    status: 'pending',
+    message: 'please vouch for me',
+    createdAt: 0,
+    respondedAt: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getAccountPanels.mockResolvedValue({ success: true, data: { panels: [] } });
+    mockApi.getVouches.mockResolvedValue({ success: true, data: { received: [], given: [] } });
+    mockApi.getVouchRequests.mockResolvedValue({
+      success: true,
+      data: { incoming: [incoming], outgoing: [] },
+    });
+    mockApi.getEvidenceScore.mockResolvedValue({
+      success: true,
+      data: { score: emptyScore, vouchCount: 0 },
+    });
+  });
+
+  afterEach(() => cleanup());
+
+  it('locks a stake before marking the request accepted', async () => {
+    mockApi.createVouch.mockResolvedValue({ success: true, data: { vouch: {} } });
+    mockApi.updateVouchRequest.mockResolvedValue({ success: true, data: {} });
+
+    render(<Verify />);
+    const accept = await screen.findByRole('button', { name: /Accept & stake/ });
+    fireEvent.click(accept);
+
+    await waitFor(() => expect(mockApi.createVouch).toHaveBeenCalledTimes(1));
+
+    // The vouch is for the person who ASKED, staking at least the minimum.
+    const arg = mockApi.createVouch.mock.calls[0][0];
+    expect(arg.payload.vouchedId).toBe('friend-abc');
+    expect(arg.payload.stakePercent).toBeGreaterThanOrEqual(5);
+    expect(arg.accountId).toBe('me');
+
+    // And only then is the request marked handled.
+    await waitFor(() => expect(mockApi.updateVouchRequest).toHaveBeenCalledTimes(1));
+    expect(mockApi.updateVouchRequest.mock.calls[0][1].payload).toEqual({ status: 'accepted' });
+  });
+
+  it('leaves the request pending when the stake is rejected', async () => {
+    mockApi.createVouch.mockResolvedValue({
+      success: false,
+      data: { vouch: {} },
+      error: { code: 'STAKE_TOO_SMALL', message: 'stakePercent 1% below minimum 5%' },
+    });
+
+    render(<Verify />);
+    fireEvent.click(await screen.findByRole('button', { name: /Accept & stake/ }));
+
+    await waitFor(() => expect(mockApi.createVouch).toHaveBeenCalledTimes(1));
+
+    // The critical assertion: a failed stake must NOT mark the request handled,
+    // or it vanishes from the inbox with nothing staked — the original bug.
+    expect(mockApi.updateVouchRequest).not.toHaveBeenCalled();
+    expect(await screen.findByText(/below minimum/)).toBeTruthy();
+  });
+
+  it('declines without staking anything', async () => {
+    mockApi.updateVouchRequest.mockResolvedValue({ success: true, data: {} });
+
+    render(<Verify />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Decline' }));
+
+    await waitFor(() => expect(mockApi.updateVouchRequest).toHaveBeenCalledTimes(1));
+    expect(mockApi.updateVouchRequest.mock.calls[0][1].payload).toEqual({ status: 'declined' });
+    expect(mockApi.createVouch).not.toHaveBeenCalled();
   });
 });

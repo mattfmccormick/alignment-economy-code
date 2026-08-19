@@ -121,7 +121,6 @@ export default function Dashboard() {
 
         {/* Balances Card */}
         <IncomeCard
-          activeBalance={account ? displayPoints(account.activeBalance) : '0'}
           earnedBalance={account ? displayPoints(account.earnedBalance) : '0'}
           lockedBalance={account ? displayPoints(account.lockedBalance) : '0'}
           percentHuman={account?.percentHuman ?? 0}
@@ -148,26 +147,28 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* A miner account is a business: it earns, it is not allocated.
+            Showing Active / Supportive / Ambient here implied a miner receives
+            a daily airdrop, which it does not — those lines read 1,440 / 144 /
+            14.40 while the number that actually matters, earned, sat at zero.
+            The personal account in the wallet is where daily points live. */}
         <div className="bg-panel border border-border rounded-lg p-5">
-          <h3 className="text-sm font-medium text-muted mb-3">Your Balances</h3>
+          <h3 className="text-sm font-medium text-muted mb-3">Earnings</h3>
           <div className="space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-muted">Active Points</span>
-              <span className="text-sm font-mono text-teal">{account ? displayPoints(account.activeBalance) : '--'}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-muted">Supportive Points</span>
-              <span className="text-sm font-mono">{account ? displayPoints(account.supportiveBalance) : '--'}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-muted">Ambient Points</span>
-              <span className="text-sm font-mono">{account ? displayPoints(account.ambientBalance) : '--'}</span>
-            </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted">Earned Points</span>
               <span className="text-sm font-mono text-gold">{account ? displayPoints(account.earnedBalance) : '--'}</span>
             </div>
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-muted">Locked (stake)</span>
+              <span className="text-sm font-mono">{account ? displayPoints(account.lockedBalance) : '--'}</span>
+            </div>
           </div>
+          <p className="text-[11px] text-muted mt-3 leading-relaxed">
+            Mining is a business account. It earns from transaction fees and
+            verification work, and receives no daily allocation — those go to
+            your personal account in the wallet.
+          </p>
         </div>
 
         <div className="bg-panel border border-border rounded-lg p-5">

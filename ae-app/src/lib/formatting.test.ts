@@ -47,11 +47,13 @@ describe('displayPoints', () => {
   });
 });
 
-// The MAX button used to feed displayPoints back into the amount field.
-// displayPoints is the HUMAN formatter and is lossy on purpose, so MAX could
-// produce an amount that was either unparseable or larger than the balance —
-// on the one button whose whole promise is "all of it".
-describe('baseUnitsToExactDisplay (what MAX puts in the box)', () => {
+// The MAX button that used to call this is gone — emptying an account in one
+// tap is the wrong thing to make effortless. The helper stays because the
+// distinction it encodes is still worth having: displayPoints is the HUMAN
+// formatter and is lossy on purpose (it abbreviates above a million and rounds
+// below it), so it must never be fed back into an amount field. Anything that
+// turns a balance into editable input needs this exact, truncated form.
+describe('baseUnitsToExactDisplay (exact, machine-parseable amounts)', () => {
   it('never abbreviates, so large balances stay parseable', () => {
     const big = toBaseUnits(3_000_000);
     expect(displayPoints(big)).toBe('3.00M');           // fine for a human
