@@ -475,6 +475,30 @@ export class PeerManager extends EventEmitter {
 
     if (this.peers.size >= this.maxPeers && !this.peers.has(hs.nodeId)) return;
 
+    // Close the socket we are about to replace.
+    //
+    // This map.set silently dropped the previous WebSocket: the entry was
+    // overwritten but the old TCP connection stayed ESTABLISHED forever, so
+    // every reconnect leaked one. Measured on a real two-machine network — 33
+    // live connections between two nodes and still climbing — because discovery
+    // redials a peer it cannot tell it is already connected to. An inbound peer
+    // is recorded with its ephemeral source port (…:54073), which never matches
+    // the configured seed address (…:9000), so maintainConnections' "already
+    // connected" check misses every time.
+    //
+    // Fixing the redial itself needs the handshake to advertise a listen port,
+    // which changes the signed bytes. Closing the replaced socket is the half
+    // that stops the harm: it caps live connections at one per peer no matter
+    // how often we redial.
+    if (existing && existing.ws !== ws) {
+      try {
+        existing.ws.close(4005, 'replaced by newer connection');
+      } catch {
+        // Already closing or dead. Nothing to do, and it must not stop us
+        // registering the new connection.
+      }
+    }
+
     this.peers.set(hs.nodeId, {
       info: {
         id: hs.nodeId,

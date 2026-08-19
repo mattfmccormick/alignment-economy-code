@@ -93,11 +93,27 @@ export class PeerDiscovery {
 
     const connectedPeers = this.peerManager.getConnectedPeers();
     const connectedHosts = new Set(connectedPeers.map((p) => `${p.host}:${p.port}`));
+    // Also match on bare host.
+    //
+    // The host:port check alone never matches an INBOUND peer: we record such a
+    // peer with its ephemeral source port (…:54073), because the handshake does
+    // not advertise a listen port, while the address we would redial is the
+    // configured one (…:9000). A node already connected to us therefore looked
+    // unconnected, and we redialled it every interval forever — each dial
+    // leaving another live socket behind. 33 connections between two machines
+    // before this was caught, still climbing.
+    //
+    // "One node per host" is an assumption, and it is wrong for several nodes
+    // on one machine. Those are dedupd by the exact host:port check above,
+    // which does match for outbound connections, so this only changes behaviour
+    // for the inbound case it is meant to fix.
+    const connectedBareHosts = new Set(connectedPeers.map((p) => p.host));
 
     const now = Date.now();
     for (const [key, addr] of this.knownAddresses) {
       if (connectedCount >= this.config.minPeers) break;
       if (connectedHosts.has(key)) continue;
+      if (connectedBareHosts.has(addr.host)) continue;
       // Don't retry too frequently
       if (now - addr.lastAttempt < this.config.reconnectInterval) continue;
 
