@@ -48,11 +48,19 @@ const panelDetail: PanelDetail = {
   liveScore: { totalScore: 0, breakdown: { tierA: 0, tierB: 0, tierC: 0 } },
 };
 
-async function openPanelAndReachSubmit() {
+// The panel deliberately ships with NO pre-filled score. It used to default to
+// 80, which let a miner seat a panel and submit a passing grade in one click
+// without forming a judgement — on a proof-of-human network, the screen that
+// decides whether a stranger is real should not arrive with the answer already
+// typed in. This helper therefore chooses a score explicitly, exactly as a real
+// miner now has to.
+async function openPanelAndScore(score: number) {
   // Data loads on mount; the queue row is a button labelled with the applicant.
   fireEvent.click(await screen.findByRole('button', { name: /applicant-xyz/ }));
-  // openPanel() fetches detail; the submit button appears once it resolves.
-  return screen.findByRole('button', { name: /Submit .* Human Score/ });
+  // openPanel() fetches detail; the score control appears once it resolves.
+  const slider = await screen.findByRole('slider');
+  fireEvent.change(slider, { target: { value: String(score) } });
+  return screen.findByRole('button', { name: new RegExp(`Submit ${score}% human score`) });
 }
 
 describe('Verify panel-score flow', () => {
@@ -67,14 +75,14 @@ describe('Verify panel-score flow', () => {
 
   afterEach(() => cleanup());
 
-  it('submits the default score to the opened panel, signed as the miner', async () => {
+  it('submits the score the miner chose, signed as the miner', async () => {
     mockApi.submitPanelScore.mockResolvedValue({
       success: true,
       data: { recorded: true, panelComplete: false, medianScore: null },
     });
 
     render(<Verify />);
-    const submitBtn = await openPanelAndReachSubmit();
+    const submitBtn = await openPanelAndScore(65);
     fireEvent.click(submitBtn);
 
     await waitFor(() => expect(mockApi.submitPanelScore).toHaveBeenCalledTimes(1));
@@ -84,7 +92,7 @@ describe('Verify panel-score flow', () => {
     expect(envelope).toMatchObject({
       accountId: 'miner-me',
       signature: 'sig',
-      payload: { score: 80 }, // the page's default proposed score
+      payload: { score: 65 }, // exactly what the miner set — there is no default
     });
   });
 
@@ -96,9 +104,51 @@ describe('Verify panel-score flow', () => {
     });
 
     render(<Verify />);
-    const submitBtn = await openPanelAndReachSubmit();
+    const submitBtn = await openPanelAndScore(65);
     fireEvent.click(submitBtn);
 
     expect(await screen.findByText('You are not assigned to this panel')).toBeTruthy();
+  });
+});
+
+// Guard against re-introducing a pre-filled verdict.
+//
+// The panel used to arrive with the score set to 80 and the submit button live,
+// so a miner could accept a stranger as human in a single click having looked
+// at nothing. That is the core screen of a proof-of-human network rewarding
+// rubber-stamping, and it is the sort of "convenience" that creeps back in.
+describe('Verify panel arrives with no answer pre-filled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getAssignedPanels.mockResolvedValue({
+      success: true,
+      data: { minerRegistered: true, assignments: [assignment] },
+    });
+    mockApi.getPanel.mockResolvedValue({ success: true, data: panelDetail });
+  });
+
+  afterEach(() => cleanup());
+
+  it('cannot be submitted until the miner sets a score', async () => {
+    render(<Verify />);
+    fireEvent.click(await screen.findByRole('button', { name: /applicant-xyz/ }));
+
+    const prompt = await screen.findByRole('button', { name: /Move the slider to set a score/ });
+    expect((prompt as HTMLButtonElement).disabled).toBe(true);
+
+    // No submit-with-a-number button exists yet, because no number was chosen.
+    expect(screen.queryByRole('button', { name: /Submit \d+% human score/ })).toBeNull();
+
+    fireEvent.click(prompt);
+    expect(mockApi.submitPanelScore).not.toHaveBeenCalled();
+  });
+
+  it('enables submission once a score is chosen', async () => {
+    render(<Verify />);
+    fireEvent.click(await screen.findByRole('button', { name: /applicant-xyz/ }));
+    fireEvent.change(await screen.findByRole('slider'), { target: { value: '30' } });
+
+    const submit = await screen.findByRole('button', { name: /Submit 30% human score/ });
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
   });
 });

@@ -4,6 +4,26 @@ import { loadMinerWallet } from '../lib/keys';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 
+/**
+ * Human-readable names for evidence type ids, mirroring ae-node's verification
+ * policy. The panel listed raw ids like "biometric_primary", which tells a
+ * miner nothing about what was claimed.
+ *
+ * Falls back to the raw id for any type not listed, so a policy change produces
+ * an unlovely label rather than a blank row.
+ */
+const EVIDENCE_LABELS: Record<string, string> = {
+  gov_id: 'Government-issued ID',
+  photo_match: 'Photo or video matched to ID',
+  voice_print: 'Voice print',
+  captcha: 'CAPTCHA / behavioural check',
+  in_person_tx: 'In-person transaction',
+  biometric_primary: 'Primary biometric',
+  biometric_secondary: 'Secondary biometric',
+  biometric_tertiary: 'Tertiary biometric',
+  vouch: 'Vouch from a verified human (stake-backed)',
+};
+
 export default function Verify() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -11,7 +31,13 @@ export default function Verify() {
   const [minerRegistered, setMinerRegistered] = useState(false);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [panelDetail, setPanelDetail] = useState<PanelDetail | null>(null);
-  const [proposedScore, setProposedScore] = useState(80);
+  // Deliberately NOT pre-filled.
+  //
+  // This defaulted to 80, which meant a miner could seat a panel and submit a
+  // passing score in one click without forming a judgement. On a proof-of-human
+  // network, the screen that decides whether a stranger is real should not ship
+  // with the answer already typed in. Null forces a choice.
+  const [proposedScore, setProposedScore] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const loadAssignments = useCallback(async () => {
@@ -67,6 +93,7 @@ export default function Verify() {
     setSubmitting(true);
     try {
       const timestamp = Math.floor(Date.now() / 1000);
+      if (proposedScore === null) return;
       const payload = { score: proposedScore };
       const signature = signPayload(payload, timestamp, wallet.privateKey);
       const res = await api.submitPanelScore(selectedPanelId, {
@@ -205,17 +232,37 @@ export default function Verify() {
               <div className="bg-bg rounded-lg p-4">
                 <h3 className="text-xs uppercase tracking-wider text-muted mb-2">Submitted Evidence</h3>
                 {panelDetail.evidence.length === 0 ? (
-                  <p className="text-sm text-muted italic">No evidence submitted yet.</p>
+                  <p className="text-sm text-muted italic">
+                    Nothing submitted. An applicant who has supplied no evidence
+                    should score low, not score a default.
+                  </p>
                 ) : (
                   <ul className="space-y-1.5 text-sm">
                     {panelDetail.evidence.map((e) => (
-                      <li key={e.id} className="flex justify-between text-white">
-                        <span>{e.evidenceTypeId}</span>
-                        <span className="font-mono text-xs text-muted">{e.evidenceHash.slice(0, 12)}…</span>
+                      <li key={e.id} className="flex justify-between text-white gap-3">
+                        <span>{EVIDENCE_LABELS[e.evidenceTypeId] ?? e.evidenceTypeId}</span>
+                        <span
+                          className="font-mono text-xs text-muted shrink-0"
+                          title={e.evidenceHash}
+                        >
+                          {e.evidenceHash.slice(0, 12)}…
+                        </span>
                       </li>
                     ))}
                   </ul>
                 )}
+                {/* Say plainly what a miner is and is not looking at.
+                    The protocol stores a SHA-256 commitment, never the artefact
+                    — there is no selfie, ID or video to retrieve, here or
+                    anywhere. A raw type id beside a hash prefix implied the
+                    miner was reviewing something. They are attesting on the
+                    strength of what was claimed and who vouched, and they
+                    should know that before their accuracy score rides on it. */}
+                <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">
+                  These are cryptographic commitments, not the evidence itself —
+                  the protocol never stores the underlying file. You are judging
+                  what was submitted and by whom, not inspecting a document.
+                </p>
               </div>
 
               <div className="bg-bg rounded-lg p-4">
@@ -251,24 +298,32 @@ export default function Verify() {
                       type="range"
                       min={0}
                       max={100}
-                      value={proposedScore}
+                      value={proposedScore ?? 50}
                       onChange={(e) => setProposedScore(parseInt(e.target.value))}
                       className="flex-1"
                     />
                     <div className="bg-bg border border-border rounded-md px-3 py-1.5 w-20 text-center">
-                      <span className="text-lg font-mono text-white">{proposedScore}</span>
+                      <span className="text-lg font-mono text-white">
+                        {proposedScore ?? '—'}
+                      </span>
                       <span className="text-xs text-muted">%</span>
                     </div>
                   </div>
                   <p className="text-xs text-muted">
                     Per the white paper, you decide the weight. Tier classifications are hints, not caps.
+                    Your accuracy is measured against court outcomes, so a score you
+                    cannot justify can cost you your tier.
                   </p>
                   <button
                     onClick={submitScore}
-                    disabled={submitting}
+                    disabled={submitting || proposedScore === null}
                     className="w-full py-2.5 bg-teal text-white rounded-lg text-sm font-medium hover:bg-teal-dark transition-colors disabled:opacity-50"
                   >
-                    {submitting ? 'Submitting…' : `Submit ${proposedScore}% Human Score`}
+                    {submitting
+                      ? 'Submitting…'
+                      : proposedScore === null
+                        ? 'Move the slider to set a score'
+                        : `Submit ${proposedScore}% human score`}
                   </button>
                 </div>
               )}

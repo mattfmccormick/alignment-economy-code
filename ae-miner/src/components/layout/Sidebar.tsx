@@ -181,7 +181,11 @@ export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean;
         </button>
       </div>
 
-      {/* Language */}
+      {/* Language.
+          Both apps ship 12 locale files and depend on i18next, and there are
+          ZERO t() calls across 43 components — every visible string is
+          hardcoded English. This changes the stored setting and nothing else,
+          so say so rather than implying a translation that does not happen. */}
       <div className="px-4 py-2">
         <select
           value={i18n.language}
@@ -197,6 +201,9 @@ export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean;
             </option>
           ))}
         </select>
+        <p className="text-[10px] text-muted/60 mt-1 leading-relaxed">
+          Translations in progress — most text stays in English.
+        </p>
       </div>
 
       {/* Bottom: miner ID + logout */}

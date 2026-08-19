@@ -25,8 +25,15 @@ export function Receive() {
   return (
     <div className="p-4 space-y-5">
       <h2 className="text-xl font-serif text-white">Receive Points</h2>
+      {/* Said "have someone scan this code". The wallet has no scanner — the
+          only QR dependency generates codes, and Send offers four ways to pick
+          a recipient, none of them a camera. Two people in the same room,
+          following the instruction on screen, could not finish. The code is
+          still useful (a phone camera reads it and yields the id), but the
+          reliable path is copying the id, so lead with that. */}
       <p className="text-sm text-gray-400">
-        Have someone scan this code, or share your Account ID, to send you points.
+        Share your Account ID and they can paste it into Send. A phone camera
+        will also read the code below.
       </p>
 
       <div className="flex flex-col items-center gap-4 bg-navy border border-navy-light rounded-2xl p-6">

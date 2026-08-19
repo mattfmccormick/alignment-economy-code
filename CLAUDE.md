@@ -740,6 +740,28 @@ Common threads worth fixing at the root rather than one at a time: court stakes
 are not rebase-aware (1 and 2), and jury selection reports success without
 checking that it actually seated a viable jury (3, 4, 5).
 
+### The verification panel has nothing to verify (architectural)
+
+The miner's review screen is the core of a proof-of-human network, and it shows
+the reviewer a raw evidence type id and twelve characters of a SHA-256 hash.
+There is no selfie, no ID, no video — **the protocol stores only
+`evidence_hash`, never the artefact** (`ae-node/src/verification/evidence.ts`).
+A miner cannot inspect what they are attesting to, because nothing was kept.
+
+Mitigated in the UI, not solved: evidence types now render human-readable
+names, the screen states plainly that these are commitments rather than
+evidence, and the score no longer arrives pre-filled at 80 with the submit
+button live — a miner had been able to pass a stranger as human in one click
+having looked at nothing. `Verify.test.tsx` pins the no-default rule, because
+that "convenience" is exactly the sort that creeps back.
+
+Solving it properly is a protocol decision, and a privacy-sensitive one. The
+options are roughly: store encrypted artefacts the assigned panel can decrypt
+and nobody else; keep artefacts off-chain with the hash as the on-chain
+commitment and a separate retrieval channel; or accept that miners judge
+metadata plus vouches and design the scoring around that honestly. Today the
+code implies the first and implements the third.
+
 ### Roadmap: protocol features, not scheduling or UI work
 
 These are not bugs. Each needs a protocol capability that does not exist yet, so

@@ -1803,7 +1803,12 @@ export function Onboarding() {
         <button
           onClick={() => {
             if (!twoFaPhone.trim()) { setTwoFaNote('Enter a phone number, or choose "I will do it later".'); return; }
-            setTwoFaNote('Text-message codes are coming soon. Your number is saved. You can also set up app-based 2FA now from the More menu.');
+            // Said "Your number is saved." Nothing here saves it — there is no
+            // API call, no storage, no state that outlives this screen. Telling
+            // someone their recovery contact is on file when it is not is the
+            // worst class of lie an onboarding flow can tell, because they find
+            // out when they need it.
+            setTwoFaNote('Text-message codes are not available yet, so this number has not been saved. Set up app-based 2FA from the More menu instead — that one works today.');
           }}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
         >
@@ -1824,11 +1829,17 @@ export function Onboarding() {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark">
         <h2 className="text-2xl font-serif text-white mb-6">Get Verified</h2>
+        {/* Said "10 vouches = 100% verified = full spending power". None of
+            that is how it works: vouches score by SUMMED STAKE PERCENTAGE (ten
+            friends at the 5% minimum comes to 50, not 100), and a vouch never
+            sets percentHuman at all — only a completed miner panel does. The
+            Verify screen already carries a note walking this back, which is the
+            tell that the promise was wrong rather than merely simplified. */}
         <p className="text-gray-400 text-sm leading-relaxed max-w-sm mb-8">
-          You'll receive your full daily allocation right away, but spends
-          transfer 0 until a miner verifies you. The easiest start: ask
-          friends who are already verified to vouch for you. 10 vouches =
-          100% verified = full spending power.
+          You get points every day from the start, but they transfer as 0 until
+          a miner verifies you. Vouches from verified friends are the easiest
+          way to build a case — each one stakes their own points on you. A miner
+          then reviews everything and sets your score.
         </p>
         <button
           onClick={() => navigate('/verify')}

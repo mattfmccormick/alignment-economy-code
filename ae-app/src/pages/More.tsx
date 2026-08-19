@@ -772,6 +772,17 @@ function LanguagePicker() {
           </option>
         ))}
       </select>
+      {/* Say what this currently does, which is almost nothing.
+          Both apps ship 12 locale files and depend on i18next, and there are
+          ZERO t() calls across 43 components — every visible string is
+          hardcoded English. Changing the language changes the stored setting
+          and the text direction, and nothing else. A silent picker made the app
+          promise a translation it cannot deliver; until the strings are
+          extracted, admitting it here is the honest option. */}
+      <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+        Translations are still being wired up, so most of the app stays in
+        English for now. Right-to-left layout does apply.
+      </p>
     </div>
   );
 }
