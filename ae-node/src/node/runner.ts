@@ -14,6 +14,7 @@ import {
   catchUpCycles,
   getNextCycleAt,
   setNextCycleAt,
+  applyChainDayCycle,
 } from '../core/day-cycle.js';
 import { startServer } from '../api/server.js';
 import { AENode } from '../network/node.js';
@@ -450,6 +451,31 @@ export class AENodeRunner {
             // distribution the original proposer ran on its side.
             commitBlockSideEffects(this.db, block.number, block.hash);
           });
+
+          // Run the day cycle for this block, exactly as the live commit path
+          // does (BftBlockProducer.onCommit) — same position, same input, same
+          // error handling.
+          //
+          // Without this, catch-up sync could never replay a chain that had
+          // seen a day boundary. The cycle is what mints daily allocations, and
+          // a syncing node skipped it entirely: every account stayed at zero,
+          // so the first historical transaction that spent minted points threw
+          //   "Replay: insufficient active balance ... has 0, needs N"
+          // and the node retried the same block forever. A fresh node simply
+          // could not join a chain that had any real activity on it — which is
+          // exactly what happened bringing a new machine online.
+          //
+          // Deterministic because it keys off block.timestamp, so a node
+          // replaying history at full speed derives the same mints, expiries
+          // and rebases the original validators did in real time.
+          try {
+            applyChainDayCycle(this.db, block.timestamp);
+          } catch (err) {
+            // Telemetry only, matching the commit path: the block itself is
+            // applied and the cycle is a separate, resumable state machine.
+            void err;
+          }
+
           this.p2pNode.consensus.notifyHeightAdvanced?.(block.number);
           logger.info(
             'blocks',
