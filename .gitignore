@@ -89,3 +89,10 @@ dev-dist/
 
 # Local Claude/agent scratch
 .claude/scheduled_tasks.lock
+
+# Per-machine node config. Each operator writes their own from
+# docs/node-config.example.json — it names that machine's keystore and its
+# peers' addresses, so it is never the same on two machines and must not be
+# shared or committed.
+ae-node/node-config.json
+ae-node/node-config.*.json

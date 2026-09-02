@@ -34,6 +34,20 @@ docs/ARCHITECTURE.md  Architecture + handoff map: how the pieces fit, the
 AE_PROJECT_BRIEF.md  Original project brief.
 ```
 
+## Running a node
+
+**[docs/running-a-node.md](docs/running-a-node.md)** — one command, same on
+every machine:
+
+```bash
+npm run dev -- --config=./node-config.json
+```
+
+Per-machine settings (which keystore, which peers) live in that config file
+rather than in a long environment-variable line. Includes the four checks that
+account for every multi-machine failure so far, none of which were consensus
+bugs.
+
 ## Quick start (dev)
 
 Run each project from its own directory:

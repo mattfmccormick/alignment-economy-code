@@ -1,0 +1,21 @@
+{
+  "_comment": "EXAMPLE. Copy to ae-node/node-config.json and edit the four marked fields.",
+  "_identity": "REPLACE: which machine and which validator this is",
+  "consensusMode": "bft",
+  "genesisConfigPath": "./testnet/genesis.json",
+  "nodeKeyPath": "./testnet/keys/REPLACE-WITH-YOUR-ACCOUNT-ID.json",
+  "bftLocalAccountId": "REPLACE-WITH-YOUR-ACCOUNT-ID",
+  "nodeId": "REPLACE-WITH-YOUR-ACCOUNT-ID",
+  "apiPort": 3000,
+  "p2pPort": 9000,
+  "dbPath": "./data/ae-node.db",
+  "seedNodes": [
+    {
+      "host": "REPLACE-WITH-A-PEER-IP",
+      "port": 9000
+    }
+  ],
+  "blockIntervalMs": 10000,
+  "bftStartupDelayMs": 20000,
+  "logLevel": "info"
+}
