@@ -12,7 +12,22 @@ Optimize for, in order:
 
 Deployment-stage and operations work (NAT traversal, public bootstrap nodes, picking a host, code-signing certs, running infrastructure, external audits) is explicitly the professional team's job. We make the code ready for that work and document the seams. We do not have to operate it ourselves.
 
-## Two-laptop bring-up audit (August 16, 2026)
+## Multi-node bring-up audit (August 16 – September 2, 2026)
+
+Running the network across real machines: two laptops first, then a dedicated
+mini PC as an always-on node. Almost nothing that broke was in the consensus
+algorithm. The failures were in the seams — between packages, between the live
+path and the sync path, between what a screen said and what the code did, and
+in the test harness meant to catch all of it.
+
+**Current state:** chain live across two machines, 749 tests / 118 suites green,
+LAN 3-validator 5/5. Blocks paced at 10s.
+
+**The one thing to fix before real users:** joining requires replaying every
+block. See "Sync does not scale" below — the primitive for the fix already
+exists.
+
+
 
 First attempt to run the two-laptop LAN test from a clean `git clone`. It did not
 work, and the reasons were not in the consensus layer. A code audit of the four
@@ -477,6 +492,94 @@ were the largest piece, not the only one.
   stale — Phase 64 superseded it. **Lesson worth keeping: "the code does not do
   X" is not evidence that it should.**
 
+### Ninth pass: joining a running network (September 1-2, 2026)
+
+Bringing a third machine (a dedicated mini PC) onto the live chain, which
+exercised catch-up sync properly for the first time.
+
+- **A new node could not join any chain that had been used.** It synced to
+  block 4,690 and then failed the same block forever with
+  `Replay: insufficient active balance ... has 0, needs 10000000000`. The
+  sender genuinely had zero: `BftBlockProducer.onCommit` calls
+  `applyChainDayCycle` after every block, and the sync path in `runner.ts` did
+  not. A catching-up node replayed registrations and transactions while never
+  minting, expiring or rebasing, so every account stayed empty and the first
+  historical transaction that spent minted points threw.
+
+  The scope is larger than one stuck machine: existing nodes were fine only
+  because they lived through the mints in real time. Catch-up sync had
+  evidently never been run against a chain with real activity on it.
+  `onSyncBlockApply` now runs the cycle in the same position, with the same
+  catch-and-log, as the commit path. `sync-day-cycle.test.ts` pins the three
+  properties sync depends on.
+
+- **BFT is paced at 10s per block.** There was no pacing at all: `onCommit`
+  advanced the height and called `startRound()` immediately, so a healthy
+  network produced a block roughly every 2.7 seconds regardless of activity.
+  `blockIntervalMs` has defaulted to 10s all along but only ever reached the
+  legacy Authority path.
+
+  Measured on the live chain: **30,932 blocks carrying 4 transactions**, 64 MB
+  on disk, ~32,400 blocks/day. The real cost is joinability rather than disk — a
+  new node replays every block, so if sync is slower than production a node that
+  falls behind can never catch up, and the threshold tightens as the chain
+  grows. 10s takes blocks/day from ~32,400 to 8,640: 4x off sync, disk, and the
+  per-block state-root scan at once.
+
+  The pause is unconditional rather than "skip it when transactions are
+  waiting", because nodes decide that independently and would enter rounds at
+  different times. **Every validator on a network must use the same value.**
+
+### The LAN test was lying, and it gates every consensus change
+
+Worth its own heading because it invalidated several judgements made today.
+
+`scripts/test-lan-multi-validator.mjs` is the only end-to-end gate on consensus
+work. Its `teardown()` sent `SIGTERM` and scheduled a `SIGKILL` two seconds
+later. Neither worked on Windows: SIGTERM does not take down a Node child tree,
+and the timer never fired because callers invoke `process.exit()` immediately.
+
+**Every run leaked its three nodes.** They kept holding ports 4001-4003 and
+9301-9303, so the next run hit `EADDRINUSE` on startup and had its handshake
+answered by a survivor carrying a different genesis. The test failed roughly a
+third of the time for reasons having nothing to do with consensus.
+
+This nearly caused a correct change to be rejected. First measurements of the
+block-interval work were 3/6 with pacing against 4/6 without — which reads as a
+consensus regression. The captured failure said otherwise once actually read
+rather than inferred from pass rates: `FATAL listen EADDRINUSE :::4002`, then
+`network mismatch: peer is on "ae-lan-test-m…"`.
+
+Fixed with `taskkill /T /F` synchronously. After: **baseline 4/5, with 10s
+pacing 5/5**, no orphans. Treat pre-fix LAN results as unreliable, including the
+peering work earlier in the audit.
+
+### Sync does not scale, and pacing only buys time
+
+The block interval is a constant-factor win, not a fix. Sync time still grows
+without bound, just 4x slower. At 10s a year of chain is ~3.2M blocks and a new
+node still replays all of them.
+
+Every comparable chain solved this the same way, and none of them by keeping the
+chain small:
+
+- **Bitcoin** tolerates full replay only because 10-minute blocks keep the count
+  low, and even then defaults to `assumevalid` (skip signature checks before a
+  hardcoded hash), offers pruning, and recently added a UTXO-snapshot path.
+- **Ethereum** made full replay impractical, so **snap sync** is the default:
+  fetch current state, verify against a recent block, replay only the tail.
+- **Solana** never pretended replay was viable; validators start from a
+  snapshot.
+
+**AE should do the same, and the hard part already exists.** `computeStateRoot`
+is precisely what makes a snapshot trustworthy: a joining node hashes the
+account state it was handed and checks it against a committed block's root, so
+it verifies rather than trusts the peer. The remaining work is serving account
+state over the wire and a join path that starts from a verified root.
+
+Do this before real users. At 30k blocks it is a feature; at 30M it is a
+migration.
+
 ### Audit status (court + verification panels)
 
 A multi-agent audit with an adversarial refute stage confirmed **14 defects in
@@ -591,6 +694,20 @@ reaches: `withdrawVouch`, `resolveAppeal`, `markAssignmentMissed`,
 it. New orphans break the build. Existing ones are baselined in `KNOWN_ORPHANS`
 with a reason each, and **removing an entry from that list is the definition of
 done** for the item.
+
+**The guard does not catch the harder variant, and that variant has now bitten
+twice.** Where a second caller exists but does *less* than the first, the
+function is referenced, so the orphan check passes:
+
+- `applyChainDayCycle` — called on the BFT commit path, absent from the sync
+  path. Result: a new node could not join any chain that had been used.
+- `commitBlockSideEffects` — present on both paths, but the sync path lacked
+  everything the commit path did around it.
+
+Both are "two paths that must agree, and only one does the work." Worth a guard
+of its own: any function called from the commit path should probably be called
+from the sync path too, and the diff between those two functions is a review
+checklist in its own right.
 
 Running it for the first time found **34 orphans**. Most are benign (client-side
 signing, operator helpers, dead code superseded by `db/schema.ts`). These are
@@ -809,6 +926,14 @@ including History.tsx, the explorer, and anything added later.
 
 ### Open blockers (not fixed, ordered by severity)
 
+0. **Joining a network requires replaying every block.** The 10s interval makes
+   the chain grow 4x slower; it does not remove the wall. A node that falls far
+   enough behind can never catch up, and the threshold tightens as the chain
+   grows — the one problem here that gets strictly worse with time. Snapshot
+   sync is the fix, and `computeStateRoot` is already the piece that makes it
+   trustworthy. See "Sync does not scale" above. Cheap at 30k blocks, a
+   migration at 30M.
+
 1. **The state root is diagnostic, and must stay that way for now.** It travels
    in the gossip payload and receivers compare it, but it does not gate a vote
    and is not folded into `computeBlockHash`.
@@ -866,6 +991,28 @@ dry run, the state-root check and the on-chain registration path together, in
 separate processes, rather than in-process fixtures. Worth re-running after any
 further consensus change — it is ~80 seconds and it is the only check that
 covers the seams between nodes.
+
+**Run it several times, not once.** Even with the teardown fixed it is ~4/5, so
+a single pass proves little and a single failure proves less. Compare a run of
+5 against a run of 5 with the change reverted; that is the only way today to
+tell a real regression from the residual flake. Any result recorded before the
+teardown fix (September 2) should be treated as noise.
+
+**Operator lessons from real multi-machine bring-up**, none of which were code
+bugs but all of which cost hours:
+
+- Windows marks a new network **Public**, and a firewall rule scoped to Private
+  silently does not apply. The node looks healthy and peers simply never
+  connect.
+- A machine's LAN IP changes between networks, and `AE_SEED_NODES` is a
+  hardcoded address. Nothing logs "the address you were told to dial no longer
+  exists." Set DHCP reservations.
+- Mismatched code between machines fails block validation and earns a ban. Both
+  nodes must be on the same commit — check with `git log --oneline -1` before
+  debugging anything else.
+- `genesis.json` and the database are a matched pair. Regenerate one and the
+  other must be deleted; the node refuses to start otherwise and says so
+  clearly.
 
 ### Note on the operator docs
 
