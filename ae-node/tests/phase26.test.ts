@@ -612,3 +612,138 @@ describe('Phase 26: BFT driver', () => {
     driver.stop();
   });
 });
+
+// ── inter-block pacing ───────────────────────────────────────────────
+//
+// BFT had no pacing: onCommit advanced the height and called startRound()
+// immediately, so a healthy network produced a block roughly every 2.7 seconds
+// regardless of whether anything had happened. Measured on the real chain:
+// 30,932 blocks carrying 4 transactions, ~32,400 blocks a day.
+//
+// That is a sync problem, not just a disk one. A joining node replays every
+// block, so if sync is slower than production, a node that falls behind can
+// never catch up — and the gap widens daily.
+//
+// blockIntervalMs pauses between commit and the next round. The pause must:
+//   - actually delay the next round
+//   - not lose proposals that arrive during it (routeProposal buffers when
+//     there is no controller, which is what makes the pause safe)
+//   - be cancelled by stop(), or a stopped node wakes up and starts a round
+//   - not apply to a FAILED round, which should retry promptly
+describe('Phase 26: inter-block pacing', () => {
+  let env: ReturnType<typeof setupValidators>;
+  let proposer: ValidatorHandle;
+  const proposerSeedFor = (h: number) => `seed-${h}`;
+
+  beforeEach(() => {
+    env = setupValidators(4);
+    const sel = selectProposer(env.set.listActive(), 1, proposerSeedFor(1))!;
+    proposer = env.validators.find((v) => v.accountId === sel.accountId)!;
+  });
+
+  function driveToCommit(clock: FakeClock, transport: FakeTransport, intervalMs: number) {
+    const commits: Array<{ height: number }> = [];
+    const driver = new BftDriver({
+      transport,
+      clock,
+      validatorSet: env.set,
+      initialHeight: 1,
+      proposerSeedFor,
+      localValidator: {
+        accountId: proposer.accountId,
+        publicKey: proposer.identity.publicKey,
+        secretKey: proposer.identity.secretKey,
+      },
+      blockProviderFor: () => HASH_A,
+      onCommit: (height) => commits.push({ height }),
+      blockIntervalMs: intervalMs,
+    });
+    driver.start();
+
+    const others = env.validators
+      .filter((v) => v.accountId !== proposer.accountId)
+      .slice(0, 2);
+    for (const kind of ['prevote', 'precommit'] as const) {
+      for (const v of others) {
+        transport.pushVote(
+          signVote({
+            kind,
+            height: 1,
+            round: 0,
+            blockHash: HASH_A,
+            validatorAccountId: v.accountId,
+            validatorPublicKey: v.identity.publicKey,
+            validatorSecretKey: v.identity.secretKey,
+          }),
+        );
+      }
+    }
+    return { driver, commits };
+  }
+
+  it('waits the interval before starting the next round', () => {
+    const clock = new FakeClock();
+    const transport = new FakeTransport();
+    const { driver, commits } = driveToCommit(clock, transport, 10_000);
+
+    assert.equal(commits.length, 1, 'block 1 committed');
+    assert.equal(driver.getCurrentHeight(), 2, 'height advanced immediately');
+
+    // Height advances at once, but the ROUND has not started. Assert on votes
+    // rather than proposals: whether this node proposes at height 2 depends on
+    // the proposer rotation, but EITHER path emits a vote once the round runs —
+    // as proposer it prevotes for its own block, as a follower its propose
+    // timeout fires and it prevotes NIL. Proposals alone would make this test
+    // depend on which validator the seed happens to select.
+    const votesBefore = transport.votesOut.length;
+
+    clock.tick(9_000);
+    assert.equal(
+      transport.votesOut.length,
+      votesBefore,
+      'still paused before the interval elapses',
+    );
+
+    // Past the interval, plus enough for the propose phase to resolve either way.
+    clock.tick(2_000);
+    clock.tick(5_000);
+    assert.ok(
+      transport.votesOut.length > votesBefore,
+      'round starts once the interval has passed',
+    );
+
+    driver.stop();
+  });
+
+  it('starts the next round immediately when no interval is set', () => {
+    const clock = new FakeClock();
+    const transport = new FakeTransport();
+    const { driver } = driveToCommit(clock, transport, 0);
+    const afterCommit = transport.votesOut.length;
+
+    // No pause: the height-2 round is already running, so its propose phase
+    // resolves on the very next tick with no interval to wait out first.
+    clock.tick(5_000);
+    assert.ok(
+      transport.votesOut.length > afterCommit,
+      'with no interval the next round is already underway',
+    );
+    driver.stop();
+  });
+
+  it('stop() cancels the pause, so a stopped node never wakes into a round', () => {
+    const clock = new FakeClock();
+    const transport = new FakeTransport();
+    const { driver } = driveToCommit(clock, transport, 10_000);
+
+    driver.stop();
+    const after = transport.votesOut.length;
+
+    clock.tick(60_000);
+    assert.equal(
+      transport.votesOut.length,
+      after,
+      'a stopped driver must not start a round when the pause fires',
+    );
+  });
+});

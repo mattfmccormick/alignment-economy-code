@@ -301,6 +301,11 @@ export interface BftBlockProducerConfig {
    * fires. See BftDriverConfig.startupDelayMs for full rationale.
    */
   startupDelayMs?: number;
+  /**
+   * Minimum gap between committing a block and starting the next round.
+   * Forwarded to BftDriver. Must be identical on every validator.
+   */
+  blockIntervalMs?: number;
 }
 
 export class BftBlockProducer {
@@ -371,6 +376,7 @@ export class BftBlockProducer {
       timeouts: config.timeouts,
       clock: config.clock,
       startupDelayMs: config.startupDelayMs,
+      blockIntervalMs: config.blockIntervalMs,
     });
   }
 

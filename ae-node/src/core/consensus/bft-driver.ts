@@ -177,6 +177,32 @@ export interface BftDriverConfig {
    * direct SQL write such as scripts/dev-bump-ph.mjs on one node only.
    */
   onApplyFailed?: (height: number, blockHash: string, err: unknown) => void;
+  /**
+   * Minimum wall-clock gap between committing one block and starting the round
+   * for the next. 0 (the default) restores the previous behaviour of starting
+   * the next round immediately.
+   *
+   * BFT had no pacing at all: onCommit advanced the height and called
+   * startRound() straight away, so a healthy two-node network produced a block
+   * roughly every 2.7 seconds whether or not anything had happened. Measured on
+   * the real chain: 30,932 blocks carrying 4 transactions, 64 MB on disk, and
+   * ~32,400 blocks a day. `blockIntervalMs` in node/config.ts looks like the
+   * knob for this but is only read on the legacy Authority path.
+   *
+   * That is not merely wasteful. A joining node has to replay every block, so
+   * if sync runs slower than blocks are produced, a node that falls behind can
+   * never catch up. The gap widens every day, which makes it the one problem
+   * that cannot be deferred.
+   *
+   * EVERY VALIDATOR MUST USE THE SAME VALUE. The pause is deliberately
+   * unconditional rather than "skip it when transactions are waiting": nodes
+   * decide that independently, so one would start proposing while another was
+   * still paused, and the early proposer's prevote timeout would fire before
+   * the paused node ever voted. Uniform pacing keeps every validator entering
+   * the round together. The cost is that a transaction waits up to one interval
+   * — the same trade Bitcoin makes at 10 minutes and Ethereum at 12 seconds.
+   */
+  blockIntervalMs?: number;
   /** Injectable wallclock-seconds for the controllers (replay window). */
   nowSec?: () => number;
 }
@@ -194,6 +220,13 @@ export class BftDriver {
   private currentRound = 0;
   private controller: RoundController | null = null;
   private pendingTimers = new Map<'propose' | 'prevote' | 'precommit', TimerId>();
+  /**
+   * Timer for the inter-block pause (blockIntervalMs). Held separately from
+   * pendingTimers because that map is keyed by round phase and is cleared at
+   * the start of every round — this one must survive until it fires, and must
+   * still be cancellable by stop().
+   */
+  private pacingTimer: TimerId | null = null;
   private running = false;
   /**
    * Lock that carries across rounds at the CURRENT height. Set when the
@@ -459,6 +492,12 @@ export class BftDriver {
       this.config.clock.clearTimeout(id);
     }
     this.pendingTimers.clear();
+    // The inter-block pause has to die with the driver too, or a stopped node
+    // wakes an interval later and starts a round it has no business in.
+    if (this.pacingTimer !== null) {
+      this.config.clock.clearTimeout(this.pacingTimer);
+      this.pacingTimer = null;
+    }
   }
 
   private onCommit(blockHash: string, cert: CommitCertificate): void {
@@ -483,6 +522,27 @@ export class BftDriver {
     this.currentRound = 0;
     this.currentLock = null;
     this.latestPolka = null;
+
+    // Pace the next round if an interval is configured.
+    //
+    // Only after a COMMIT. onAdvance (a failed round) still restarts
+    // immediately — a round that failed means something is already wrong and
+    // waiting would compound it.
+    //
+    // Clearing the controller first is what makes the pause safe: routeProposal
+    // and routeVote buffer messages whenever no controller exists, so a peer
+    // that starts its round marginally earlier does not have its proposal
+    // dropped on the floor. The buffer is replayed by startRound().
+    const interval = this.config.blockIntervalMs ?? 0;
+    if (interval > 0) {
+      this.controller = null;
+      this.pacingTimer = this.config.clock.setTimeout(() => {
+        this.pacingTimer = null;
+        if (this.running) this.startRound();
+      }, interval);
+      return;
+    }
+
     this.startRound();
   }
 

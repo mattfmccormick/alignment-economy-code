@@ -717,6 +717,10 @@ export class AENodeRunner {
       // peers who connected after. 3000ms is generous enough for
       // local + LAN deployments; production WAN may want longer.
       startupDelayMs: this.config.bftStartupDelayMs ?? 3000,
+      // AE_BLOCK_INTERVAL_MS finally applies in BFT mode. It previously only
+      // paced the legacy Authority path, so a BFT chain produced blocks as
+      // fast as consensus completed — ~2.7s, ~32,400/day, almost all empty.
+      blockIntervalMs: this.config.blockIntervalMs,
     });
     this.bftBlockProducer.start();
     logger.info('blocks', 'BFT consensus loop started');

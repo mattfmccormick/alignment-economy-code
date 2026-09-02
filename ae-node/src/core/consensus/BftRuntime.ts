@@ -67,6 +67,8 @@ export interface BftRuntimeConfig {
    * RoundController drops messages from non-current rounds).
    */
   startupDelayMs?: number;
+  /** Minimum gap between blocks. See BftDriverConfig.blockIntervalMs. */
+  blockIntervalMs?: number;
 }
 
 export class BftRuntime {
@@ -90,6 +92,7 @@ export class BftRuntime {
       onApplyFailed: config.onApplyFailed,
       timeouts: config.timeouts,
       startupDelayMs: config.startupDelayMs,
+      blockIntervalMs: config.blockIntervalMs,
     });
   }
 

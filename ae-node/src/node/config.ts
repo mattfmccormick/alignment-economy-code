@@ -108,7 +108,23 @@ export interface AENodeConfig {
   dayCycleIntervalMs: number; // how often to run the day cycle (default: 86400000 = 24h)
 
   // Block production
-  blockIntervalMs: number; // how often to produce blocks (default: 10000 = 10s)
+  /**
+   * Minimum gap between blocks, in ms. Default 10s.
+   *
+   * Applies to BOTH consensus modes. It previously paced only the legacy
+   * Authority path, so a BFT chain ignored it entirely and produced blocks as
+   * fast as rounds completed — about every 2.7 seconds, whether or not anything
+   * had happened. A real chain reached 30,932 blocks carrying 4 transactions.
+   *
+   * That is a joinability problem more than a disk one: a new node replays every
+   * block, so if sync is slower than production, a node that falls behind can
+   * never catch up, and the threshold tightens as the chain grows.
+   *
+   * EVERY VALIDATOR ON A NETWORK MUST USE THE SAME VALUE — see
+   * BftDriverConfig.blockIntervalMs for why mismatched pacing desynchronises
+   * rounds.
+   */
+  blockIntervalMs: number;
 
   // SSL
   sslCert?: string;

@@ -37,7 +37,7 @@
  * or failure).
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -172,16 +172,40 @@ async function waitForHeight(ports, minHeight) {
 
 let children = [];
 
+/**
+ * Kill one spawned node, and anything it spawned, synchronously.
+ *
+ * The previous teardown sent SIGTERM and scheduled a SIGKILL two seconds later.
+ * Neither worked reliably on Windows: SIGTERM does not take down a Node child's
+ * process tree, and the setTimeout never fired because every caller invokes
+ * process.exit() immediately afterwards. `c.killed` only records that a signal
+ * was SENT, not that anything died.
+ *
+ * So every run leaked its three nodes. They kept holding ports 4001-4003 and
+ * 9301-9303, which meant the NEXT run hit EADDRINUSE on startup and had its
+ * handshake answered by a survivor of a previous run carrying a different
+ * genesis. This test failed roughly a third of the time for reasons that had
+ * nothing to do with consensus — which made it useless for judging whether a
+ * consensus change was safe, the only reason it exists.
+ *
+ * taskkill /T takes the tree, /F forces it, and spawnSync means it has actually
+ * happened before this returns.
+ */
+function killChild(c) {
+  if (!c || c.pid === undefined) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(c.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      c.kill('SIGKILL');
+    }
+  } catch { /* already gone */ }
+}
+
 function teardown(reason) {
   log(`tearing down (${reason})`);
-  for (const c of children) {
-    try { c.kill('SIGTERM'); } catch { /* ignore */ }
-  }
-  setTimeout(() => {
-    for (const c of children) {
-      try { if (!c.killed) c.kill('SIGKILL'); } catch { /* ignore */ }
-    }
-  }, 2000);
+  for (const c of children) killChild(c);
+  children = [];
 }
 
 process.on('SIGINT', () => { teardown('SIGINT'); process.exit(130); });
