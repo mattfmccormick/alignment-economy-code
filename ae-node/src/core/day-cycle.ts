@@ -19,7 +19,6 @@ import { rebalanceVouchLocks } from '../verification/vouching.js';
 import { rebaseCourtStakes, expireCourtDeadlines } from '../court/court.js';
 import { expireOverdueAssignments } from '../mining/fifo-queue.js';
 import { runMinerTierEvaluation } from '../mining/tiers.js';
-import { getActiveMiners } from '../mining/registration.js';
 import { finalizeSupportiveTags } from '../tagging/supportive.js';
 import { finalizeAmbientTags } from '../tagging/ambient.js';
 import { logger } from '../node/logger.js';
