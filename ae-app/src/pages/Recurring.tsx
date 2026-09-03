@@ -141,13 +141,19 @@ export function Recurring() {
   async function handleSaveEdit(id: string) {
     if (!wallet?.accountId) return;
     try {
+      // editAmount is in DISPLAY units (what the user sees and types); the API
+      // and the stored row are in BASE units. Convert on the way out, exactly as
+      // handleCreate does. Before this, the edit field was seeded with the raw
+      // base-unit number and sent back unconverted, so any edit divided the
+      // transfer by 100,000,000 (audit #21).
+      const baseAmount = Number(toBaseUnits(Number(editAmount)));
       const env = signEnvelope(
-        { amount: Number(editAmount), schedule: editSchedule },
+        { amount: baseAmount, schedule: editSchedule },
         wallet.accountId,
         wallet.privateKey,
       );
       await api.updateRecurring(id, env);
-      setTransfers(prev => prev.map(t => t.id === id ? { ...t, amount: Number(editAmount), schedule: editSchedule } : t));
+      setTransfers(prev => prev.map(t => t.id === id ? { ...t, amount: baseAmount, schedule: editSchedule } : t));
       setEditingId(null);
     } catch { /* ignore */ }
   }
@@ -320,7 +326,7 @@ export function Recurring() {
                       {t.isActive ? 'Active' : 'Paused'}
                     </button>
                     <button
-                      onClick={() => { setEditingId(t.id); setEditAmount(String(t.amount)); setEditSchedule(t.schedule); }}
+                      onClick={() => { setEditingId(t.id); setEditAmount(baseUnitsToExactDisplay(String(t.amount))); setEditSchedule(t.schedule); }}
                       className="text-xs text-gray-400 hover:text-white px-2 py-1.5"
                     >
                       Edit

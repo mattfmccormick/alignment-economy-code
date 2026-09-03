@@ -5,6 +5,8 @@ interface RateEntry {
   windowStart: number;
 }
 
+// Retained for resetRateLimits (tests) and the future post-auth limiter; not
+// consulted in the request path today.
 const accountLimits = new Map<string, RateEntry>();
 const ipLimits = new Map<string, RateEntry>();
 
@@ -49,23 +51,19 @@ export function rateLimitMiddleware() {
       return;
     }
 
-    // Account limit (if authenticated)
-    const accountId = req.body?.accountId || req.params?.id;
-    if (accountId) {
-      const limit = isWrite ? WRITE_LIMIT : READ_LIMIT;
-      const key = `${accountId}:${isWrite ? 'write' : 'read'}`;
-      const acctCheck = checkLimit(accountLimits, key, limit, now);
-      if (!acctCheck.allowed) {
-        res.set('Retry-After', String(acctCheck.retryAfter));
-        res.status(429).json({
-          success: false,
-          error: { code: 'RATE_LIMITED', message: 'Too many requests', details: { retryAfter: acctCheck.retryAfter } },
-        });
-        return;
-      }
-    }
+    // The per-account limiter that used to live here was a denial-of-service
+    // vector, not a protection (audit #24). It keyed on
+    // req.body.accountId || req.params.id - both attacker-supplied and, because
+    // this middleware runs app-wide BEFORE authMiddleware, unauthenticated.
+    // Anyone could send WRITE_LIMIT writes carrying a victim accountId and lock
+    // that victim out of every write for the window, from one IP, with no
+    // signature. The key cannot be trusted pre-auth, so keeping it bought
+    // nothing; the IP limiter above is the real pre-auth defence. A genuine
+    // per-account limit belongs AFTER auth sets req.accountId, as router-level
+    // middleware - that is the follow-up.
+    void isWrite;
 
-    next();
+        next();
   };
 }
 

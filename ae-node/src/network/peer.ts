@@ -269,6 +269,23 @@ export class PeerManager extends EventEmitter {
   }
 
   private handleMessage(msg: NetworkMessage, ws: WebSocket, host: string, port: number): void {
+    // Never let a malformed message take down the process (audit #8). Handlers
+    // cast msg.data and index into it; a crafted null/number/string data field
+    // was a synchronous TypeError, and ws Receiver does not wrap the message
+    // emit, so it unwound to the process and killed the node - one packet per
+    // node was a whole-network kill. Cases still shape-check below; this is the
+    // backstop that turns any miss into a dropped message, not a dead node.
+    try {
+      this.handleMessageInner(msg, ws, host, port);
+    } catch (err) {
+      logger.warn(
+        "p2p",
+        `dropped malformed ${msg && msg.type ? msg.type : "message"}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private handleMessageInner(msg: NetworkMessage, ws: WebSocket, host: string, port: number): void {
     // parseMessage already verified the embedded signature; reject banned senders here.
     if (this.bannedKeys.has(msg.publicKey)) {
       ws.close(4002, 'banned');
@@ -307,7 +324,29 @@ export class PeerManager extends EventEmitter {
         break;
       }
       case 'peers': {
-        const peerList = msg.data as Array<{ host: string; port: number; nodeId: string }>;
+        // Authenticate, shape-check, and bound (audit #8, #18). Previously this
+        // trusted an unauthenticated message, cast it to an array, and emitted it
+        // straight to discovery, which looped over it: a non-array crashed the
+        // node, and a huge attacker array poisoned the address table and drove a
+        // dial storm every reconnect. Require a handshaked sender, a real array,
+        // a length cap, and well-shaped entries.
+        if (!this.isAuthenticatedSender(msg.publicKey, ws)) return;
+        if (!Array.isArray(msg.data)) return;
+        const MAX_PEERS_PER_MSG = 64;
+        const peerList = (msg.data as unknown[])
+          .slice(0, MAX_PEERS_PER_MSG)
+          .filter(
+            (pp): pp is { host: string; port: number; nodeId: string } =>
+              !!pp &&
+              typeof pp === 'object' &&
+              typeof (pp as { host?: unknown }).host === 'string' &&
+              (pp as { host: string }).host.length <= 255 &&
+              typeof (pp as { port?: unknown }).port === 'number' &&
+              Number.isInteger((pp as { port: number }).port) &&
+              (pp as { port: number }).port > 0 &&
+              (pp as { port: number }).port <= 65535 &&
+              typeof (pp as { nodeId?: unknown }).nodeId === 'string',
+          );
         this.emit('peers:discovered', peerList);
         break;
       }

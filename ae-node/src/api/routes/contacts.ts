@@ -113,7 +113,11 @@ export function contactRoutes(db: DatabaseSync) {
     if (q.length < 3) return res.json({ accounts: [] });
 
     const accounts = db.prepare(
-      `SELECT id, public_key, type, percent_human, earned_balance, is_active
+      // No earned_balance here (audit #27): this endpoint is unauthenticated and
+      // enumerable by a 3-char id prefix, so returning balances handed anyone a
+      // way to read them across the network. The picker needs only id, type,
+      // percent_human.
+      `SELECT id, public_key, type, percent_human, is_active
        FROM accounts WHERE id LIKE ? AND is_active = 1 LIMIT 10`
     ).all(`${q}%`) as Array<Record<string, unknown>>;
 

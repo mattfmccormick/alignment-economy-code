@@ -306,6 +306,14 @@ export function courtRoutes(db: DatabaseSync): Router {
   });
 
   // GET /court/jury-duty/:accountId - cases where this miner has jury duty.
+  //
+  // Sealed-vote rule (audit #13). This endpoint is unauthenticated, so it must
+  // not reveal any juror's vote before that case's jury has fully voted - the
+  // same rule GET /court/cases/:id already enforces. Before this fix it
+  // returned j.vote and j.voted_at unconditionally, which let anyone read a
+  // juror's choice mid-vote by hitting this route, defeating the seal the
+  // case-detail page was careful to keep. A juror's OWN duty list can still show
+  // their vote, but only once the case is decided; until then it reads 'sealed'.
   router.get('/jury-duty/:accountId', (req, res, next) => {
     try {
       const accountId = req.params.accountId as string;
@@ -317,22 +325,38 @@ export function courtRoutes(db: DatabaseSync): Router {
          WHERE j.juror_account_id = ?
          ORDER BY c.created_at DESC`
       ).all(accountId) as Array<Record<string, unknown>>;
+
+      // Per case: has every juror voted? If not, this case's votes stay sealed.
+      const allVotedByCase = new Map<string, boolean>();
+      for (const r of rows) {
+        const caseId = r.case_id as string;
+        if (allVotedByCase.has(caseId)) continue;
+        const jurors = courtStore(db).findJurorsByCase(caseId);
+        allVotedByCase.set(caseId, jurors.length > 0 && jurors.every((j) => j.vote !== null));
+      }
+
       res.json({
         success: true,
         data: {
-          assignments: rows.map((r) => ({
-            caseId: r.case_id,
-            caseType: r.type,
-            caseLevel: r.level,
-            caseStatus: r.status,
-            challengerId: r.challenger_id,
-            defendantId: r.defendant_id,
-            votingDeadline: r.voting_deadline,
-            verdict: r.verdict,
-            stakeAmount: r.stake_amount,
-            myVote: r.vote,
-            votedAt: r.voted_at,
-          })),
+          assignments: rows.map((r) => {
+            const revealed = allVotedByCase.get(r.case_id as string) === true;
+            return {
+              caseId: r.case_id,
+              caseType: r.type,
+              caseLevel: r.level,
+              caseStatus: r.status,
+              challengerId: r.challenger_id,
+              defendantId: r.defendant_id,
+              votingDeadline: r.voting_deadline,
+              verdict: r.verdict,
+              stakeAmount: r.stake_amount,
+              // Sealed until the whole jury has voted; null stays null so the UI
+              // can still tell "not yet voted" from "voted, sealed".
+              myVote: revealed ? r.vote : (r.vote === null ? null : 'sealed'),
+              votedAt: revealed ? r.voted_at : null,
+              votesRevealed: revealed,
+            };
+          }),
         },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });

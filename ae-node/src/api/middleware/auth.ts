@@ -36,6 +36,27 @@ export function authMiddleware(db: DatabaseSync) {
       return;
     }
 
+    // The payload must be PRESENT and an object, even when empty (audit #15).
+    //
+    // Before this, an absent payload was silently treated as a signature over
+    // {} (`verifyPayload(payload || {}, ...)`). A caller could sign {}, omit
+    // the payload entirely, and pass — while route handlers that read a
+    // parameter out of req.body rather than out of the signed payload then
+    // acted on UNSIGNED data. Requiring a present object closes that: an empty
+    // payload is still fine (some routes legitimately sign {}), but it must be
+    // sent explicitly as `payload: {}`, so what the route sees is what was
+    // signed. Every first-party client already sends the payload object.
+    if (payload === undefined || payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: 'AUTH_MISSING_PAYLOAD',
+          message: 'Request must include a signed `payload` object (send {} if there are no parameters)',
+        },
+      });
+      return;
+    }
+
     // Replay protection: reject timestamps > 5 minutes old
     const now = Math.floor(Date.now() / 1000);
     if (Math.abs(now - timestamp) > 300) {
@@ -55,11 +76,35 @@ export function authMiddleware(db: DatabaseSync) {
       return;
     }
 
-    const valid = verifyPayload(payload || {}, timestamp, signature, account.publicKey);
+    const valid = verifyPayload(payload, timestamp, signature, account.publicKey);
     if (!valid) {
       res.status(401).json({
         success: false,
         error: { code: 'AUTH_INVALID', message: 'Invalid signature' },
+      });
+      return;
+    }
+
+    // Reject a transaction signature reused as an auth envelope (audit #3).
+    //
+    // signPayload/verifyPayload sign JSON.stringify(payload)+timestamp with no
+    // domain tag, and transactions sign the same way, so a signature that
+    // authorises a PAYMENT also verifies here as a login for any auth-gated
+    // route within the 5-minute window. A transaction payload is uniquely
+    // shaped — from + to + amount + pointType together — and no legitimate auth
+    // payload carries that shape, so refusing it blocks the crossover without
+    // touching the transaction path or any client. (Publishing signatures was
+    // the other half and is fixed separately; full domain separation, which
+    // binds a per-purpose tag into the signed bytes across the node and both
+    // apps, is the complete fix and is tracked in CLAUDE.md.)
+    const pl = (payload ?? {}) as Record<string, unknown>;
+    if ('from' in pl && 'to' in pl && 'amount' in pl && 'pointType' in pl) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: 'AUTH_TX_SIGNATURE_REUSE',
+          message: 'A transaction signature cannot be used to authenticate a request',
+        },
       });
       return;
     }

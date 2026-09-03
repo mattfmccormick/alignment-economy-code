@@ -7,7 +7,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { v4 as uuid } from 'uuid';
-import { verifyPayload } from './crypto.js';
+import { verifyPayload, sha256 } from './crypto.js';
 import { TRANSACTION_FEE_RATE, FEE_DENOMINATOR } from './constants.js';
 import { getAccount, updateBalance, accountStore } from './account.js';
 import { addToFeePool } from './fee-pool.js';
@@ -403,6 +403,22 @@ export function replayTransaction(
  * is exactly what a blockchain is for; doing the work before the ordering
  * exists gives it away.
  */
+/**
+ * Transaction id derived from the SENDER'S SIGNATURE.
+ *
+ * A replay resubmits the captured signature bytes verbatim, so hashing them
+ * yields the same id and the duplicate is rejected. A genuinely re-issued
+ * payment is signed afresh, and ML-DSA-65 signing is randomised (two signatures
+ * over identical bytes differ), so it gets a different id and is allowed -
+ * including two identical-amount payments to the same person in the same
+ * second, which a payload+timestamp hash would have wrongly rejected as a
+ * replay. This keys dedup on exactly the artifact a replay reuses.
+ */
+export function deriveTxId(signature: string): string {
+  return sha256(`ae.txid.v1
+${signature}`);
+}
+
 export function processTransaction(
   db: DatabaseSync,
   input: TransactionInput,
@@ -498,7 +514,25 @@ export function processTransaction(
   const netAmount = effectiveAmount - fee;
   const burnedUnverified = input.amount - effectiveAmount;
 
-  const txId = uuid();
+  // Deterministic id derived from the signed content, NOT a random uuid.
+  //
+  // Replay protection (audit #2). The signed message is
+  // JSON.stringify(payload) + timestamp; hashing it (plus `from`, already in
+  // payload but included explicitly for clarity) yields an id that is identical
+  // for identical signed bytes. A replayed transaction therefore collides on
+  // this id and is rejected below, rather than minting a second row under a
+  // fresh uuid the way it used to. Two DISTINCT legitimate payments differ in
+  // timestamp (seconds) or any field, so they still get distinct ids; the only
+  // thing this rejects is a byte-identical resubmission. A per-account nonce
+  // (documented as the deeper fix) would also separate two identical payments
+  // within the same second, which this does not.
+  const txId = deriveTxId(input.signature);
+  if (transactionStore(db).hasTransaction(txId)) {
+    throw new ValidationError(
+      'Duplicate transaction: these exact signed bytes were already submitted',
+      'DUPLICATE_TRANSACTION',
+    );
+  }
   const now = input.timestamp;
   const senderField = BALANCE_FIELD_MAP[input.pointType];
   const newSenderBalance = senderBalance - input.amount;

@@ -9,6 +9,7 @@ import {
 import { deriveAccountId } from '../../core/crypto.js';
 import { queueAccountRegistration } from '../../core/account-registration.js';
 import { transactionStore } from '../../core/transaction.js';
+import type { TransactionRow } from '../../core/stores/ITransactionStore.js';
 import { getCycleState } from '../../core/day-cycle.js';
 import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
@@ -188,7 +189,13 @@ export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroa
       res.json({
         success: true,
         data: {
-          transactions: txs,
+          // Strip signature and receiverSignature (audit #2/#3). A transaction
+          // signature is a valid ML-DSA signature over the sender's payload, and
+          // because the auth scheme signs the same way, publishing it here handed
+          // anyone a replayable transaction AND, within the 5-minute auth window,
+          // a usable login token for the signer. Nothing legitimate needs these
+          // over the API; the chain keeps them, the client never re-reads them.
+          transactions: txs.map(publicTx),
           total,
           page,
           limit,
@@ -320,6 +327,16 @@ export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroa
   });
 
   return router;
+}
+
+// Transaction as exposed over the API: everything the client legitimately
+// needs, minus the two signature fields. See the call site for why publishing
+// them is a live exploit rather than merely untidy.
+function publicTx(tx: TransactionRow): Record<string, unknown> {
+  const { signature: _s, receiverSignature: _r, ...rest } = tx;
+  void _s;
+  void _r;
+  return rest;
 }
 
 function serializeAccount(acct: NonNullable<ReturnType<typeof getAccount>>) {

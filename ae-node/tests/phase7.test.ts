@@ -178,46 +178,32 @@ describe('Phase 7: API Layer', () => {
     db.close();
   });
 
-  // Test 4: Rate limiting
-  it('returns 429 when rate limit exceeded', async () => {
+  // Test 4: Rate limiting.
+  //
+  // The per-account write limiter that this used to exercise was removed (audit
+  // #24): it keyed on an unauthenticated body field, so it throttled the victim
+  // named in the body, not the caller - a griefing vector, not a protection.
+  // The IP limiter is the real pre-auth defence, so this now exercises that:
+  // enough cheap GETs from one client trip IP_LIMIT and return 429.
+  it('returns 429 when the IP request limit is exceeded', async () => {
     const db = freshDb();
     const app = createApp(db);
     resetRateLimits();
 
-    const sender = createAccount(db, 'individual', 1, 100);
-    updateBalance(db, sender.account.id, 'active_balance', pts(1000000));
-    const receiver = createAccount(db, 'individual', 1, 100);
-
+    // IP_LIMIT is 200/min in the middleware. Fire past it against a cheap read.
     let hitLimit = false;
-    for (let i = 0; i < 25; i++) {
-      const storageAmt = pts(1);
-      const internalPayload = {
-        from: sender.account.id,
-        to: receiver.account.id,
-        amount: storageAmt.toString(),
-        pointType: 'active',
-        isInPerson: false,
-        recipientIsHuman: false,
-        memo: '',
-      };
-      const timestamp = Math.floor(Date.now() / 1000) + i;
-      const signature = signPayload(internalPayload, timestamp, sender.privateKey);
-
-      const { status, data } = await request(app, 'POST', '/api/v1/transactions', {
-        accountId: sender.account.id,
-        timestamp,
-        signature,
-        payload: { to: receiver.account.id, amount: storageAmt.toString(), pointType: 'active', isInPerson: false, recipientIsHuman: false, memo: '' },
-      });
-
+    let lastCode: string | undefined;
+    for (let i = 0; i < 260; i++) {
+      const { status, data } = await request(app, 'GET', '/api/v1/health', undefined);
       if (status === 429) {
         hitLimit = true;
-        assert.ok(data.error.code === 'RATE_LIMITED');
+        lastCode = data.error.code;
         break;
       }
     }
 
-    assert.ok(hitLimit, 'Should have hit rate limit within 25 requests');
+    assert.ok(hitLimit, 'Should have hit the IP rate limit');
+    assert.equal(lastCode, 'RATE_LIMITED');
 
     db.close();
   });
