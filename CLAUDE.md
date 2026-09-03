@@ -1434,7 +1434,21 @@ then chain-order the operation until it passes. That is a red-green loop now,
 not a leap of faith.
 
 1. **percentHuman and value are not chain state (#4, critical) and neither are
-   tags (#16) — the "state must come only from the chain" cluster.** This is one
+   tags (#16) — the "state must come only from the chain" cluster.**
+
+   **Progress: vouch operations are now chain-ordered (commit d11ea11 + 9ad4b74).**
+   A vouch moved the voucher's locked balance (and, on withdrawal, the vouched
+   account's percentHuman) node-locally, forking the ledger. Vouch create and
+   withdraw now ride a block as signed operations - deterministic id, block
+   timestamp, folded into the block hash, applied at commit on every node -
+   mirroring account-registration/validator-change. The wallet and miner sign
+   the op client-side. Proven by tests/vouch-operation-determinism.test.ts and
+   the 3-validator LAN test (which now submits a vouch and requires the locked
+   balance + state root identical on all three nodes). Use
+   verification/vouch-operation.ts as the template for the rest.
+
+   **Remaining in the cluster:** panels and tags, then re-derive value.
+   This is one
    architectural change, not several. `replayTransaction` /
    `acceptPendingTransaction` take `fee` / `netAmount` off the wire and apply
    them verbatim; only `processTransaction` on the origin node re-derives them
