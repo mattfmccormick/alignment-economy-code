@@ -65,6 +65,11 @@ export interface CreateAppOptions {
    * API server. Omitted for single-node/Authority setups.
    */
   getPeerCount?: () => number;
+  /**
+   * Gossip a signed vouch operation to peers so every node queues it for the
+   * next block (audit #4/#16). Runner provides it in BFT mode; omitted otherwise.
+   */
+  vouchOpBroadcaster?: (op: unknown) => void;
 }
 
 export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
@@ -95,7 +100,7 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
   app.use('/api/v1', healthRoutes(db, opts.nodeIdentity, opts.getPeerCount));
   app.use('/api/v1/admin', adminRoutes(db));
   app.use('/api/v1/contacts', contactRoutes(db));
-  app.use('/api/v1/miners', minerRoutes(db));
+  app.use('/api/v1/miners', minerRoutes(db, opts.vouchOpBroadcaster));
   app.use('/api/v1/recurring', recurringRoutes(db));
   app.use('/api/v1/verification', verificationRoutes(db));
   app.use('/api/v1/court', courtRoutes(db));

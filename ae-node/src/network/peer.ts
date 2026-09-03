@@ -86,6 +86,7 @@ export class PeerManager extends EventEmitter {
   private seenBlocks = new Set<string>();
   private seenTx = new Set<string>();
   private seenAccounts = new Set<string>();
+  private seenVouchOps = new Set<string>();
   private seenProposals = new Set<string>();
   private seenVotes = new Set<string>();
   private maxPeers: number;
@@ -453,6 +454,19 @@ export class PeerManager extends EventEmitter {
         if (!this.markSeenAndAccept(this.seenAccounts, accountId, 5000)) return;
         this.emit('account:received', msg.data, msg.senderId);
         this.relayGossip('new_account', msg.data, msg.senderId);
+        break;
+      }
+      case 'new_vouch_op': {
+        // Signed vouch operations gossip to every node's QUEUE (not applied on
+        // receipt - they apply deterministically at block commit) so the next
+        // proposer, whoever it is, includes them, instead of waiting for the
+        // submitting node's own turn. Authenticated + deduped like the others.
+        if (!this.isAuthenticatedSender(msg.publicKey, ws)) return;
+        const op = msg.data as { voucherId?: string; signature?: string };
+        const key = String(op?.signature ?? '');
+        if (!key || !this.markSeenAndAccept(this.seenVouchOps, key, 5000)) return;
+        this.emit('vouch_op:received', msg.data, msg.senderId);
+        this.relayGossip('new_vouch_op', msg.data, msg.senderId);
         break;
       }
       case 'get_blocks': {

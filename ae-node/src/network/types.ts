@@ -49,6 +49,7 @@ export type MessageType =
   // its transactions. Same gossip discipline as new_transaction: authenticated
   // sender, dedupe by id, relay onward.
   | 'new_account'
+  | 'new_vouch_op'
   | 'get_blocks'
   | 'blocks'
   | 'ping'

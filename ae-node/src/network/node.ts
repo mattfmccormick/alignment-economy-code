@@ -3,6 +3,12 @@ import { WebSocketServer } from 'ws';
 import { createServer, type Server } from 'http';
 import { PeerManager } from './peer.js';
 import { Mempool } from './mempool.js';
+import {
+  verifyVouchOperation,
+  enqueueVouchOperation,
+  type VouchOperation,
+} from '../verification/vouch-operation.js';
+import { getAccount } from '../core/account.js';
 import { AuthorityConsensus } from './consensus.js';
 import type { IConsensusEngine } from '../core/consensus/IConsensusEngine.js';
 import { BFTConsensus } from '../core/consensus/BFTConsensus.js';
@@ -211,11 +217,36 @@ export class AENode {
         );
       }
     });
+
+    // Gossiped vouch operations: verify the voucher's signature, then QUEUE it
+    // (do not apply on receipt - it applies deterministically at block commit).
+    // This lets the next proposer, whoever it is, include the op, instead of it
+    // waiting for the submitting node's own turn to propose.
+    this.peerManager.on('vouch_op:received', (data: unknown) => {
+      try {
+        const op = data as VouchOperation;
+        const voucher = op?.voucherId ? getAccount(this.db, op.voucherId) : null;
+        if (!voucher) return;
+        if (!verifyVouchOperation(op, voucher.publicKey)) {
+          logger.warn('p2p', 'Rejected gossiped vouch op: signature does not verify');
+          return;
+        }
+        enqueueVouchOperation(this.db, op);
+        logger.info('p2p', `Queued gossiped vouch op from ${op.voucherId.slice(0, 12)}…`);
+      } catch (err) {
+        logger.warn('p2p', `Rejected gossiped vouch op: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   }
 
   /** Broadcast a newly created account so every peer can replay its txs. */
   broadcastAccount(reg: PeerAccountRegistration): void {
     this.peerManager.broadcast('new_account', reg as unknown as Record<string, unknown>);
+  }
+
+  /** Gossip a signed vouch operation so every node queues it for the next block. */
+  broadcastVouchOp(op: VouchOperation): void {
+    this.peerManager.broadcast('new_vouch_op', op as unknown as Record<string, unknown>);
   }
 
   /** Start the P2P WebSocket server and connect to the network */

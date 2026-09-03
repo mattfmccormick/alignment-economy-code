@@ -20,7 +20,7 @@ import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
 import { v4 as uuid } from 'uuid';
 
-export function minerRoutes(db: DatabaseSync) {
+export function minerRoutes(db: DatabaseSync, vouchOpBroadcaster?: (op: unknown) => void) {
   const router = Router();
 
   // POST /miners/register - register as a miner. Auth-required: only the
@@ -135,6 +135,7 @@ export function minerRoutes(db: DatabaseSync) {
       return res.status(400).json({ success: false, error: { code: 'OP_NOT_APPLICABLE', message: problem } });
     }
     enqueueVouchOperation(db, op);
+    vouchOpBroadcaster?.(op);
     return res.json({
       success: true,
       data: { status: 'pending', vouchId: deriveVouchId(op) },
@@ -228,6 +229,7 @@ export function minerRoutes(db: DatabaseSync) {
     }
     try {
       enqueueVouchOperation(db, op);
+      vouchOpBroadcaster?.(op);
       return res.json({
         success: true,
         data: {
