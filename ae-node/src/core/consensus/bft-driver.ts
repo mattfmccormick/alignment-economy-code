@@ -41,8 +41,19 @@ const DEFAULT_TIMEOUT_SCALING: TimeoutScaling = {
 
 const DEFAULT_BASE_TIMEOUTS: TimeoutConfig = {
   propose: 3000,
-  prevote: 1000,
-  precommit: 1000,
+  // Prevote/precommit raised from 1000ms (audit #1 residual). At startup nodes
+  // enter round 0 staggered (they boot sequentially, and their startup-delay
+  // timers fire at different wall-clock moments). With a 1000ms prevote timeout
+  // the FIRST node to start times out and precommits NIL before the slower nodes
+  // have prevoted, so it never sees the polka and never locks - the asymmetric
+  // lock the re-propose fix then has to recover from, sometimes past the
+  // deadline. A longer window lets the staggered prevotes land first, so all
+  // nodes see the same polka and lock together on round 0, the clean path the
+  // chain already takes on every later height. The cost is paid only when a
+  // round genuinely fails (rare after startup), and 2500ms is still small
+  // against the 10s block interval.
+  prevote: 2500,
+  precommit: 2500,
 };
 
 /**
