@@ -1417,6 +1417,22 @@ is a large, correctness-critical change that must be built and validated as its
 own unit (the way the deadlock fix was), not rushed inside a sweep. The interim
 mitigations already applied are noted.
 
+**The validation path now exists.** The blocker for the #4 / #16 cluster was
+never the code, it was that nothing could prove a cross-node determinism change
+correct. That gap is closed:
+- `scripts/test-lan-multi-validator.mjs` now submits a real transfer between
+  validators, confirms every node credits the recipient identically, and
+  asserts all nodes agree on the recorded state root (not just the block hash,
+  which never covered account state - the blind spot that hid these findings).
+- `tests/tx-replay-determinism.test.ts` pins the same property fast and in CI:
+  two independent node databases replaying one transaction reach identical
+  state roots.
+So the way to build the cluster safely is: extend the LAN harness to trigger a
+percentHuman change (a vouch, then a panel) across nodes and require the roots
+to still converge; make the change fail that assertion first (node-local write),
+then chain-order the operation until it passes. That is a red-green loop now,
+not a leap of faith.
+
 1. **percentHuman and value are not chain state (#4, critical) and neither are
    tags (#16) — the "state must come only from the chain" cluster.** This is one
    architectural change, not several. `replayTransaction` /
