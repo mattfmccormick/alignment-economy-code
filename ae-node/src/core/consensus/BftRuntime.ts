@@ -33,7 +33,7 @@ export interface BftRuntimeConfig {
   /** Per-height seed for proposer selection (typically previous block hash). */
   proposerSeedFor: (height: number) => string;
   /** When local is the proposer, returns the blockHash to put up for vote. */
-  blockProviderFor: (height: number, round: number) => string;
+  blockProviderFor: (height: number, round: number, lockedHash?: string) => string;
   /**
    * Optional content-validation gate (Session 45). Forwarded to the
    * driver and on to each round's RoundController. Without it the

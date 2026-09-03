@@ -362,7 +362,7 @@ export class BftBlockProducer {
         const parent = blockStore(this.db).findByNumber(h - 1);
         return parent?.hash ?? '';
       },
-      blockProviderFor: (h, _r) => this.buildCandidateBlock(h),
+      blockProviderFor: (h, r, lockedHash) => this.provideBlock(h, r, lockedHash),
       // Content-validation gate (Session 45). The stash holds the only
       // local view of a candidate block's content (timestamp, txs, etc).
       // If a hash isn't in the stash the controller votes NIL — same
@@ -556,6 +556,60 @@ export class BftBlockProducer {
    * content, returns the hash to the round controller for inclusion
    * in the proposal.
    */
+  /**
+   * Choose what block to propose for (height, round): the value this node is
+   * LOCKED on if it holds a lock, otherwise a fresh candidate.
+   *
+   * This is the missing half of Tendermint's locking rule (audit #1). The vote
+   * side already downgrades a prevote/precommit to NIL whenever the proposed
+   * hash differs from the lock, but the PROPOSE side ignored the lock and always
+   * built a fresh block - and buildCandidateBlock stamps a new Date.now()
+   * timestamp, so every round produced a different hash. A locked validator then
+   * voted NIL on every proposal forever, no prevote quorum could form on any
+   * value, the sole unlock path (a polka at a higher round) was unreachable, and
+   * the height deadlocked in silence. That is the 3-node LAN "all nodes quiet for
+   * 90s" flake.
+   *
+   * Re-proposing the locked value is always safe: a lock is only ever taken on a
+   * value that already saw a prevote quorum (a polka), i.e. a value 2/3 of the
+   * set found valid. Re-serving it can only help THAT value commit; it can never
+   * cause a different value to commit, so it cannot fork. Worst case (two nodes
+   * locked on different values across rounds) it does not resolve on its own -
+   * that needs the full valid-value / POL-round rule, which is a wire-format
+   * change tracked separately - but it strictly improves liveness and never
+   * risks safety.
+   */
+  private provideBlock(height: number, _round: number, lockedHash?: string): string {
+    if (lockedHash) {
+      const payload = this.stash.get(lockedHash);
+      if (payload) {
+        // Re-broadcast the stashed content so any peer that evicted it can
+        // still validate and prevote, then propose the same hash. Same
+        // broadcast shape buildCandidateBlock uses.
+        this.peerManager.broadcast(
+          'new_block',
+          { ...serializeBlock(payload as unknown as Record<string, unknown>) } as Record<
+            string,
+            unknown
+          >,
+        );
+        logger.info(
+          'bft',
+          `re-proposing locked block ${lockedHash.slice(0, 10)}… at height ${height} instead of a fresh candidate`,
+        );
+        return lockedHash;
+      }
+      // Locked on a hash we cannot serve (should not happen - we stash every
+      // candidate we see). Building fresh is safer than proposing a hash no
+      // peer can validate from us.
+      logger.warn(
+        'bft',
+        `locked on ${lockedHash.slice(0, 10)}… but its payload is not stashed; building a fresh candidate`,
+      );
+    }
+    return this.buildCandidateBlock(height);
+  }
+
   private buildCandidateBlock(height: number): string {
     const latest = getLatestBlock(this.db);
     const previousHash = latest?.hash ?? '0'.repeat(64);

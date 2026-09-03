@@ -108,7 +108,11 @@ export interface BftDriverConfig {
    * blockHash to put up for vote. The driver invokes this on every
    * round where local is selected as proposer.
    */
-  blockProviderFor?: (height: number, round: number) => string;
+  // The third argument is the hash this node is currently LOCKED on at this
+  // height, if any. A locked proposer must re-propose its lock rather than mint
+  // a fresh block, or the height can deadlock (audit #1). Undefined when not
+  // locked.
+  blockProviderFor?: (height: number, round: number, lockedHash?: string) => string;
   /**
    * Optional content-validation gate (Session 45). Forwarded to each
    * round's RoundController. When set, validators downgrade to NIL on
@@ -343,7 +347,12 @@ export class BftDriver {
       proposerSeed: this.config.proposerSeedFor(this.currentHeight),
       localValidator: this.config.localValidator,
       blockProvider: this.config.blockProviderFor
-        ? () => this.config.blockProviderFor!(this.currentHeight, this.currentRound)
+        ? () =>
+            this.config.blockProviderFor!(
+              this.currentHeight,
+              this.currentRound,
+              this.currentLock?.blockHash,
+            )
         : undefined,
       timeouts: this.computeRoundTimeouts(),
       nowSec: this.config.nowSec,
