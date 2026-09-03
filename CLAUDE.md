@@ -29,7 +29,14 @@ locked block. The LAN 3-validator test went from ~1/3 failing to 15/15 green,
 with the 2-node canary still clean.
 
 **Fixed and pushed this session (24 of 28):**
-- Consensus: the deadlock (#1); a committed block with no local content now
+- Consensus: the deadlock (#1) - a locked proposer now re-proposes its locked
+  value AND the early-round prevote/precommit timeouts were raised from 1000ms to
+  2500ms, which together took the 3-node startup deadlock from ~1-in-3 to 0 in 13
+  consecutive LAN runs (the residual was the startup stagger: the first node
+  timed out and precommitted NIL before the staggered later nodes prevoted). At
+  n=3 (quorum = n = unanimity) this is the pragmatic fix; n>=4 gets true fault
+  tolerance and the full valid-value/POL rule remains the deeper large-set work.
+  Also: a committed block with no local content now
   halts loudly instead of writing a chain hole (#23); catch-up sync no longer
   strips signature fields (#14).
 - Determinism / forks: the daily mint no longer reads the node-local miners
