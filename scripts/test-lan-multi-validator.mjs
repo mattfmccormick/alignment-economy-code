@@ -141,6 +141,83 @@ async function getNetworkStatus(apiPort) {
   return r.data ?? r;
 }
 
+async function getAccount(apiPort, accountId) {
+  try {
+    const r = await fetchJson(`http://127.0.0.1:${apiPort}/api/v1/accounts/${accountId}`);
+    return r.data ?? r;
+  } catch {
+    return null;
+  }
+}
+
+// Sign and submit an earned-point transfer between two genesis validators, so
+// the convergence checks below run on state that transactions actually moved -
+// not just the static genesis + mint state. Uses the node's own compiled
+// signPayload so the bytes match exactly what the node verifies.
+async function submitValidatorTransfer(apiPort, fromKs, toKs, amountBaseUnits) {
+  const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
+  const { signPayload } = await import(cryptoUrl);
+  const timestamp = Math.floor(Date.now() / 1000);
+  // The SIGNED payload is the 7-key internal form (includes from); the WIRE
+  // payload drops from (it is the top-level accountId). Mirror Send.tsx.
+  const internal = {
+    from: fromKs.accountId,
+    to: toKs.accountId,
+    amount: String(amountBaseUnits),
+    pointType: 'earned',
+    isInPerson: false,
+    recipientIsHuman: false,
+    memo: '',
+  };
+  const signature = signPayload(internal, timestamp, fromKs.account.privateKey);
+  const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: fromKs.accountId,
+      timestamp,
+      signature,
+      payload: {
+        to: internal.to,
+        amount: internal.amount,
+        pointType: 'earned',
+        isInPerson: false,
+        recipientIsHuman: false,
+        memo: '',
+      },
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+}
+
+async function waitForRecipientCredit(ports, accountId, minBalance, deadlineMs = 30000) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const balances = [];
+    for (const port of ports) {
+      const a = await getAccount(port, accountId);
+      balances.push(a ? BigInt(a.earnedBalance ?? '0') : 0n);
+    }
+    if (balances.every((b) => b >= minBalance)) return balances;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return null;
+}
+
+async function getStateRootAt(apiPort, height) {
+  // Recorded per-block state root (schema v16). Returns null if the node has
+  // not recorded one at this height (older block) or does not have the height.
+  try {
+    const r = await fetchJson(
+      `http://127.0.0.1:${apiPort}/api/v1/network/state-root?height=${height}`,
+    );
+    return r.data?.stateRoot ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function getLatestBlock(apiPort) {
   const r = await fetchJson(`http://127.0.0.1:${apiPort}/api/v1/network/blocks?limit=1`);
   const blocks = r.data?.blocks ?? r.blocks ?? [];
@@ -266,6 +343,34 @@ async function main() {
   }
   log(`heights converged: [${heights.join(', ')}]`);
 
+  // 4b. Move real value, so the convergence checks below exercise the
+  // transaction apply path on every node (not just genesis + mint). Validators
+  // hold spendable earned points (initialEarned minus stake), so validator 0
+  // sends some to validator 1. If any node applied the transfer differently -
+  // the class of bug this audit kept finding - the state roots diverge below.
+  const AMOUNT = 10n * 100000000n; // 10 points at PRECISION 10^8
+  const before = await getAccount(apiPorts[0], keystores[1].accountId);
+  const beforeBal = before ? BigInt(before.earnedBalance ?? '0') : 0n;
+  log(`submitting transfer: validator 0 -> validator 1, 10 earned points`);
+  const submit = await submitValidatorTransfer(apiPorts[0], keystores[0], keystores[1], AMOUNT);
+  if (!submit.ok) {
+    teardown('tx submit failed');
+    err(`transfer POST failed: HTTP ${submit.status} ${JSON.stringify(submit.body)}`);
+    process.exit(6);
+  }
+  // Recipient credit is net of fee, so require strictly greater than before by
+  // a positive margin (any credit proves the tx applied on that node).
+  const credited = await waitForRecipientCredit(apiPorts, keystores[1].accountId, beforeBal + 1n);
+  if (!credited) {
+    teardown('tx not applied on all nodes');
+    err('transfer did not credit the recipient on all nodes within the deadline');
+    process.exit(6);
+  }
+  log(`transfer applied on all nodes; recipient earned balances: [${credited.join(', ')}]`);
+  // Let a couple more blocks commit so all nodes have recorded a post-transfer
+  // state root at a common height.
+  await waitForHeight(apiPorts, Math.min(...heights) + 2);
+
   // 5. Compare latest block hashes via /network/blocks?limit=1.
   // Heights matching is necessary but not sufficient — same chain means
   // the SAME block at the same height. Hash divergence here means the
@@ -303,6 +408,37 @@ async function main() {
     teardown('hash divergence');
     err(`nodes disagree on block hash at height ${minMutualHeight}: ${[...distinctHashes].join(' vs ')}`);
     process.exit(4);
+  }
+
+  // State-root convergence (the check block-hash comparison cannot make).
+  //
+  // Block hashes cover transactions (via the merkle root) but NOT the account
+  // state those transactions produce - the state root is deliberately not
+  // folded into the block hash yet. So two nodes can agree on every block hash
+  // while their ledgers have silently diverged (different balances, different
+  // percentHuman, a fee pool paid to different miners). That is exactly the
+  // determinism class this audit kept finding, and the reason "the LAN test was
+  // lying": it only ever compared block hashes. Now it also compares the
+  // recorded state root at the common height and fails on a mismatch.
+  const roots = [];
+  for (const port of apiPorts) roots.push(await getStateRootAt(port, minMutualHeight));
+  log(`state root at height ${minMutualHeight}: ${roots.map((r) => (r ? r.slice(0, 16) + '…' : '(none)')).join(' / ')}`);
+  const recordedRoots = roots.filter(Boolean);
+  if (recordedRoots.length >= 2) {
+    const distinctRoots = new Set(recordedRoots);
+    if (distinctRoots.size > 1) {
+      teardown('state root divergence');
+      err(
+        `nodes agree on block hash but DISAGREE on state root at height ${minMutualHeight} - ` +
+          `the ledger has forked: ${[...distinctRoots].map((r) => r.slice(0, 16) + '…').join(' vs ')}`,
+      );
+      process.exit(5);
+    }
+    log(`state roots match across ${recordedRoots.length} node(s) at height ${minMutualHeight}`);
+  } else {
+    // Not a failure: on a very young chain the common height may predate
+    // state-root recording on some node. Say so rather than claim convergence.
+    log('state-root check skipped: fewer than 2 nodes recorded a root at the common height');
   }
 
   log('PASS: 3-validator BFT chain advanced past min height with matching hashes');
