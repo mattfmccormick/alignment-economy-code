@@ -43,7 +43,11 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { signPayload, deriveAccountId } from '../core/crypto.js';
+import { deriveAccountId } from '../core/crypto.js';
+import {
+  signValidatorChangeRegister,
+  signValidatorChangeDeregister,
+} from '../core/consensus/validator-change.js';
 import { MIN_VALIDATOR_STAKE } from '../core/consensus/registration.js';
 import { PRECISION } from '../core/constants.js';
 
@@ -66,6 +70,11 @@ interface ParsedArgs {
 }
 
 const MIN_STAKE_DISPLAY = Number(MIN_VALIDATOR_STAKE) / Number(PRECISION);
+
+/** Display points -> fixed-precision base units, the unit the protocol uses. */
+function stakeFixed(displayPoints: number): bigint {
+  return BigInt(Math.round(displayPoints * Number(PRECISION)));
+}
 
 function usage(): never {
   console.error(`Usage: npm run validator:register -- --keystore <file> --node <url> [options]
@@ -248,7 +257,7 @@ async function preflight(node: string, accountId: string, deregister: boolean, s
     const data = (acct.body as { data?: Record<string, unknown> })?.data ?? {};
     const earnedRaw = data.earnedBalance;
     const earned = typeof earnedRaw === 'string' ? BigInt(earnedRaw) : null;
-    const wanted = BigInt(Math.round(stake * Number(PRECISION)));
+    const wanted = stakeFixed(stake);
 
     if (wanted < MIN_VALIDATOR_STAKE) {
       problems.push(
@@ -311,26 +320,54 @@ async function main(): Promise<void> {
     console.log('');
   }
 
-  // The auth middleware verifies sign(JSON.stringify(payload) + timestamp).
-  // JSON.stringify is NOT canonicalised, so the object sent must be byte-for-
-  // byte the object signed - same keys, same insertion order. Building it once
-  // and reusing the reference is what guarantees that; constructing a "same
-  // shape" object for the wire is how this breaks.
+  // POST to /propose-{register,deregister}, NOT to /{register,deregister}.
+  //
+  // This distinction is the whole correctness of this tool and it is not
+  // obvious from the route names.
+  //
+  //   /register        calls registerValidator() directly. That does three
+  //                    purely LOCAL writes - debit earned, credit locked,
+  //                    INSERT into the validators table - inside one
+  //                    runTransaction. It never enqueues, never gossips, never
+  //                    rides a block. The receiving node's validator set now
+  //                    differs from every peer's.
+  //   /propose-register  enqueues a signed ValidatorChange that the proposer
+  //                    drains into block.validatorChanges, so every node
+  //                    applies it from the chain.
+  //
+  // Calling the local one against an active validator halts the chain almost
+  // immediately: that node's quorumCount jumps (floor(2n/3)+1 with n now one
+  // larger) while its peers' does not, so it demands more prevotes than can
+  // exist and precommits NIL forever. Nothing reports an error, because the
+  // state root that would notice the divergence is diagnostic only.
+  //
+  // Signed with the protocol's own signValidatorChange* helper rather than a
+  // hand-built payload, so the canonical bytes match what verifyValidatorChange
+  // recomputes on the far side.
   const timestamp = Math.floor(Date.now() / 1000);
-  const payload = args.deregister
-    ? {}
-    : {
-        stake: args.stake,
+  const change = args.deregister
+    ? signValidatorChangeDeregister({
+        accountId,
+        timestamp,
+        accountPrivateKey: ks.account.privateKey,
+      })
+    : signValidatorChangeRegister({
+        accountId,
         nodePublicKey: ks.publicKey,
         vrfPublicKey: ks.vrf.publicKey,
-      };
-  const signature = signPayload(payload, timestamp, ks.account.privateKey);
+        // Base-10 string of the fixed-precision bigint. The route parses it
+        // with BigInt() and compares against MIN_VALIDATOR_STAKE directly, so
+        // display units here would be wrong by a factor of 10^8.
+        stake: stakeFixed(args.stake).toString(),
+        timestamp,
+        accountPrivateKey: ks.account.privateKey,
+      });
 
-  const url = `${args.node}/api/v1/validators/${action}`;
+  const url = `${args.node}/api/v1/validators/propose-${action}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId, timestamp, signature, payload }),
+    body: JSON.stringify({ change }),
     signal: AbortSignal.timeout(30_000),
   });
   const body = (await res.json().catch(() => null)) as

@@ -571,14 +571,16 @@ started" and then go completely silent for the full 90 seconds. Never a partial
 commit, never a stalled height, never an error. So this is not the deadline
 being too tight; round 0 never produces a block and no later round recovers,
 even though propose/prevote/precommit timeouts (3s/1s/1s, scaling per round)
-should burn through dozens of rounds in the remaining 78 seconds. That reads as
-the nodes never meshing rather than as a consensus-logic stall, and peer
-connections are not logged at info level, so the current logs cannot tell the
-two apart. **Next step is logging peer connect/disconnect at info, not tuning a
-timeout.**
+should burn through dozens of rounds in the remaining 78 seconds. **That diagnosis was wrong.** I guessed "the nodes never meshed" because peer
+connections are not logged and I could not see past that. An adversarial audit
+later the same day found the real cause, and it is a consensus bug, not a
+networking one: a validator can lock on a block hash that no future proposer
+ever re-proposes, and the lock can never be broken. See "Pre-launch risk audit"
+below, finding 1.
 
 For a 3-node network this is more than test noise: it is "the chain sometimes
-does not start."
+does not start", and the same mechanism can halt a chain that is already
+running.
 
 ### Sync does not scale, and pacing only buys time
 
@@ -713,6 +715,247 @@ parameter change: every genesis spec, every registered validator and about a
 dozen tests are written against `10000n`, so it needs a coordinated restart of
 every node rather than a quiet edit. **Matt's call.** Do it before the network
 has validators worth attacking — the cost of the change only goes up.
+
+## Pre-launch risk audit (September 3, 2026)
+
+A multi-agent adversarial audit across eight dimensions: consensus, economics,
+crypto/auth, determinism, scale, network, operations, app surface. 31 findings
+filed, **28 survived** a refutation pass in which every finding was handed to a
+separate reviewer instructed to refute it by reading the source. 3 were refuted
+and dropped.
+
+Four were then verified BY HAND with a running reproduction, because they change
+what happens next. Those four are stated as fact. The other 24 carry the audit's
+confidence, not mine, and should be re-checked before anyone acts on them.
+
+### Verified by hand, with a reproduction
+
+**1. A transaction signature is a valid login token for that account.**
+
+`signPayload` signs `JSON.stringify(payload) + timestamp` and nothing else
+(`core/crypto.ts:50-65`). No accountId, no HTTP method, no path, no domain tag.
+So the envelope a wallet signs to send money also verifies as the envelope
+`authMiddleware` checks. And the public, unauthenticated
+`GET /accounts/:id/transactions` returns the signature column verbatim, because
+`SqliteTransactionStore` selects `*`.
+
+Working proof of concept, start to finish: victim sends a payment (200); an
+attacker holding no credentials reads the victim's history (200) and lifts the
+signature; the attacker replays that signature as an auth envelope on
+`POST /miners/register` and **registers the victim as a miner (200)**.
+
+Every auth-gated route that derives the actor from `req.accountId` and the
+target from a URL param, without inspecting the payload, is exploitable this way
+inside the 5-minute replay window: validator deregistration, miner registration,
+court actions, contacts, recurring transfers.
+
+The fix is domain separation. Bind accountId, method and path into the signed
+bytes behind a per-purpose prefix, and stop returning `signature` from public
+read routes. Both halves are needed; either alone leaves a path open.
+
+**2. `npm run validator:register` never put anything on the chain.**
+
+My bug, shipped and documented the same morning. The CLI POSTed to
+`/api/v1/validators/register`, which calls `registerValidator()` and performs
+three purely LOCAL writes inside one transaction: debit earned, credit locked,
+INSERT into `validators`. It never enqueues, never gossips, never rides a block.
+The chain-replicated route is `/propose-register`, which calls
+`enqueueValidatorChange`.
+
+Worse, both the CLI's own preflight and `docs/running-a-node.md` insisted you
+aim it at an ACTIVE VALIDATOR, which is the worst possible target: that node's
+`quorumCount` (floor(2n/3)+1) rises while its peers' does not, so it demands more
+prevotes than can exist and precommits NIL forever. The chain halts with no error
+anywhere, because the state root that would notice the divergence is diagnostic
+only and not folded into the block hash.
+
+**Fixed.** The CLI now signs with `signValidatorChangeRegister` and POSTs to
+`/propose-register`, and `validator-register-goes-onchain.test.ts` pins both
+routes' behaviour so they cannot be confused again.
+
+**3. The daily cycle blocks the whole node for roughly 0.7 ms per account.**
+
+Measured on this machine, not estimated. Expire + rebase + mint, second sample:
+
+| accounts | expire | rebase | mint | total | state root, per block |
+|---|---|---|---|---|---|
+| 25,000 | 1.4 s | 1.1 s | 7.6 s | **10.1 s** | 46 ms |
+| 50,000 | 13.5 s | 8.7 s | 15.8 s | **38.0 s** | 293 ms |
+| 100,000 | 25.6 s | 17.7 s | 30.0 s | **73.3 s** | 532 ms |
+
+It runs synchronously inside `applyChainDayCycle`, called from
+`BftBlockProducer.onCommit`, on every validator at the same instant (08:59 UTC).
+Node is single-threaded, so for that entire time the node cannot answer a vote or
+a proposal. Consensus timeouts are propose 3 s, prevote 1 s, precommit 1 s.
+
+At 10k users the cycle already exceeds one 10-second block. At 50k the whole
+network is unresponsive for over half a minute, every single day, simultaneously.
+The catch-up loop multiplies it: a node offline for 30 days runs 30 cycles back
+to back before it can participate.
+
+**4. The consensus engine has zero logging.**
+
+`bft-driver.ts` and `BftRuntime.ts` contain **0** `logger.` calls between them.
+Peer count is exposed by no API route. `onRoundFailed` is declared but has no
+production caller.
+
+That is why the halt in finding 1 presents as total silence, and why it survived
+several sessions of investigation including my own wrong guess this morning:
+there is nothing to look at. Cheapest high-value fix on this list.
+
+### The 28 confirmed findings
+
+Ranked by verified severity. "Bites at" is when it starts to matter, not when it
+was introduced.
+
+- **[CRITICAL / consensus] A single validator locking on a stale block hash deadlocks the height forever — proposers never re-propose a locked value (this is the 3-node LAN 90s-silence bug)**  
+  Where: `ae-node/src/core/consensus/BftBlockProducer.ts:365 and :559-586`  
+  Bites at: now — reproduces roughly 1 run in 3 on the 3-validator LAN test. Any network where a single stale-locked validator breaks quorum (N=3 exactly; N=4-5 needs two such validators) can halt permanently.  
+  Fix (large): Implement Tendermint's valid-value/POL rule. Track lockedValue + lockedRound and validValue + validRound in BftDriver, pass them into RoundController, and have the proposer path use them: change `blockProviderFor` so that when the driver holds a lock at this height it re-proposes the locked hash (re-serving the stashed payload) instead of calling buildCandidateBlock, and carry `validRound` on the Proposal so unlocked validators know they may prevote it. Separately add the round-skip rule (on seeing f+1 votes from a round > currentRound, jump to that round) in bft-driver.ts routeVote instead of dropping them, so a staggered node catches up rather than staying one round behind indefinitely.
+
+- **[CRITICAL / economics] percentHuman spend multiplier is node-local and the wire carries netAmount verbatim, so any participant running a node mints unlimited value from sybil accounts**  
+  Where: `ae-node/src/core/transaction.ts:348 (burnedUnverified derived from wire fee/netAmount), :264 (only sanity check), :440-448 (signed payload excludes fee/netAmount), :493-499 (the only place the multiplier is derived)`  
+  Bites at: now — one adversarial node and one sybil account is enough; profit scales linearly with sybil count  
+  Fix (large): Two changes, both needed. (1) In replayTransaction and acceptPendingTransaction, re-derive effectiveAmount/fee/netAmount/burn locally from the sender row exactly as processTransaction does, and reject the transaction if the wire values disagree; better still, drop fee/netAmount from the wire entirely and let every node compute them. (2) That is only sound once percentHuman is chain state, so make verification score changes a signed, block-ordered operation (a panel_score transaction type applied deterministically at commit) rather than a direct write from POST /verification/panels/:id/score. As an interim hard cap that removes the unbounded case without the full refactor, enforce `fee + netAmount <= amount * localPercentHuman / 100` for daily-point spends by individuals on both wire paths, which fails closed for a sender the local node has not seen verified.
+
+- **[CRITICAL / economics] Fee distribution pays miners out of a node-local, never-replicated miners table, so every node credits different accounts for the same block**  
+  Where: `ae-node/src/mining/rewards.ts:155-160 and :295-317 (commitBlockSideEffects)`  
+  Bites at: now — first fee-bearing transaction on any network where the miner set is not identical on every node, which is the default since nothing makes it identical  
+  Fix (large): Make miner registration, deactivation and tier changes chain-ordered operations (signed, mempool-admitted, applied at commit) exactly as the transaction path now is, so getActiveMiners returns the same rows on every node. Move the heartbeat signal onto the chain or drop uptime from the tier rule; runMinerTierEvaluation must not read Date.now() or node-local rows from inside runExpireAndRebase. Pass the block timestamp into runExpireAndRebase instead of the three Date.now() calls at day-cycle.ts:413-426. Until that lands, remove the fee payout from commitBlockSideEffects and let the pool accumulate rather than diverge.
+
+- **[CRITICAL / crypto-auth] Any transaction can be replayed forever by anyone, using data the public API hands out**  
+  Where: `ae-node/src/core/transaction.ts:501 (txId = uuid())`  
+  Bites at: now - one payment by one user is enough  
+  Fix (medium): Make the transaction id a function of the signed bytes and reject duplicates: derive txId = sha256(canonical payload || timestamp || from) instead of uuid(), add UNIQUE(signature) (or UNIQUE on the derived id) to the transactions table, and check for an existing row before applying. Independently add a monotonically increasing per-account nonce to the signed payload, rejecting any tx whose nonce is not sender.nonce + 1, plus a timestamp-freshness window inside processTransaction. Also stop returning `signature` and `receiver_signature` from GET /accounts/:id/transactions.
+
+- **[CRITICAL / crypto-auth] The signing scheme has no domain separation, so a publicly-readable transaction signature is a valid login token for that account**  
+  Where: `ae-node/src/core/crypto.ts:50-65 (signPayload/verifyPayload)`  
+  Bites at: now - one payment by a validator or voucher within the last 5 minutes  
+  Fix (medium): Domain-separate and context-bind the signature. Have signPayload/verifyPayload sign a canonical string containing a fixed domain tag, the accountId, the HTTP method and the full request path including URL params, alongside the payload and timestamp - e.g. `ae-auth-v1|POST|/api/v1/validators/deregister|<accountId>|<canonical payload>|<timestamp>`. Give transactions a distinct tag ('ae-tx-v1') so the two can never be interchanged, and update ae-app/src/lib/crypto.ts and ae-miner/src/lib/crypto.ts in lockstep. Add a server-side seen-signature cache covering the 5-minute window so an envelope is single-use.
+
+- **[CRITICAL / determinism] Daily mint is gated on the node-local `miners` table, so two nodes mint different balances for the same account**  
+  Where: `ae-node/src/core/day-cycle.ts:198,203`  
+  Bites at: now — the live network already has miners registered per-machine, and it fires on the first day boundary after any miner registration  
+  Fix (large): Make miner registration ride a block the way `AccountRegistration` already does (core/account-registration.ts, schema v13): a signed `MinerRegistration` type, a `pending_miner_registrations` queue drained by the proposer, `computeMinerRegistrationsHash` appended to `computeBlockHash`, applied before transactions on both the commit and sync-replay paths. Until that lands, the interim correct behaviour is to drop the miner exclusion from `mintDaily` entirely (day-cycle.ts:198-203), because minting from a node-local set is strictly worse than minting to everyone.
+
+- **[CRITICAL / determinism] Fee-pool payouts run at every commit against the node-local miner registry, and the fee pool is not in the state root**  
+  Where: `ae-node/src/mining/rewards.ts:272-317, :154-157, :161`  
+  Bites at: now for the ordering/remainder divergence; guaranteed the moment any node joins by catch-up sync or snapshot, which is the documented path for the planned third validator  
+  Fix (large): Two parts. Short term, add `ORDER BY account_id ASC` to `findActiveMiners` (SqliteMiningStore.ts:51-60) and add the fee-pool row to `computeStateRoot` so this class of drift is at least visible. Real fix is the same as the miner-registration finding — miner set must be chain-derived — after which `commitBlockSideEffects` becomes a pure function of committed state. Also correct the two comments that claim cross-node identity (BftBlockProducer.ts:777-779, runner.ts:456-457); they are the reason this path was not on the audit list.
+
+- **[CRITICAL / scale] Unappliable pending transactions are never evicted, so every block proposal reloads and re-replays the whole accumulated garbage set**  
+  Where: `ae-node/src/core/transaction.ts:235-285 (acceptPendingTransaction)`  
+  Bites at: now (3 nodes) -- one overdrawn signed transaction is enough to seed it; a deliberate flood halts the chain at any size  
+  Fix (small): Add a LIMIT plus a deterministic ORDER BY to findUnblockedTransactions so block building is bounded, and add a sweep that deletes pending rows (applied=0, block_number IS NULL) older than a fixed number of blocks or seconds. Also reject in acceptPendingTransaction anything the sender's current balance plus pendingOutgoingTotal cannot cover, so obvious garbage never enters the table.
+
+- **[CRITICAL / network] One unauthenticated `peers` message with a non-array payload kills any node process**  
+  Where: `ae-node/src/network/peer.ts:252-255, ae-node/src/network/peer.ts:307-310, ae-node/src/network/discovery.ts:80-87, ae-node/src/node/cli.ts:14-17`  
+  Bites at: now — any node with a reachable P2P port, single attacker, one packet per node  
+  Fix (small): Wrap the body of `handleMessage` (and the two `ws.on('message')` callbacks at peer.ts:204-207 and 252-255) in try/catch that logs and drops the message. Separately, shape-validate before emitting: `if (!Array.isArray(msg.data)) return;` in the `peers` case, and add `isAuthenticatedSender` to `peers`/`get_peers` so pre-handshake sockets cannot reach the discovery layer at all. The same null-deref exists in `new_block` (`(msg.data as {hash}).hash` at peer.ts:314) and `new_transaction` (peer.ts:327) for any handshaken peer.
+
+- **[CRITICAL / network] Gossip relays blocks before validating them, and the receiver bans the relayer, so one bad block makes honest nodes permanently ban each other**  
+  Where: `ae-node/src/network/peer.ts:312-323, ae-node/src/network/sync.ts:400-445, ae-node/src/network/peer.ts:150-161`  
+  Bites at: now — any node that can complete a handshake, which requires only public information  
+  Fix (medium): Validate before relaying: move the relay so it runs only after the block passes `validateIncomingBlock`, or have the `block:received` listener return an accept/reject the peer layer honours. Independently, stop attributing a relayed payload's badness to the relay hop: ban on the inner signed producer identity (the block's own producer key / cert signers), not on `msg.publicKey`. Add ban expiry and a strike counter so a single bad message is not a permanent partition.
+
+- **[CRITICAL / operations] `npm run validator:register` — the documented way to add a validator — writes to one node's local DB and never touches the chain**  
+  Where: `ae-node/src/scripts/register-validator.ts:288,329`  
+  Bites at: now — the first time anyone adds a third validator  
+  Fix (medium): Point the CLI at `/propose-register` / `/propose-deregister`: build and sign a `ValidatorChange` with `validator-change.ts`'s canonical signer instead of the auth-middleware `{accountId,timestamp,signature,payload}` envelope. Then delete the local-only `/register` and `/deregister` routes, or gate them behind the admin secret and rename them so they cannot be reached by an operator following the docs. Fix the running-a-node.md prose to describe the endpoint actually used.
+
+- **[HIGH / consensus] Catch-up sync strips recipientIsHuman and receiverSignature from block transactions, permanently wedging any node that falls behind**  
+  Where: `ae-node/src/network/sync.ts:347-360`  
+  Bites at: now, on the first restart-after-downtime that spans any block containing an in-person or recipientIsHuman transaction.  
+  Fix (small): In sync.ts:347-360 add `recipientIsHuman: t.recipientIsHuman` and `receiverSignature: t.receiverSignature` to the mapped object — the columns are already on the TransactionRow the store returns, and the live-gossip path (BftBlockProducer's txRowToWire) already ships them. Then extend validateIncomingBlock step 7 to reject a payload whose transactions are missing signature-relevant fields, so a truncation like this fails loudly at validation instead of silently at replay.
+
+- **[HIGH / economics] Tier-2 fee lottery is seeded on the block hash the proposer chooses, so a validator who is also a miner wins the lottery on every block it proposes**  
+  Where: `ae-node/src/mining/rewards.ts:203-210 and :216 (winner = lowest sha256(blockHash|accountId))`  
+  Bites at: as soon as there are two or more Tier-2 miners and any validator also operates a miner; profit scales with the fee pool and with the validator's proposer share  
+  Fix (medium): Do not seed the lottery on a value the proposer controls. Either wire up the existing VRF path (selectLotteryWinner, rewards.ts:93) so each miner's ticket is a VRF output over a chain-anchored seed the proposer cannot pick, or seed on an aggregate the proposer does not author — e.g. the concatenated precommit signatures in the block's commit certificate, which no single validator fixes. A cheaper partial mitigation is to seed on the hash of a block k heights back and tighten DEFAULT_MAX_TIMESTAMP_DRIFT_SEC, but that only raises the grinding cost rather than removing it.
+
+- **[HIGH / crypto-auth] Omitting the `payload` key downgrades the signature to a signature over `{}` while the route reads its parameters from the unsigned body**  
+  Where: `ae-node/src/api/middleware/auth.ts:58 (`payload || {}`)`  
+  Bites at: now - any account that has registered as a miner or deregistered as a validator  
+  Fix (small): Stop treating a missing `payload` as an empty signed payload. In authMiddleware reject with 401 when `req.body.payload` is not a present object instead of defaulting to `{}`. Remove the `req.body.payload || req.body` fallback from every route handler and the `'payload' in req.body ? ... : req.body` fallback from validateBody - the envelope shape should be mandatory. That also removes the need for the per-route `claimed*` mismatch guards, which only function when the wrapper exists.
+
+- **[HIGH / determinism] Supportive and ambient payouts at commit are computed from node-local tag tables**  
+  Where: `ae-node/src/core/day-cycle.ts:407, :73-125`  
+  Bites at: the first time any user submits a tag on a multi-node network; the Tag screen auto-saves ~800ms after any edit, so this is normal wallet use, not an edge case  
+  Fix (large): Tags must be chain-ordered like transactions: a signed tag-submission operation admitted to the mempool, included in a block, applied deterministically at commit. Same shape as the commit-time execution change transactions already went through (schema v14). Interim mitigation that keeps the ledger consistent though not correct: gossip tag submissions the way `new_account` is gossiped (network/node.ts:218), which closes the online case but not the sync case.
+
+- **[HIGH / scale] The daily cycle runs synchronously inside the block-commit callback and already exceeds one block interval at 10k accounts, growing every day because transaction_log is never pruned**  
+  Where: `ae-node/src/core/consensus/BftBlockProducer.ts:851 (applyChainDayCycle inside onCommit)`  
+  Bites at: crosses the 10 s block interval at ~5-10k accounts within the first weeks, and at ~2-3k accounts after a few months of history  
+  Fix (medium): Three parts: (1) add an index on transaction_log(reference_id, change_type) so the idempotency probe stops scanning the whole mint bucket; (2) actually call pruneChain and extend it to cycle reference ids, or stop writing one log row per account per point type per day and record a single day-level event instead; (3) move the cycle off the commit callback (or chunk it across blocks) so a slow cycle cannot freeze consensus, the API, and the P2P layer at once.
+
+- **[HIGH / network] Unauthenticated peer-list injection poisons the address table without bound and triggers a dial storm every 30 seconds**  
+  Where: `ae-node/src/network/peer.ts:302-311, ae-node/src/network/discovery.ts:61-72, ae-node/src/network/discovery.ts:90-122`  
+  Bites at: now — a single unauthenticated message; harm scales with the size of the list the attacker sends  
+  Fix (medium): Gate `peers` and `get_peers` behind `isAuthenticatedSender` like every other non-handshake type. Cap the injected list length (e.g. 50 entries), validate `host` against an IP/hostname pattern with a length bound, cap `knownAddresses` with LRU eviction, and prefer seed/self-observed addresses over gossiped ones. Fix the loop-invariant break in `maintainConnections` by recomputing `getPeerCount()` inside the loop, and bound outstanding dials per tick.
+
+- **[HIGH / network] Pre-handshake sockets are unlimited and untimed, and a single recorded `ping` packet can be replayed to pin the node's CPU**  
+  Where: `ae-node/src/network/node.ts:224-229, ae-node/src/network/peer.ts:245-267, ae-node/src/network/peer.ts:386-389, ae-node/src/network/messages.ts:106-123`  
+  Bites at: now for the replay/CPU path; the 100 MiB frame and connection-count paths bite as soon as the node is on a public address  
+  Fix (medium): Set `maxPayload` on the `WebSocketServer` to a few hundred KB (the largest legitimate message is a 100-block sync reply, so size that explicitly). Add a handshake deadline (close any socket that has not completed `addPeer` within a few seconds) and a cap on concurrent pre-handshake connections, plus a per-IP connection limit. Reject any non-`handshake` message type on a socket that has not handshaken, before `parseMessage` runs, so unauthenticated signature verification is impossible. Add a freshness window and a per-peer rate limit to `verifyMessage`/`ping` so one captured packet cannot be replayed indefinitely.
+
+- **[HIGH / app-surface] Unauthenticated GET /accounts/:id/share-history does a full-table scan plus a 365x all-accounts loop, blocking the consensus event loop**  
+  Where: `ae-node/src/api/routes/accounts.ts:237-320 (query at :258 and :268-273, loop at :303-312)`  
+  Bites at: now — measurably degraded at 2,000 accounts (186ms/request measured), node-halting at ~10,000, which is the stated Phase 1 ceiling  
+  Fix (medium): Two changes, both small. (1) Bound the work: cap the account scan and the log query (e.g. restrict the log SELECT to the 365-day window and index on timestamp), or precompute a daily share snapshot table and serve it. (2) Fix the rate-limit key so GET routes are actually throttled per account — either move `rateLimitMiddleware()` inside each router after params are bound, or key on a path segment parsed from `req.path` instead of `req.params`. Adding `authMiddleware(db)` and restricting the endpoint to the account's own history would also remove the anonymous vector, though it does not fix the cost.
+
+- **[HIGH / app-surface] GET /court/jury-duty/:accountId returns a juror's vote unauthenticated, defeating the sealed-vote rule the case-detail endpoint enforces**  
+  Where: `ae-node/src/api/routes/court.ts:308-345 (SELECT at :313, `myVote: r.vote` at :333)`  
+  Bites at: now — any case with more than one juror, on any network size  
+  Fix (small): Gate `GET /court/jury-duty/:accountId` behind `authMiddleware(db)` and reject when `req.accountId !== req.params.accountId` (the pattern already used for `/cases/:id/escalate`, court.ts:161-166). Since it is a GET and this API's auth envelope travels in a signed body, either convert it to a signed POST like `/miners/vouches/:id/withdraw` was, or null out `vote`/`votedAt` in the response for any case whose jury has not fully voted. Also stop emitting `jurorAccountId` in `GET /court/cases/:id` until `allVoted` is true.
+
+- **[MEDIUM / consensus] Two validators that dial each other within one RTT both tear down both sockets and lose the peer entirely for at least 30 seconds**  
+  Where: `ae-node/src/network/peer.ts:464-515 (addPeer, esp. 493-500) and peer.ts:215-230 (outbound close handler)`  
+  Bites at: now for any deployment where two nodes list each other as seeds and restart together; also on every network-blip-induced simultaneous reconnect.  
+  Fix (medium): Make the duplicate-connection tiebreak deterministic and identical on both sides instead of arrival-order dependent: in addPeer, when a second socket appears for a nodeId already connected, keep the connection whose (lower publicKey hex) node is the dialer — both sides compute the same verdict from data they already have, so exactly one socket is closed. Add jitter to discovery's reconnectInterval (e.g. 30s ± 30%) so simultaneous redials do not stay in phase, and shorten the first retry after a total peer loss.
+
+- **[MEDIUM / consensus] A validator that commits a block it has no stashed content for advances its consensus height without applying the block, and can then write a permanent hole in its own chain**  
+  Where: `ae-node/src/core/consensus/BftBlockProducer.ts:698-705`  
+  Bites at: N>=4 validators, on the first dropped or clock-rejected block-content gossip. Not reachable at N=3, where quorum equals N.  
+  Fix (medium): Make the missing-stash case a hard error rather than a silent return: throw from BftBlockProducer.onCommit when the payload is absent so BftDriver's existing fail-stop (bft-driver.ts:511-517, onApplyFailed) engages and the node halts loudly instead of skipping a height. Better still, add a 'fetch block by hash' request to the peer protocol and block the commit on retrieving the content. Independently, add a contiguity assertion in SqliteBlockStore.insert (reject a non-genesis block whose number != current max + 1 or whose previousHash != current head hash) so a gap can never be written, and re-anchor BftDriver.currentHeight from the persisted chain head after any commit that did not apply.
+
+- **[MEDIUM / crypto-auth] Per-account write rate limit is keyed on an unauthenticated body field, so anyone can lock any account out of all writes**  
+  Where: `ae-node/src/api/middleware/rateLimit.ts:53-57`  
+  Bites at: now - single attacker, single IP, any known accountId  
+  Fix (small): Move the per-account bucket behind authentication: let authMiddleware set req.accountId, then apply the account-scoped limiter as router-level middleware after it so only verified signers consume an account's quota. Keep the IP limiter app-wide as the pre-auth defense, and add a separate tighter IP-keyed counter for requests that fail auth so unauthenticated write attempts throttle on the attacker's own key rather than the victim's.
+
+- **[MEDIUM / scale] computeStateRoot does a full accounts scan and builds one giant string 3-4 times per block, for a value the code itself says is diagnostic only**  
+  Where: `ae-node/src/core/state-root.ts:77-107`  
+  Bites at: noticeable around 50k accounts, breaks round timing at ~100k, hard chain halt around 1M  
+  Fix (medium): Compute the root once per height at commit and reuse the cached value in the vote gate instead of recomputing per prevote/precommit; move the computeStateRoot call inside dryRunTransactions so it shares the existing per-block-hash cache. For real scale, replace the full scan with an incremental accumulator or Merkle tree updated only for the accounts a block touched, or sample it every Nth block while it remains diagnostic.
+
+- **[MEDIUM / operations] A validator whose machine dies permanently cannot be removed, and the docs overstate fault tolerance by one validator**  
+  Where: `ae-node/src/core/consensus/SqliteValidatorSet.ts:116-124`  
+  Bites at: now — any 2- or 3-validator network, on the first permanent hardware loss  
+  Fix (large): Two parts. (1) Correct docs/running-a-node.md: the first fault-tolerant size is four validators, not three. (2) Add an operator-usable removal path that does not require the dead validator's key — either downtime-based deactivation (count consecutive heights with no precommit from a validator and emit a deregister validatorChange from the proposer), or a documented, tested emergency procedure to rewrite the validator set on every surviving node plus the matching validator-set snapshot row, so historical cert verification still resolves the right set.
+
+- **[MEDIUM / app-surface] Wallet's recurring-transfer edit form is in base units on read and display units on write, so any edit silently divides the transfer by 100,000,000**  
+  Where: `ae-app/src/pages/Recurring.tsx:110 vs :145 and :323`  
+  Bites at: now — first time any user edits an existing recurring transfer  
+  Fix (small): In Recurring.tsx:323 seed the input from `baseUnitsToExactDisplay(String(t.amount))` (the exact-display helper already in ae-app/src/lib/formatting.ts), and in handleSaveEdit:145 send `Number(toBaseUnits(editAmount))`, matching handleCreate:110; update the optimistic setState at :150 to store the base-unit value. Server-side, add `validateBody` to `PUT /recurring/:id` with the same `baseUnitAmount` regex the transaction schema uses so a display-unit write is rejected rather than stored.
+
+- **[LOW / scale] Rebase crash-resume is O(n^2): getAllAccounts() is called inside the per-account loop**  
+  Where: `ae-node/src/core/day-cycle.ts:290-295 (inside runTransaction opened at :286)`  
+  Bites at: painful at ~10k accounts (minutes), effectively unrecoverable at ~100k (hours)  
+  Fix (small): Build the lookup once outside the loop: `const fresh = new Map(getAllAccounts(db).map(a => [a.id, a]))` before the `for`, then index into it. Better still, skip the full reread and select just earned_balance and locked_balance for the one account id.
+
+- **[LOW / app-surface] Contacts and recurring-transfer rows are write-protected by ownership checks but readable by anyone who knows an account id, which the search endpoint hands out**  
+  Where: `ae-node/src/api/routes/contacts.ts:35-43 and :111-121`  
+  Bites at: now — it is cheaper the smaller the network, since fewer prefixes cover everyone  
+  Fix (small): Put the same ownership predicate on the reads that already guards the writes: convert both list endpoints to signed requests (`authMiddleware(db)` plus `req.accountId === req.params.ownerId/accountId`), following the signed-POST pattern the codebase already uses for `/miners/vouches/:id/withdraw` where a GET body was not workable. Separately, drop `earned_balance` from the `/contacts/search/accounts` projection — the search UI only needs id, type and percent_human — and require a longer prefix to blunt enumeration.
+
+
+### Refuted, recorded so they are not raised again
+
+- The chain-driven day cycle settling court and panel deadlines from
+  `Date.now()` rather than the block timestamp.
+- Validator restart losing its Tendermint lock and producing self-slashing
+  evidence.
+- Version skew being ungated in the P2P handshake and the schema initializer.
 
 ### Audit status (court + verification panels)
 

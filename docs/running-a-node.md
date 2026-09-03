@@ -261,11 +261,19 @@ npm run validator:register -- --keystore $HOMEae-validatorkeystore.json --node h
 
 **`--node` must be a node that is ALREADY an active validator, and it is
 usually not your own.** A validator change is not gossiped like a transaction:
-the API writes it to a local queue on the node that received it, and that queue
-is drained in exactly one place — when *that* node proposes a block. A candidate
-node is not in the set yet, so it never proposes, so the change sits in its queue
-forever. The POST returns 200 and nothing anywhere reports an error. The CLI
-checks the target's `/status` and refuses rather than let that happen.
+it goes into a local queue on the node that received it, and that queue is
+drained in exactly one place — when *that* node proposes a block. A candidate
+node is not in the set yet, so it never proposes, so the change would sit in its
+queue forever. The POST returns 200 and nothing anywhere reports an error. The
+CLI checks the target's `/status` and refuses rather than let that happen.
+
+If you are scripting this by hand rather than using the CLI, POST to
+`/api/v1/validators/propose-register`, **not** `/api/v1/validators/register`.
+The names differ by one word and the behaviour differs completely: the second
+one applies the change to that single node's database and never puts it on the
+chain, which silently diverges that node's validator set from everyone else's
+and halts the chain. The CLI shipped pointing at the wrong one on September 3
+and was fixed the same day.
 
 Confirm it landed:
 
