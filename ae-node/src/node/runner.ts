@@ -295,6 +295,10 @@ export class AENodeRunner {
         consensusMode: this.config.consensusMode ?? 'authority',
         blockIntervalMs: this.config.blockIntervalMs,
       },
+      // Deferred, same reason as txBroadcaster above: startApiServer runs before
+      // startP2P, so this.p2pNode does not exist yet. Returns 0 until the P2P
+      // layer is up, which is the honest answer during that window.
+      getPeerCount: () => this.p2pNode?.peerManager.getPeerCount() ?? 0,
     });
     logger.info('api', `API server listening on ${this.config.apiHost}:${this.config.apiPort}`);
   }

@@ -14,7 +14,11 @@ export interface NodeIdentitySummary {
   blockIntervalMs: number;
 }
 
-export function healthRoutes(db: DatabaseSync, identity?: NodeIdentitySummary) {
+export function healthRoutes(
+  db: DatabaseSync,
+  identity?: NodeIdentitySummary,
+  getPeerCount?: () => number,
+) {
   const router = Router();
 
   // Basic health check (for load balancers, Docker HEALTHCHECK)
@@ -74,6 +78,7 @@ export function healthRoutes(db: DatabaseSync, identity?: NodeIdentitySummary) {
         network: {
           participants,
           wsClients,
+          peers: getPeerCount ? getPeerCount() : null,
         },
         memory: {
           heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
@@ -109,6 +114,9 @@ export function healthRoutes(db: DatabaseSync, identity?: NodeIdentitySummary) {
         '# HELP ae_ws_clients Connected WebSocket clients',
         '# TYPE ae_ws_clients gauge',
         `ae_ws_clients ${wsClients}`,
+        '# HELP ae_p2p_peers Connected P2P peers',
+        '# TYPE ae_p2p_peers gauge',
+        `ae_p2p_peers ${getPeerCount ? getPeerCount() : 0}`,
         '# HELP ae_uptime_seconds Node uptime in seconds',
         '# TYPE ae_uptime_seconds gauge',
         `ae_uptime_seconds ${Math.floor(process.uptime())}`,

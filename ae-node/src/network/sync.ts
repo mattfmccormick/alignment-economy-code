@@ -354,6 +354,16 @@ export class ChainSync {
           netAmount: t.netAmount,
           pointType: t.pointType,
           isInPerson: t.isInPerson,
+          // recipientIsHuman and receiverSignature are part of the SIGNED
+          // payload (core/transaction.ts:440-463) and, for in-person txs, are
+          // what the countersignature check needs. Omitting them here made a
+          // syncing node default them to false/null (runner.ts sync path uses
+          // `?? false` / `?? null`), so the replayed tx no longer matched its
+          // own signature or reproduced the merkle root, and the node wedged on
+          // the first block carrying such a tx. The live-gossip path
+          // (txRowToWire) already ships both.
+          recipientIsHuman: t.recipientIsHuman,
+          receiverSignature: t.receiverSignature,
           memo: t.memo,
           signature: t.signature,
           timestamp: t.timestamp,

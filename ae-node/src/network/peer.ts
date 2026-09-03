@@ -220,6 +220,7 @@ export class PeerManager extends EventEmitter {
             this.emit('peer:disconnected', peer.info);
             this.peers.delete(id);
             knownPeer = true;
+            logger.info('p2p', `peer disconnected ${id.slice(0, 10)}… (${host}:${port}); ${this.peers.size} peer(s) left`);
             break;
           }
         }
@@ -260,6 +261,7 @@ export class PeerManager extends EventEmitter {
           peer.info.status = 'disconnected';
           this.emit('peer:disconnected', peer.info);
           this.peers.delete(id);
+          logger.info('p2p', `peer disconnected ${id.slice(0, 10)}…; ${this.peers.size} peer(s) left`);
           break;
         }
       }
@@ -499,6 +501,7 @@ export class PeerManager extends EventEmitter {
       }
     }
 
+    const isNew = !this.peers.has(hs.nodeId);
     this.peers.set(hs.nodeId, {
       info: {
         id: hs.nodeId,
@@ -512,6 +515,15 @@ export class PeerManager extends EventEmitter {
       },
       ws,
     });
+    // Log the mesh forming. Before this, whether two nodes had actually
+    // connected was invisible, so a network that never peered looked identical
+    // to one stuck in consensus.
+    if (isNew) {
+      logger.info(
+        'p2p',
+        `peer connected ${hs.nodeId.slice(0, 10)}… (${host}:${port}, height ${hs.blockHeight}); ${this.peers.size} peer(s) total`,
+      );
+    }
   }
 
   broadcast(type: NetworkMessage['type'], data: unknown, excludeId?: string): void {

@@ -59,6 +59,12 @@ export interface CreateAppOptions {
    * submitting is the difference between a clear message and an afternoon.
    */
   nodeIdentity?: NodeIdentitySummary;
+  /**
+   * How many P2P peers this node currently has, surfaced on GET /status and
+   * /metrics. Deferred (a getter) because the P2P node is constructed after the
+   * API server. Omitted for single-node/Authority setups.
+   */
+  getPeerCount?: () => number;
 }
 
 export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
@@ -86,7 +92,7 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
     transactionRoutes(db, opts.txBroadcaster, opts.executionMode ?? 'receipt'),
   );
   app.use('/api/v1/network', networkRoutes(db));
-  app.use('/api/v1', healthRoutes(db, opts.nodeIdentity));
+  app.use('/api/v1', healthRoutes(db, opts.nodeIdentity, opts.getPeerCount));
   app.use('/api/v1/admin', adminRoutes(db));
   app.use('/api/v1/contacts', contactRoutes(db));
   app.use('/api/v1/miners', minerRoutes(db));

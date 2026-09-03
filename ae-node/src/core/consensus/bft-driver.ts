@@ -21,6 +21,7 @@ import type { IValidatorSet } from './IValidatorSet.js';
 import type { Vote } from './votes.js';
 import type { Proposal } from './proposal.js';
 import type { CommitCertificate } from './commit-certificate.js';
+import { logger } from '../../node/logger.js';
 import {
   RoundController,
   type LocalValidator,
@@ -330,6 +331,11 @@ export class BftDriver {
 
   private startRound(): void {
     this.cancelAllTimers();
+    logger.info(
+      'bft',
+      `round start h=${this.currentHeight} r=${this.currentRound}` +
+        (this.currentLock ? ` (locked on ${this.currentLock.blockHash.slice(0, 10)}…)` : ''),
+    );
     this.controller = new RoundController({
       validatorSet: this.config.validatorSet,
       height: this.currentHeight,
@@ -439,6 +445,10 @@ export class BftDriver {
           // Record the lock so it carries into round+1 of the same
           // height. Cleared in onCommit when we move to height+1.
           this.currentLock = action.lockState;
+          logger.info(
+            'bft',
+            `locked h=${this.currentHeight} r=${this.currentRound} on ${action.lockState.blockHash.slice(0, 10)}…`,
+          );
           break;
         case 'observed-polka':
           // Track the highest-round polka. Multiple rounds at this
@@ -547,6 +557,13 @@ export class BftDriver {
   }
 
   private onAdvance(): void {
+    logger.warn(
+      'bft',
+      `round FAILED h=${this.currentHeight} r=${this.currentRound} → r=${this.currentRound + 1}` +
+        (this.currentLock
+          ? `; still locked on ${this.currentLock.blockHash.slice(0, 10)}… — if this repeats every round the height is deadlocked`
+          : ' (no lock)'),
+    );
     this.config.onRoundFailed?.(this.currentHeight, this.currentRound);
     if (!this.running) return;
     // Same height, round+1

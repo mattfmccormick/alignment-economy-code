@@ -286,11 +286,20 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
     let postRebaseSum = 0n;
     const rebasedRows: Array<{ id: string; newEarned: bigint; newLocked: bigint }> = [];
 
+    // On a crash-resume, already-rebased accounts must have their CURRENT
+    // (post-crash) balances read back for the conservation accounting. Build
+    // that lookup once, not once per account: the old code called
+    // getAllAccounts(db).find(...) inside the loop, which is O(n^2) and turned
+    // resume into minutes at 10k accounts and hours at 100k. Only built when a
+    // resume actually happened, so the normal path pays nothing.
+    const freshById =
+      alreadyRebased.size > 0
+        ? new Map(getAllAccounts(db).map((x) => [x.id, x]))
+        : null;
+
     for (const acct of accounts) {
       if (alreadyRebased.has(acct.id)) {
-        // For accounts already rebased on resume, read their current balances
-        // back so the conservation accounting stays consistent.
-        const fresh = getAllAccounts(db).find((x) => x.id === acct.id)!;
+        const fresh = freshById!.get(acct.id)!;
         postRebaseSum += fresh.earnedBalance + fresh.lockedBalance;
         continue;
       }
