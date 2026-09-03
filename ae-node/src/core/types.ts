@@ -4,6 +4,7 @@
 // Type-only import to avoid runtime circular deps with consensus modules.
 import type { ValidatorChange } from './consensus/validator-change.js';
 import type { AccountRegistration } from './account-registration.js';
+import type { VouchOperation } from '../verification/vouch-operation.js';
 
 export type AccountType = 'individual' | 'company' | 'government' | 'ai_bot';
 export type PointType = 'active' | 'supportive' | 'ambient' | 'earned';
@@ -173,6 +174,15 @@ export interface Block {
    * exactly the digest they always had.
    */
   accountRegistrations: AccountRegistration[] | null;
+
+  /**
+   * Signed vouch operations carried by this block (schema v17). Same lifecycle
+   * as validatorChanges / accountRegistrations: the proposer drains its queue,
+   * the set is folded into the block hash, and every node applies it at commit.
+   * `null` on blocks that carry none — and null hashes as empty, so those
+   * blocks keep exactly the digest they always had.
+   */
+  vouchOperations: VouchOperation[] | null;
 }
 
 export interface RebaseEvent {

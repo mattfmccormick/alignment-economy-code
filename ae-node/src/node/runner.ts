@@ -42,6 +42,11 @@ import {
 import type { IValidatorSet } from '../core/consensus/IValidatorSet.js';
 import { eventBus } from '../api/websocket.js';
 import { recordStateRoot } from '../core/state-root.js';
+import {
+  applyVouchOperation,
+  drainVouchOperations,
+  removeAppliedVouchOperations,
+} from '../verification/vouch-operation.js';
 import { logger, setLogLevel } from './logger.js';
 import type { AENodeConfig } from './config.js';
 import type { TransactionRow } from '../core/stores/ITransactionStore.js';
@@ -457,6 +462,12 @@ export class AENodeRunner {
               applyValidatorChange(this.db, change, block.timestamp);
             }
 
+            // Vouch operations in the fixed block order (audit #4/#16), matching
+            // the live commit path so a syncing node reaches identical state.
+            for (const op of payload.vouchOperations ?? []) {
+              applyVouchOperation(this.db, op, block.timestamp);
+            }
+
             // Distribute fees per WP economics. Idempotent — matches the
             // distribution the original proposer ran on its side.
             commitBlockSideEffects(this.db, block.number, block.hash);
@@ -695,6 +706,13 @@ export class AENodeRunner {
             'accounts',
             `${removed} account registration(s) committed on-chain and drained from the queue`,
           );
+        }
+      },
+      pendingVouchOperations: () => drainVouchOperations(this.db),
+      onVouchOperationsApplied: (ops) => {
+        const removed = removeAppliedVouchOperations(this.db, ops);
+        if (removed > 0) {
+          logger.info('vouch', `${removed} vouch operation(s) committed on-chain and drained`);
         }
       },
       onBlockCommitted: (block) => {

@@ -93,12 +93,17 @@ export function computeBlockHash(
   prevCommitCertHash: string | null = null,
   validatorChangesHash: string | null = null,
   accountRegistrationsHash: string | null = null,
+  // Appended last and defaulting to '' for the empty case (audit #4/#16), so a
+  // block that carries no vouch operations - every block until this lane is
+  // wired - hashes exactly as it did before. No flag day.
+  vouchOperationsHash: string | null = null,
 ): string {
   const certPart = prevCommitCertHash ?? '';
   const changesPart = validatorChangesHash ?? '';
   const registrationsPart = accountRegistrationsHash ?? '';
+  const vouchPart = vouchOperationsHash ?? '';
   return sha256(
-    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}`,
+    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}${vouchPart}`,
   );
 }
 
@@ -117,6 +122,7 @@ export function createGenesisBlockWithStore(store: IBlockStore): Block {
     prevCommitCertHash: null,
     validatorChanges: null,
     accountRegistrations: null,
+    vouchOperations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,
@@ -162,6 +168,7 @@ export function createBlockWithStore(
     // pending queue). Authority networks are single-node dev setups where the
     // account already exists locally.
     accountRegistrations: null,
+    vouchOperations: null,
   };
 
   store.insert(block, /* isGenesis */ false);

@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -148,7 +148,13 @@ const TABLES = `
     -- currently deadlocks the chain. Until it is, a snapshot verified against
     -- this value is only as trustworthy as the quorum of peers that agree on
     -- it, which is why the joiner cross-checks rather than trusting one peer.
-    state_root TEXT
+    state_root TEXT,
+    -- Signed vouch operations carried by THIS block (schema v17). JSON-encoded
+    -- VouchOperation[]. NULL when none rode the block, which is the steady
+    -- state. Persisted so a node syncing past blocks re-applies them like any
+    -- other on-chain state change. Folded into the block hash the same way
+    -- validator_changes and account_registrations are.
+    vouch_operations TEXT
   );
 
   CREATE TABLE IF NOT EXISTS rebase_events (
@@ -529,6 +535,20 @@ const TABLES = `
     registration_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+
+  -- Signed vouch operations (create / withdraw) awaiting inclusion in a block
+  -- this node proposes (schema v17). Same shape and lifecycle as
+  -- pending_validator_changes: the proposer drains its own queue into a block,
+  -- and every node applies the result from the block payload. Vouching moves
+  -- consensus state (the voucher's locked balance, and on withdrawal the
+  -- vouched account's percentHuman), so it must ride the chain rather than be
+  -- applied node-locally, or the ledgers fork. See verification/vouch-operation.ts.
+  CREATE TABLE IF NOT EXISTS pending_vouch_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    voucher_id TEXT NOT NULL,
+    op_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `;
 
 const INDEXES = `
@@ -565,6 +585,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_human_tags_recipient ON human_tags(recipient_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_validators_active ON validators(is_active);
   CREATE INDEX IF NOT EXISTS idx_pending_changes_created ON pending_validator_changes(created_at);
+  CREATE INDEX IF NOT EXISTS idx_pending_vouch_ops_created ON pending_vouch_operations(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created ON pending_account_registrations(created_at);
 `;
 
@@ -811,6 +832,24 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       );
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
+    `);
+  }
+  if (from < 17) {
+    // Vouch operations lane (audit #4/#16): a pending queue + a per-block
+    // column. Additive; existing blocks get NULL (they carried no vouch ops).
+    const cols = db.prepare('PRAGMA table_info(blocks)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'vouch_operations')) {
+      db.exec('ALTER TABLE blocks ADD COLUMN vouch_operations TEXT');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_vouch_operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        voucher_id TEXT NOT NULL,
+        op_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_vouch_ops_created
+        ON pending_vouch_operations(created_at);
     `);
   }
   if (from < 16) {

@@ -21,6 +21,7 @@
 //   - /contacts/         : auth + ownership-checked PUT shape
 
 import { describe, it, beforeEach } from 'node:test';
+import { signVouchCreate } from '../src/verification/vouch-operation.js';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import http from 'node:http';
@@ -123,13 +124,20 @@ describe('Phase 71: auth-hardening regression', () => {
       db.close();
     });
 
-    it('rejects body voucherId that disagrees with the signed account (403)', async () => {
+    it('rejects an op whose voucherId disagrees with the signed account (403)', async () => {
       const db = freshDb();
       const voucher = makeAccount(db);
       const vouchee = makeAccount(db);
       const someoneElse = makeAccount(db);
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { voucherId: someoneElse.accountId, vouchedId: vouchee.accountId, stakePercent: 10 };
+      const op = signVouchCreate({
+        voucherId: someoneElse.accountId,
+        vouchedId: vouchee.accountId,
+        stakePercent: 10,
+        timestamp: ts,
+        voucherPrivateKey: voucher.privateKey,
+      });
+      const payload = { op };
       const sig = signPayload(payload, ts, voucher.privateKey);
       const app = createApp(db);
       const r = await request(app, 'POST', '/api/v1/miners/vouches', {

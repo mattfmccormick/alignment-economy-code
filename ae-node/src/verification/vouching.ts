@@ -35,6 +35,12 @@ export function createVouch(
   voucherId: string,
   vouchedId: string,
   stakePercent: number,
+  // Deterministic overrides for the chain-ordered path (audit #4/#16). When a
+  // vouch rides a block, every node must store it with the SAME id and the SAME
+  // timestamp, or the vouches table (and every state root after it) diverges.
+  // The block supplies both. Omitted on the legacy direct path, which keeps its
+  // uuid()/Date.now() behaviour so existing callers and tests are unaffected.
+  opts?: { id?: string; now?: number },
 ): Vouch {
   const voucher = getAccount(db, voucherId);
   if (!voucher) throw new NotFoundError(`Voucher account not found: ${voucherId}`);
@@ -68,8 +74,8 @@ export function createVouch(
     throw new ValidationError('Stake amount rounds to zero — balance too small', 'STAKE_ROUNDS_TO_ZERO');
   }
 
-  const id = uuid();
-  const now = Math.floor(Date.now() / 1000);
+  const id = opts?.id ?? uuid();
+  const now = opts?.now ?? Math.floor(Date.now() / 1000);
 
   runTransaction(db, () => {
     const newEarned = voucher.earnedBalance - stakeAmount;
@@ -94,7 +100,7 @@ export function createVouch(
   };
 }
 
-export function withdrawVouch(db: DatabaseSync, vouchId: string): void {
+export function withdrawVouch(db: DatabaseSync, vouchId: string, nowOverride?: number): void {
   const verif = verificationStore(db);
   const vouch = verif.findActiveVouchById(vouchId);
   if (!vouch) throw new NotFoundError(`Active vouch not found: ${vouchId}`);
@@ -102,7 +108,8 @@ export function withdrawVouch(db: DatabaseSync, vouchId: string): void {
   const voucher = getAccount(db, vouch.voucherId);
   if (!voucher) throw new NotFoundError(`Voucher account not found`);
 
-  const now = Math.floor(Date.now() / 1000);
+  // Block timestamp on the chain-ordered path, wall clock on the legacy path.
+  const now = nowOverride ?? Math.floor(Date.now() / 1000);
 
   // Use the current stakeAmount (which may have been rebalanced)
   const unlockAmount = vouch.stakeAmount;

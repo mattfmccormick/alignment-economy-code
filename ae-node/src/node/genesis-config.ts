@@ -323,6 +323,7 @@ export function applyGenesisSpec(db: DatabaseSync, spec: GenesisSpec): Block {
     // exactly as it always did, which matters because the genesis hash is the
     // network's identity in the P2P handshake.
     accountRegistrations: null,
+    vouchOperations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,

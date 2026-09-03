@@ -1,10 +1,17 @@
 ﻿import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
-import { registerMiner, getMinerByAccount } from '../../mining/registration.js';
-import { getAccount } from '../../core/account.js';
+import { registerMiner, getMinerByAccount } from '../../mining/registration.js';
 import { submitEvidence } from '../../verification/evidence.js';
 import { calculateScore } from '../../verification/scoring.js';
-import { createVouch, getActiveVouchesForAccount, withdrawVouch } from '../../verification/vouching.js';
+import { getActiveVouchesForAccount } from '../../verification/vouching.js';
+import {
+  enqueueVouchOperation,
+  verifyVouchOperation,
+  validateVouchOperationApplicable,
+  deriveVouchId,
+  type VouchOperation,
+} from '../../verification/vouch-operation.js';
+import { getAccount } from '../../core/account.js';
 import { verificationStore } from '../../verification/panel.js';
 import { recordHeartbeat } from '../../mining/heartbeat.js';
 import { getLatestBlock } from '../../core/block.js';
@@ -90,27 +97,49 @@ export function minerRoutes(db: DatabaseSync) {
   });
 
   // POST /vouches - create a vouch (WP v2: stake a percentage of holdings).
-  router.post('/vouches', authMiddleware(db), validateBody(schemas.createVouch), (req, res) => {
+  // Create a vouch. The vouch now rides the chain (audit #4/#16): it moves the
+  // voucher's balance (earned -> locked) and, on later withdrawal, the vouched
+  // account's percentHuman - both consensus state - so applying it node-locally
+  // forked the ledger. The client signs a VouchOperation and sends it here; this
+  // route verifies and QUEUES it for the next block. It applies deterministically
+  // on every node at commit, not synchronously here.
+  //
+  // Body: { accountId, timestamp, signature, payload: { op: <signed VouchOpCreate> } }
+  router.post('/vouches', authMiddleware(db), (req, res) => {
     const voucherId = req.accountId!;
-    const { vouchedId, stakePercent } = req.body.payload || req.body;
-    const claimedVoucherId =
-      (req.body.payload && req.body.payload.voucherId) ?? req.body.voucherId;
-    if (claimedVoucherId && claimedVoucherId !== voucherId) {
-      return res.status(403).json({
+    const op = (req.body.payload?.op ?? req.body.op) as VouchOperation | undefined;
+    if (!op || op.type !== 'vouch_create') {
+      return res.status(400).json({
         success: false,
-        error: { code: 'VOUCHER_MISMATCH', message: 'voucherId does not match the authenticated account' },
+        error: { code: 'INVALID_OP', message: 'payload.op must be a signed vouch_create operation' },
       });
     }
-    if (!vouchedId || stakePercent == null) {
-      return res.status(400).json({ error: 'vouchedId and stakePercent required' });
+    if (op.voucherId !== voucherId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'VOUCHER_MISMATCH', message: 'op.voucherId does not match the authenticated account' },
+      });
     }
-
-    try {
-      const vouch = createVouch(db, voucherId, vouchedId, Number(stakePercent));
-      res.json({ vouch: { ...vouch, stakeAmount: vouch.stakeAmount.toString() } });
-    } catch (err) {
-      res.status(400).json({ error: String(err) });
+    const voucher = getAccount(db, voucherId);
+    if (!voucher) {
+      return res.status(404).json({ success: false, error: { code: 'ACCOUNT_NOT_FOUND', message: 'voucher not found' } });
     }
+    if (!verifyVouchOperation(op, voucher.publicKey)) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'INVALID_OP_SIGNATURE', message: 'vouch operation signature does not verify' },
+      });
+    }
+    const problem = validateVouchOperationApplicable(db, op);
+    if (problem) {
+      return res.status(400).json({ success: false, error: { code: 'OP_NOT_APPLICABLE', message: problem } });
+    }
+    enqueueVouchOperation(db, op);
+    return res.json({
+      success: true,
+      data: { status: 'pending', vouchId: deriveVouchId(op) },
+      meta: { timestamp: Math.floor(Date.now() / 1000) },
+    });
   });
 
   // POST /miners/heartbeat - "I am online and available for assignments."
@@ -175,11 +204,34 @@ export function minerRoutes(db: DatabaseSync) {
       });
     }
 
+    // Same chain-ordered path as create: the client signs a vouch_withdraw op,
+    // this route verifies + queues it, and it applies at commit on every node.
+    const op = (req.body.payload?.op ?? req.body.op) as VouchOperation | undefined;
+    if (!op || op.type !== 'vouch_withdraw' || op.vouchId !== vouchId) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_OP', message: 'payload.op must be a signed vouch_withdraw for this vouch' },
+      });
+    }
+    if (op.voucherId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'NOT_VOUCHER', message: 'op.voucherId does not match the authenticated account' },
+      });
+    }
+    const voucherAcct = getAccount(db, accountId);
+    if (!voucherAcct || !verifyVouchOperation(op, voucherAcct.publicKey)) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'INVALID_OP_SIGNATURE', message: 'vouch operation signature does not verify' },
+      });
+    }
     try {
-      withdrawVouch(db, vouchId);
+      enqueueVouchOperation(db, op);
       return res.json({
         success: true,
         data: {
+          status: 'pending',
           withdrawn: vouchId,
           vouchedId: vouch.vouchedId,
           returnedStake: vouch.stakeAmount.toString(),

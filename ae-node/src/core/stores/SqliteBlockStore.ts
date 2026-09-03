@@ -12,6 +12,7 @@ import type { CommitCertificate } from '../consensus/commit-certificate.js';
 import type { ValidatorInfo } from '../consensus/IValidatorSet.js';
 import type { ValidatorChange } from '../consensus/validator-change.js';
 import type { AccountRegistration } from '../account-registration.js';
+import type { VouchOperation } from '../../verification/vouch-operation.js';
 
 /**
  * JSON encoder/decoder for ValidatorInfo[] that survives the bigint stake.
@@ -38,6 +39,7 @@ function decodeValidatorSnapshot(json: string): ValidatorInfo[] {
 function rowToBlock(row: Record<string, unknown>): Block {
   const rawChanges = row.validator_changes as string | null | undefined;
   const rawRegistrations = row.account_registrations as string | null | undefined;
+  const rawVouchOps = row.vouch_operations as string | null | undefined;
   return {
     number: row.number as number,
     day: row.day as number,
@@ -52,6 +54,7 @@ function rowToBlock(row: Record<string, unknown>): Block {
     accountRegistrations: rawRegistrations
       ? (JSON.parse(rawRegistrations) as AccountRegistration[])
       : null,
+    vouchOperations: rawVouchOps ? (JSON.parse(rawVouchOps) as VouchOperation[]) : null,
   };
 }
 
@@ -66,6 +69,11 @@ function validatorChangesToColumn(block: Block): string | null {
 function accountRegistrationsToColumn(block: Block): string | null {
   if (!block.accountRegistrations || block.accountRegistrations.length === 0) return null;
   return JSON.stringify(block.accountRegistrations);
+}
+
+function vouchOperationsToColumn(block: Block): string | null {
+  if (!block.vouchOperations || block.vouchOperations.length === 0) return null;
+  return JSON.stringify(block.vouchOperations);
 }
 
 function rebaseEventToColumn(block: Block): string | null {
@@ -101,10 +109,10 @@ export class SqliteBlockStore implements IBlockStore {
   insert(block: Block, isGenesis: boolean): void {
     const cols =
       'number, day, timestamp, previous_hash, hash, merkle_root, transaction_count, ' +
-      'rebase_event, prev_commit_cert_hash, validator_changes, account_registrations';
+      'rebase_event, prev_commit_cert_hash, validator_changes, account_registrations, vouch_operations';
     const sql = isGenesis
-      ? `INSERT OR IGNORE INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      : `INSERT INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      ? `INSERT OR IGNORE INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      : `INSERT INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     this.db
       .prepare(sql)
       .run(
@@ -119,6 +127,7 @@ export class SqliteBlockStore implements IBlockStore {
         block.prevCommitCertHash,
         validatorChangesToColumn(block),
         accountRegistrationsToColumn(block),
+        vouchOperationsToColumn(block),
       );
   }
 

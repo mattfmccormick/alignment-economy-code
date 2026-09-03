@@ -16,6 +16,7 @@ import { seedParams } from '../src/config/params.js';
 import { createApp } from '../src/api/server.js';
 import { createAccount, getAccount, updateBalance } from '../src/core/account.js';
 import { createVouch } from '../src/verification/vouching.js';
+import { signVouchWithdraw, applyVouchOperation } from '../src/verification/vouch-operation.js';
 import { signPayload, generateKeyPair } from '../src/core/crypto.js';
 import { resetRateLimits } from '../src/api/middleware/rateLimit.js';
 import { verificationStore } from '../src/verification/panel.js';
@@ -94,7 +95,11 @@ function completedPanelAfterVouch(db: DatabaseSync, accountId: string, score: nu
 describe('POST /miners/vouches/:id/withdraw', () => {
   beforeEach(() => resetRateLimits());
 
-  it('lets the voucher withdraw, returning the stake and dropping the score', async () => {
+  it('queues the withdrawal, which applies (stake back, score down) at commit', async () => {
+    // The withdrawal now rides the chain (audit #4/#16): the route verifies and
+    // QUEUES a signed op; it applies deterministically at block commit. Here we
+    // POST the op (expecting 'pending'), then apply it directly to stand in for
+    // the committed block, then assert the effects.
     const db = freshDb();
     const voucher = makeAccount(db);
     const vouched = makeAccount(db, 40);
@@ -104,15 +109,31 @@ describe('POST /miners/vouches/:id/withdraw', () => {
     completedPanelAfterVouch(db, vouched.accountId, 40);
     const staked = getAccount(db, voucher.accountId)!.lockedBalance;
 
+    const ts = Math.floor(Date.now() / 1000);
+    const op = signVouchWithdraw({
+      voucherId: voucher.accountId,
+      vouchId: vouch.id,
+      timestamp: ts,
+      voucherPrivateKey: voucher.privateKey,
+    });
     const res = await request(
       createApp(db),
       'POST',
       `/api/v1/miners/vouches/${vouch.id}/withdraw`,
-      envelope(voucher.accountId, voucher.privateKey, vouch.id),
+      {
+        accountId: voucher.accountId,
+        timestamp: ts,
+        signature: signPayload({ op }, ts, voucher.privateKey),
+        payload: { op },
+      },
     );
+    assert.equal(res.status, 200, JSON.stringify(res.data));
+    assert.equal(res.data.data.status, 'pending');
+    // Nothing moved yet.
+    assert.ok(getAccount(db, voucher.accountId)!.lockedBalance > 0n);
 
-    assert.equal(res.status, 200);
-    assert.equal(res.data.data.percentHumanReduction, 10);
+    applyVouchOperation(db, op, ts); // stand in for the committed block
+
     assert.equal(getAccount(db, voucher.accountId)!.lockedBalance, 0n);
     assert.equal(getAccount(db, vouched.accountId)!.percentHuman, 30);
     assert.ok(getAccount(db, voucher.accountId)!.earnedBalance >= staked);

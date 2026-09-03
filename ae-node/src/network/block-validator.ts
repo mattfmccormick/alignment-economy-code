@@ -58,6 +58,11 @@ import {
 } from '../core/consensus/validator-change.js';
 import { accountStore } from '../core/account.js';
 import {
+  computeVouchOperationsHash,
+  verifyVouchOperation,
+  type VouchOperation,
+} from '../verification/vouch-operation.js';
+import {
   computeAccountRegistrationsHash,
   type AccountRegistration,
 } from '../core/account-registration.js';
@@ -182,6 +187,7 @@ export interface IncomingBlockPayload {
    * effect either way.
    */
   validatorChanges?: ValidatorChange[];
+  vouchOperations?: VouchOperation[];
 }
 
 export interface ValidationResult {
@@ -356,6 +362,12 @@ export function validateIncomingBlock(
     payload.accountRegistrations && payload.accountRegistrations.length > 0
       ? computeAccountRegistrationsHash(payload.accountRegistrations)
       : null;
+  // Same re-derivation for vouch operations: a producer that swaps, drops or
+  // reorders them breaks the hash and the block is rejected.
+  const vouchOperationsHash =
+    payload.vouchOperations && payload.vouchOperations.length > 0
+      ? computeVouchOperationsHash(payload.vouchOperations)
+      : null;
   const expectedHash = computeBlockHash(
     payload.number,
     payload.previousHash,
@@ -365,6 +377,7 @@ export function validateIncomingBlock(
     claimedCertHash,
     validatorChangesHash,
     accountRegistrationsHash,
+    vouchOperationsHash,
   );
   if (payload.hash !== expectedHash) {
     return {
@@ -552,6 +565,36 @@ export function validateIncomingBlock(
     }
   }
 
+  // Vouch operations: each must carry a signature that verifies against the
+  // voucher's account public key. Structural/precondition checks (self-vouch,
+  // missing vouch, etc.) are the apply step's concern - it throws and the block
+  // fails to apply locally, which the dry run catches.
+  if (payload.vouchOperations && payload.vouchOperations.length > 0) {
+    if (!Array.isArray(payload.vouchOperations)) {
+      return { valid: false, error: 'vouchOperations must be an array' };
+    }
+    const aStore = accountStore(db);
+    for (let i = 0; i < payload.vouchOperations.length; i++) {
+      const op = payload.vouchOperations[i];
+      if (typeof op?.voucherId !== 'string') {
+        return { valid: false, error: `vouchOperations[${i}] missing voucherId` };
+      }
+      const account = aStore.findById(op.voucherId);
+      if (!account) {
+        return {
+          valid: false,
+          error: `vouchOperations[${i}].voucherId ${op.voucherId} not found locally`,
+        };
+      }
+      if (!verifyVouchOperation(op, account.publicKey)) {
+        return {
+          valid: false,
+          error: `vouchOperations[${i}] signature does not verify against ${op.voucherId}`,
+        };
+      }
+    }
+  }
+
   return { valid: true };
 }
 
@@ -584,6 +627,10 @@ export function payloadToBlock(payload: IncomingBlockPayload): Block {
     accountRegistrations:
       payload.accountRegistrations && payload.accountRegistrations.length > 0
         ? payload.accountRegistrations
+        : null,
+    vouchOperations:
+      payload.vouchOperations && payload.vouchOperations.length > 0
+        ? payload.vouchOperations
         : null,
   };
 }

@@ -191,6 +191,52 @@ async function submitValidatorTransfer(apiPort, fromKs, toKs, amountBaseUnits) {
   return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
 }
 
+// Sign and submit a vouch operation (audit #4/#16). The voucher signs a
+// VouchOperation and the auth envelope over it; the route queues it and it
+// applies deterministically at commit on every node. Proves the vouch
+// chain-ordering converges across the network.
+async function submitVouch(apiPort, voucherKs, vouchedKs, stakePercent) {
+  const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
+  const opUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'verification', 'vouch-operation.js')).href;
+  const { signPayload } = await import(cryptoUrl);
+  const { signVouchCreate } = await import(opUrl);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const op = signVouchCreate({
+    voucherId: voucherKs.accountId,
+    vouchedId: vouchedKs.accountId,
+    stakePercent,
+    timestamp,
+    voucherPrivateKey: voucherKs.account.privateKey,
+  });
+  const payload = { op };
+  const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/miners/vouches`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: voucherKs.accountId,
+      timestamp,
+      signature: signPayload(payload, timestamp, voucherKs.account.privateKey),
+      payload,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+}
+
+async function waitForLockedIncrease(ports, accountId, minLocked, deadlineMs = 30000) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const locked = [];
+    for (const port of ports) {
+      const a = await getAccount(port, accountId);
+      locked.push(a ? BigInt(a.lockedBalance ?? '0') : 0n);
+    }
+    if (locked.every((l) => l >= minLocked)) return locked;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return null;
+}
+
 async function waitForRecipientCredit(ports, accountId, minBalance, deadlineMs = 30000) {
   const deadline = Date.now() + deadlineMs;
   while (Date.now() < deadline) {
@@ -370,6 +416,28 @@ async function main() {
   // Let a couple more blocks commit so all nodes have recorded a post-transfer
   // state root at a common height.
   await waitForHeight(apiPorts, Math.min(...heights) + 2);
+
+  // 4c. Submit a vouch operation (validator 0 vouches for validator 2). This
+  // moves the voucher's balance (earned -> locked) as a CHAIN operation, so if
+  // any node applied it differently the state roots below diverge. This is the
+  // determinism fix for the vouch path (audit #4/#16) exercised end-to-end.
+  const beforeVouch = await getAccount(apiPorts[0], keystores[0].accountId);
+  const lockedBefore = beforeVouch ? BigInt(beforeVouch.lockedBalance ?? '0') : 0n;
+  log('submitting vouch: validator 0 vouches 10% for validator 2');
+  const vouchRes = await submitVouch(apiPorts[0], keystores[0], keystores[2], 10);
+  if (!vouchRes.ok) {
+    teardown('vouch submit failed');
+    err(`vouch POST failed: HTTP ${vouchRes.status} ${JSON.stringify(vouchRes.body)}`);
+    process.exit(7);
+  }
+  const vouchLocked = await waitForLockedIncrease(apiPorts, keystores[0].accountId, lockedBefore + 1n);
+  if (!vouchLocked) {
+    teardown('vouch not applied on all nodes');
+    err('vouch did not lock the stake on all nodes within the deadline');
+    process.exit(7);
+  }
+  log(`vouch applied on all nodes; voucher locked balances: [${vouchLocked.join(', ')}]`);
+  await waitForHeight(apiPorts, Math.min(...heights) + 4);
 
   // 5. Compare latest block hashes via /network/blocks?limit=1.
   // Heights matching is necessary but not sufficient — same chain means

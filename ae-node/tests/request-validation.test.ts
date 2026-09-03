@@ -78,7 +78,8 @@ const BAD_CASES = [
   { name: 'POST /tags/ambient (tags not an array)', path: '/api/v1/tags/ambient', payload: { day: 1, tags: 'nope' } },
   { name: 'POST /tags/supportive (day not a number)', path: '/api/v1/tags/supportive', payload: { day: 'today', tags: [] } },
   { name: 'POST /contacts (missing contactAccountId)', path: '/api/v1/contacts', payload: {} },
-  { name: 'POST /miners/vouches (missing vouchedId)', path: '/api/v1/miners/vouches', payload: { stakePercent: 10 } },
+  // POST /miners/vouches no longer uses validateBody: it takes a signed vouch
+  // operation and validates that shape itself (see phase71 + vouch-operation).
 ] as const;
 
 describe('B2: request-body validation on write routes', () => {

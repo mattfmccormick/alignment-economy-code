@@ -48,6 +48,11 @@ import {
   computeAccountRegistrationsHash,
   type AccountRegistration,
 } from '../account-registration.js';
+import {
+  computeVouchOperationsHash,
+  applyVouchOperation,
+  type VouchOperation,
+} from '../../verification/vouch-operation.js';
 
 /**
  * Sentinel thrown to unwind a successful dry run so runTransaction rolls it
@@ -279,6 +284,17 @@ export interface BftBlockProducerConfig {
    */
   onAccountRegistrationsApplied?: (regs: AccountRegistration[]) => void;
   /**
+   * Pull signed vouch operations to include in the next block this node
+   * proposes. Same contract as the queues above: only the proposer's own queue
+   * feeds a block; receivers apply whatever arrives in the payload.
+   */
+  pendingVouchOperations?: () => VouchOperation[];
+  /**
+   * Fired after a block's vouch operations have been applied locally, so the
+   * proposer can drain its queue. Every node calls it, so it must be idempotent.
+   */
+  onVouchOperationsApplied?: (ops: VouchOperation[]) => void;
+  /**
    * Fired after a block's transactions have been applied to balances.
    *
    * Under commit-time execution this is the moment money actually moves, so it
@@ -327,6 +343,8 @@ export class BftBlockProducer {
   private readonly onValidatorChangesApplied:
     | ((changes: ValidatorChange[]) => void)
     | undefined;
+  private readonly pendingVouchOperations: (() => VouchOperation[]) | undefined;
+  private readonly onVouchOperationsApplied: ((ops: VouchOperation[]) => void) | undefined;
   private readonly pendingAccountRegistrations: (() => AccountRegistration[]) | undefined;
   private readonly onAccountRegistrationsApplied:
     | ((regs: AccountRegistration[]) => void)
@@ -344,6 +362,8 @@ export class BftBlockProducer {
     this.onValidatorChangesApplied = config.onValidatorChangesApplied;
     this.pendingAccountRegistrations = config.pendingAccountRegistrations;
     this.onAccountRegistrationsApplied = config.onAccountRegistrationsApplied;
+    this.pendingVouchOperations = config.pendingVouchOperations;
+    this.onVouchOperationsApplied = config.onVouchOperationsApplied;
     this.onTransactionsApplied = config.onTransactionsApplied;
 
     const latest = getLatestBlock(this.db);
@@ -666,6 +686,15 @@ export class BftBlockProducer {
         ? computeAccountRegistrationsHash(accountRegistrations)
         : null;
 
+    // Signed vouch operations queued since our last proposal. Same queue shape
+    // and hash-folding as the two above; null hash for the empty case keeps the
+    // legacy block hash.
+    const vouchOperations: VouchOperation[] = this.pendingVouchOperations
+      ? this.pendingVouchOperations()
+      : [];
+    const vouchOperationsHash =
+      vouchOperations.length > 0 ? computeVouchOperationsHash(vouchOperations) : null;
+
     const hash = computeBlockHash(
       height,
       previousHash,
@@ -675,6 +704,7 @@ export class BftBlockProducer {
       prevCommitCertHash,
       validatorChangesHash,
       accountRegistrationsHash,
+      vouchOperationsHash,
     );
 
     // Session 53 fix: include parentCertificate + parentValidatorSnapshot
@@ -723,6 +753,7 @@ export class BftBlockProducer {
       parentStateRoot: computeStateRoot(this.db),
       ...(accountRegistrations.length > 0 ? { accountRegistrations } : {}),
       ...(validatorChanges.length > 0 ? { validatorChanges } : {}),
+      ...(vouchOperations.length > 0 ? { vouchOperations } : {}),
       ...(parentCert ? { parentCertificate: parentCert } : {}),
       ...(parentSnapshot ? { parentValidatorSnapshot: parentSnapshot } : {}),
     };
@@ -780,6 +811,7 @@ export class BftBlockProducer {
     const txs = payload.transactions ?? [];
 
     const validatorChanges: ValidatorChange[] = payload.validatorChanges ?? [];
+    const vouchOperations: VouchOperation[] = payload.vouchOperations ?? [];
 
     // Everything below is one DB transaction, so a throw anywhere rolls the
     // whole block back — the node keeps a consistent view of height N-1 rather
@@ -846,6 +878,14 @@ export class BftBlockProducer {
           applyValidatorChange(this.db, change, block.timestamp);
         }
 
+        // Apply vouch operations in the fixed block order, after transactions
+        // and validator changes so the voucher's balance is settled. Each is
+        // idempotent (a re-delivered create/withdraw is a no-op) and uses the
+        // block timestamp, so every node reaches identical state.
+        for (const op of vouchOperations) {
+          applyVouchOperation(this.db, op, block.timestamp);
+        }
+
         // Distribute the block's fees per WP economics. Idempotent — every
         // node (proposer + followers replaying via this same path) reaches
         // the same balances.
@@ -886,6 +926,16 @@ export class BftBlockProducer {
     if (accountRegistrations.length > 0 && this.onAccountRegistrationsApplied) {
       try {
         this.onAccountRegistrationsApplied(accountRegistrations);
+      } catch (err) {
+        void err;
+      }
+    }
+
+    // Drain the proposer's vouch-operation queue now they are on-chain. Queue
+    // bookkeeping only; a failure here must not disturb consensus.
+    if (vouchOperations.length > 0 && this.onVouchOperationsApplied) {
+      try {
+        this.onVouchOperationsApplied(vouchOperations);
       } catch (err) {
         void err;
       }
