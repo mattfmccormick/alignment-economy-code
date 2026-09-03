@@ -6,6 +6,7 @@ import { runTransaction } from '../db/connection.js';
 import { getFeePool, distributeFromFeePool } from '../core/fee-pool.js';
 import { sha256 } from '../core/crypto.js';
 import { getActiveMiners } from './registration.js';
+import { blockStore } from '../core/block.js';
 import { selectLotteryWinner } from './vrf.js';
 import type { FeeDistribution } from './types.js';
 
@@ -200,9 +201,23 @@ export function distributeFeesPublicLottery(
       perTier2Baseline = tier2Baseline / BigInt(tier2Count);
       const tier2Remainder = tier2Baseline - perTier2Baseline * BigInt(tier2Count);
 
+      // Lottery seed: the PARENT block's hash, not this block's (audit #17).
+      //
+      // This block's hash is chosen by the proposer, who can grind its content
+      // and timestamp to make itself win whenever it also runs a tier-2 miner -
+      // a self-deal on every block it proposes. The parent hash is committed
+      // history the current proposer cannot alter for this block, and it is
+      // identical on every node, so the draw stays deterministic while no longer
+      // being the proposer's to fix. (Full unbiasability - a VRF over a
+      // chain-anchored seed, via selectLotteryWinner - is the deeper fix; this
+      // removes the same-block self-deal at no determinism cost.) tier2Miners is
+      // already ordered by account_id, so the tie-break is deterministic too.
+      const parent = blockNumber > 1 ? blockStore(db).findByNumber(blockNumber - 1) : null;
+      const lotterySeed = parent?.hash ?? blockHash;
+
       let winningHash = '';
       for (const miner of tier2Miners) {
-        const h = sha256(`${blockHash}|${miner.accountId}`);
+        const h = sha256(`${lotterySeed}|${miner.accountId}`);
         if (winningHash === '' || h < winningHash) {
           winningHash = h;
           lotteryWinnerId = miner.id;

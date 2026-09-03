@@ -22,6 +22,39 @@ import type { AccountType } from '../../core/types.js';
  */
 export type AccountBroadcaster = (reg: PeerAccountRegistration) => void;
 
+// Short-TTL cache for the expensive share-history computation (audit #12).
+//
+// share-history walks every account across up to a year of days, which is O(days
+// x accounts) and blocks the event loop; the endpoint is unauthenticated, so a
+// flood was a cheap way to stall the node. This bounds the common flood (the
+// same account refreshing, or one attacker hammering a handful of ids) to one
+// computation per account per TTL. It does NOT bound a flood across thousands of
+// DISTINCT ids - only the IP limiter does that today - so the real fix remains
+// the per-day snapshot table noted at the query below. Kept tiny and self-
+// evicting so it cannot itself become a memory sink.
+const SHARE_HISTORY_TTL_MS = 15_000;
+const SHARE_HISTORY_CACHE_MAX = 500;
+const shareHistoryCache = new Map<string, { at: number; body: unknown }>();
+
+function shareHistoryCacheGet(key: string): unknown | null {
+  const hit = shareHistoryCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > SHARE_HISTORY_TTL_MS) {
+    shareHistoryCache.delete(key);
+    return null;
+  }
+  return hit.body;
+}
+
+function shareHistoryCacheSet(key: string, body: unknown): void {
+  if (shareHistoryCache.size >= SHARE_HISTORY_CACHE_MAX) {
+    // Cheapest bounded eviction: drop the oldest inserted entry.
+    const oldest = shareHistoryCache.keys().next().value;
+    if (oldest !== undefined) shareHistoryCache.delete(oldest);
+  }
+  shareHistoryCache.set(key, { at: Date.now(), body });
+}
+
 export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroadcaster): Router {
   const router = Router();
 
@@ -253,6 +286,12 @@ export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroa
         return;
       }
 
+      const cached = shareHistoryCacheGet(accountId);
+      if (cached !== null) {
+        res.json(cached);
+        return;
+      }
+
       // Protocol day boundary is 08:59 UTC (32340s past midnight). A timestamp
       // belongs to the day that opened at the most recent 09:00 UTC mint.
       const ANCHOR = 8 * 3600 + 59 * 60;
@@ -318,11 +357,13 @@ export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroa
       }
       points.reverse(); // oldest first
 
-      res.json({
+      const body = {
         success: true,
         data: { points, currentDay: today, joinedDay: account.joinedDay },
         meta: { timestamp: nowSec },
-      });
+      };
+      shareHistoryCacheSet(accountId, body);
+      res.json(body);
     } catch (e) { next(e); }
   });
 

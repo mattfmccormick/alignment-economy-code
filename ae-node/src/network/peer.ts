@@ -109,6 +109,12 @@ export class PeerManager extends EventEmitter {
   // Sockets THIS node opened (outbound dials), as opposed to inbound accepts.
   // Used only for the deterministic duplicate-connection tiebreak in addPeer.
   private outboundSockets = new WeakSet<WebSocket>();
+  // Inbound sockets that have connected but not yet completed a handshake, each
+  // with a deadline timer (audit #19). Bounds how many half-open connections an
+  // attacker can hold, and closes any socket that never handshakes.
+  private pendingHandshakes = new Map<WebSocket, ReturnType<typeof setTimeout>>();
+  private static readonly HANDSHAKE_DEADLINE_MS = 10_000;
+  private static readonly MAX_PENDING_HANDSHAKES = 64;
 
   constructor(
     identity: NodeIdentity,
@@ -277,6 +283,32 @@ export class PeerManager extends EventEmitter {
   }
 
   handleIncomingConnection(ws: WebSocket, remoteAddress: string): void {
+    // Reject if too many half-open connections are already pending (audit #19).
+    // A socket that has not handshaken consumes memory and a signature-verify
+    // slot; without a cap an attacker could open thousands and hold them.
+    if (this.pendingHandshakes.size >= PeerManager.MAX_PENDING_HANDSHAKES) {
+      try {
+        ws.close(4006, 'too many pending connections');
+      } catch {
+        /* already closing */
+      }
+      return;
+    }
+    // Arm a deadline: if this socket has not become a peer (completed a
+    // handshake) in time, close it. Cleared in addPeer on success and in the
+    // close handler below.
+    const deadline = setTimeout(() => {
+      const stillPending = this.pendingHandshakes.has(ws);
+      this.pendingHandshakes.delete(ws);
+      if (stillPending) {
+        try {
+          ws.close(4007, 'handshake timeout');
+        } catch {
+          /* already closing */
+        }
+      }
+    }, PeerManager.HANDSHAKE_DEADLINE_MS);
+    this.pendingHandshakes.set(ws, deadline);
     // Port 0 is deliberate and means "we do not know this peer's listen port."
     // The socket's source port is an ephemeral client port, not something any
     // node can dial. isDialable() keeps such entries out of both the dial path
@@ -289,6 +321,11 @@ export class PeerManager extends EventEmitter {
     });
 
     ws.on('close', () => {
+      const pendingTimer = this.pendingHandshakes.get(ws);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        this.pendingHandshakes.delete(ws);
+      }
       for (const [id, peer] of this.peers) {
         if (peer.ws === ws) {
           peer.info.status = 'disconnected';
@@ -601,6 +638,13 @@ export class PeerManager extends EventEmitter {
         }
         return;
       }
+    }
+
+    // Handshake completed for this socket - clear its deadline (audit #19).
+    const pendingTimer = this.pendingHandshakes.get(ws);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      this.pendingHandshakes.delete(ws);
     }
 
     const isNew = !this.peers.has(hs.nodeId);

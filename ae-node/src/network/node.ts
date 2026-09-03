@@ -221,7 +221,12 @@ export class AENode {
   /** Start the P2P WebSocket server and connect to the network */
   start(): void {
     this.server = createServer();
-    this.wss = new WebSocketServer({ server: this.server });
+    // Cap inbound message size (audit #19). ws defaults to a 100 MiB frame
+    // limit, so before this one peer could make the node buffer 100 MiB of
+    // attacker-chosen bytes per message. The largest legitimate message is a
+    // multi-block sync reply; 8 MiB covers that with headroom while removing the
+    // memory-amplification vector.
+    this.wss = new WebSocketServer({ server: this.server, maxPayload: 8 * 1024 * 1024 });
 
     this.wss.on('connection', (ws, req) => {
       const remoteAddress = req.socket.remoteAddress ?? 'unknown';
