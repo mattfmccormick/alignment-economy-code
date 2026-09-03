@@ -22,6 +22,71 @@ export function signPayload(payload: object, timestamp: number, privateKeyHex: s
   return bytesToHex(sig);
 }
 
+// ─── Vouch operations (audit #4/#16) ─────────────────────────────────────
+//
+// A vouch now rides the chain, so the client signs a VouchOperation over its
+// CANONICAL pipe-delimited bytes - byte-identical to ae-node's
+// verification/vouch-operation.ts canonicalBytesFor(). The route verifies this
+// signature against the voucher's public key and queues the op for a block.
+// This is a raw ML-DSA sign over the canonical string, NOT the JSON+timestamp
+// envelope signPayload uses.
+
+function signCanonical(message: string, privateKeyHex: string): string {
+  const sig = ml_dsa65.sign(new TextEncoder().encode(message), hexToBytes(privateKeyHex));
+  return bytesToHex(sig);
+}
+
+export interface VouchOpCreate {
+  type: 'vouch_create';
+  voucherId: string;
+  vouchedId: string;
+  stakePercent: number;
+  timestamp: number;
+  signature: string;
+}
+
+export interface VouchOpWithdraw {
+  type: 'vouch_withdraw';
+  voucherId: string;
+  vouchId: string;
+  timestamp: number;
+  signature: string;
+}
+
+export function signVouchCreate(
+  voucherId: string,
+  vouchedId: string,
+  stakePercent: number,
+  timestamp: number,
+  privateKeyHex: string,
+): VouchOpCreate {
+  const canonical = `vouch_create|${voucherId}|${vouchedId}|${stakePercent}|${timestamp}`;
+  return {
+    type: 'vouch_create',
+    voucherId,
+    vouchedId,
+    stakePercent,
+    timestamp,
+    signature: signCanonical(canonical, privateKeyHex),
+  };
+}
+
+export function signVouchWithdraw(
+  voucherId: string,
+  vouchId: string,
+  timestamp: number,
+  privateKeyHex: string,
+): VouchOpWithdraw {
+  const canonical = `vouch_withdraw|${voucherId}|${vouchId}|${timestamp}`;
+  return {
+    type: 'vouch_withdraw',
+    voucherId,
+    vouchId,
+    timestamp,
+    signature: signCanonical(canonical, privateKeyHex),
+  };
+}
+
 // ─── BIP39 mnemonic-derived keys ─────────────────────────────────────────
 export function newMnemonic(): string {
   return generateMnemonic(wordlist, 128);

@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react';
 import { api, type VouchData, type VouchRequests, type Account, type Vouch, type VouchRequest } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
-import { signPayload } from '../lib/crypto';
+import { signPayload, signVouchCreate, signVouchWithdraw } from '../lib/crypto';
 import { displayPoints, truncateId, timeAgo } from '../lib/formatting';
 
 const MIN_STAKE_PERCENT = 5; // matches white-paper default vouch policy
@@ -297,7 +297,10 @@ function IncomingRow({
       const w = loadMinerWallet();
       if (!w) { setRowErr('Wallet not loaded. Sign in again.'); return; }
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { vouchedId: request.fromId, stakePercent: pct };
+      // The vouch now rides the chain: sign a VouchOperation and send it. The
+      // auth envelope is signed over the same { op } payload.
+      const op = signVouchCreate(myAccountId, request.fromId, pct, ts, w.privateKey);
+      const payload = { op };
       const signature = signPayload(payload, ts, w.privateKey);
       const v = await api.submitVouch({
         accountId: myAccountId,
@@ -455,12 +458,14 @@ function ActiveVouchesCard({
       const w = loadMinerWallet();
       if (!w) { setErr('Wallet not loaded. Sign in again.'); return; }
       const ts = Math.floor(Date.now() / 1000);
-      const signature = signPayload({ vouchId: v.id }, ts, w.privateKey);
+      const op = signVouchWithdraw(w.accountId, v.id, ts, w.privateKey);
+      const payload = { op };
+      const signature = signPayload(payload, ts, w.privateKey);
       const res = await api.withdrawVouch(v.id, {
         accountId: w.accountId,
         timestamp: ts,
         signature,
-        payload: { vouchId: v.id },
+        payload,
       });
       if (!res.success) {
         setErr(res.error?.message ?? 'Could not withdraw that stake.');

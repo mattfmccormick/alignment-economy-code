@@ -30,7 +30,17 @@ vi.mock('../hooks/useAccount', () => ({
   }),
 }));
 
-vi.mock('../lib/crypto', () => ({ signPayload: () => 'test-signature' }));
+vi.mock('../lib/crypto', () => ({
+  signPayload: () => 'test-signature',
+  signVouchCreate: (voucherId: string, vouchedId: string, stakePercent: number, timestamp: number) => ({
+    type: 'vouch_create',
+    voucherId,
+    vouchedId,
+    stakePercent,
+    timestamp,
+    signature: 'test-op-signature',
+  }),
+}));
 vi.mock('../lib/hash', () => ({ hashFileSHA256: vi.fn() }));
 vi.mock('../lib/websocket', () => ({ wsClient: { on: vi.fn(() => () => {}) } }));
 
@@ -179,8 +189,10 @@ describe('Verify incoming vouch requests', () => {
 
     // The vouch is for the person who ASKED, staking at least the minimum.
     const arg = mockApi.createVouch.mock.calls[0][0];
-    expect(arg.payload.vouchedId).toBe('friend-abc');
-    expect(arg.payload.stakePercent).toBeGreaterThanOrEqual(5);
+    const op = arg.payload.op as { type: string; vouchedId: string; stakePercent: number };
+    expect(op.type).toBe('vouch_create');
+    expect(op.vouchedId).toBe('friend-abc');
+    expect(op.stakePercent).toBeGreaterThanOrEqual(5);
     expect(arg.accountId).toBe('me');
 
     // And only then is the request marked handled.

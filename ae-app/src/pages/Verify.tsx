@@ -3,7 +3,7 @@ import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
 import type { PanelSummary, VouchData } from '../lib/types';
-import { signPayload } from '../lib/crypto';
+import { signPayload, signVouchCreate } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { truncateId, displayPoints } from '../lib/formatting';
 import { hashFileSHA256 } from '../lib/hash';
@@ -255,7 +255,10 @@ export function Verify() {
     setVouchActionBusy(req.id);
     try {
       const ts = Math.floor(Date.now() / 1000);
-      const vouchPayload = { vouchedId: req.fromId, stakePercent };
+      // The vouch rides the chain now: sign a VouchOperation and send it; the
+      // auth envelope is signed over the same { op } payload.
+      const op = signVouchCreate(wallet.accountId, req.fromId, stakePercent, ts, wallet.privateKey);
+      const vouchPayload = { op };
       const vouchRes = await api.createVouch({
         accountId: wallet.accountId,
         timestamp: ts,

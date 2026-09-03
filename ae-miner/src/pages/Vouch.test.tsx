@@ -14,6 +14,21 @@ vi.mock('../lib/keys', () => ({
 
 vi.mock('../lib/crypto', () => ({
   signPayload: () => 'sig',
+  signVouchCreate: (voucherId: string, vouchedId: string, stakePercent: number, timestamp: number) => ({
+    type: 'vouch_create',
+    voucherId,
+    vouchedId,
+    stakePercent,
+    timestamp,
+    signature: 'op-sig',
+  }),
+  signVouchWithdraw: (voucherId: string, vouchId: string, timestamp: number) => ({
+    type: 'vouch_withdraw',
+    voucherId,
+    vouchId,
+    timestamp,
+    signature: 'op-sig',
+  }),
 }));
 
 vi.mock('../lib/api', () => ({
@@ -72,10 +87,14 @@ describe('Vouch accept flow', () => {
 
     // Stake locked with the default 5% policy minimum, vouching for the requester.
     expect(mockApi.submitVouch).toHaveBeenCalledTimes(1);
-    expect(mockApi.submitVouch.mock.calls[0][0].payload).toEqual({
-      vouchedId: 'friend',
-      stakePercent: 5,
-    });
+    const op = mockApi.submitVouch.mock.calls[0][0].payload.op as {
+      type: string;
+      vouchedId: string;
+      stakePercent: number;
+    };
+    expect(op.type).toBe('vouch_create');
+    expect(op.vouchedId).toBe('friend');
+    expect(op.stakePercent).toBe(5);
     // And the request is only then marked accepted.
     expect(mockApi.updateVouchRequest.mock.calls[0][0]).toBe('req1');
     expect(mockApi.updateVouchRequest.mock.calls[0][1].payload).toEqual({ status: 'accepted' });

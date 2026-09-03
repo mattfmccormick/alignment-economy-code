@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
-import { truncateId, toBaseUnits, displayPoints } from '../lib/formatting';
+import { truncateId, toBaseUnits, displayPoints, baseUnitsToExactDisplay } from '../lib/formatting';
 
 // Centralize the ts/sig/payload envelope shape so all four recurring
 // mutations look the same. Auth-required routes (auth-fix round 4)

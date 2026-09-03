@@ -196,7 +196,7 @@ export const api = {
   // Vouches (WP v2: percentage-based).
   // The voucher signs `{ vouchedId, stakePercent }` — the backend computes
   // the actual locked amount from the voucher's total holdings.
-  createVouch: (envelope: { accountId: string; timestamp: number; signature: string; payload: { vouchedId: string; stakePercent: number } }) =>
+  createVouch: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
     request<{ vouch: VouchData }>('POST', '/miners/vouches', envelope),
 
   getVouches: (accountId: string) =>

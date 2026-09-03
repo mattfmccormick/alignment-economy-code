@@ -15,6 +15,31 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Vouch operations (audit #4/#16). A vouch rides the chain, so the client signs
+// a VouchOperation over its CANONICAL pipe-delimited bytes, byte-identical to
+// ae-node's verification/vouch-operation.ts canonicalBytesFor(). Raw ML-DSA
+// over the canonical string, NOT the JSON+timestamp envelope signPayload uses.
+export interface VouchOpCreate {
+  type: 'vouch_create';
+  voucherId: string;
+  vouchedId: string;
+  stakePercent: number;
+  timestamp: number;
+  signature: string;
+}
+
+export function signVouchCreate(
+  voucherId: string,
+  vouchedId: string,
+  stakePercent: number,
+  timestamp: number,
+  privateKeyHex: string,
+): VouchOpCreate {
+  const canonical = `vouch_create|${voucherId}|${vouchedId}|${stakePercent}|${timestamp}`;
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'vouch_create', voucherId, vouchedId, stakePercent, timestamp, signature: bytesToHex(sig) };
+}
+
 export function signPayload(payload: object, timestamp: number, privateKeyHex: string): string {
   const message = JSON.stringify(payload) + timestamp.toString();
   const data = new TextEncoder().encode(message);
