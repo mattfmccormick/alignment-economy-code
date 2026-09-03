@@ -12,6 +12,53 @@ Optimize for, in order:
 
 Deployment-stage and operations work (NAT traversal, public bootstrap nodes, picking a host, code-signing certs, running infrastructure, external audits) is explicitly the professional team's job. We make the code ready for that work and document the seams. We do not have to operate it ourselves.
 
+## Launch-readiness audit (September 3, 2026)
+
+Before opening the network up, an eight-dimension adversarial audit read the
+whole codebase (consensus, economics, crypto/auth, determinism, scale, network,
+operations, app surface). Every finding was verified against the source by a
+second reviewer instructed to refute it; 28 survived. This session fixed 24 of
+them. The four that remain are large and are scoped at the end of "Known
+Issues" below.
+
+**The one that mattered most is fixed: the BFT deadlock (#1).** A locked
+proposer never re-proposed its locked value, so a locked validator voted NIL on
+every fresh proposal forever and the height deadlocked in silence - the 3-node
+"all quiet for 90s" flake, roughly 1 run in 3. The proposer now re-serves its
+locked block. The LAN 3-validator test went from ~1/3 failing to 15/15 green,
+with the 2-node canary still clean.
+
+**Fixed and pushed this session (24 of 28):**
+- Consensus: the deadlock (#1); a committed block with no local content now
+  halts loudly instead of writing a chain hole (#23); catch-up sync no longer
+  strips signature fields (#14).
+- Determinism / forks: the daily mint no longer reads the node-local miners
+  table (#6); miner iteration is ordered (#5/#7); the fee pool is in the state
+  root so fee-distribution drift is visible (#5/#7). The deeper "all state must
+  come from the chain" work is the remaining cluster below.
+- Crypto / auth: transaction replay is rejected (id derived from the signature)
+  and signatures are no longer published (#2); a transaction signature can no
+  longer authenticate a request (#3, interim guard); a missing payload no longer
+  downgrades to a signature over {} (#15); the spoofable per-account rate limit
+  that let anyone lock out any account is gone (#24).
+- Network: a malformed gossip packet can no longer crash the node, and the peers
+  message authenticates and is bounded (#8/#18); bans expire with backoff so one
+  bad block cannot permanently partition honest nodes (#9, interim); the
+  duplicate-connection tiebreak is deterministic and reconnect is jittered (#22);
+  pre-handshake sockets are size-capped, count-capped and time-limited (#19).
+- Economics: the fee lottery seeds on the parent hash, not the proposer-chosen
+  block hash, so a validator-miner cannot grind to win (#17).
+- App / ops: sealed jury votes are not leaked by the jury-duty endpoint (#13);
+  the wallet recurring-edit unit bug that divided transfers by 1e8 is fixed
+  (#21); account search no longer leaks balances (#27); share-history has a
+  response cache to blunt its DoS (#12, partial); the docs' fault-tolerance
+  claim is corrected - 3 validators is NOT fault tolerant, 4 is (#25).
+- The tool this project shipped for adding a validator was writing to one node's
+  DB instead of the chain; it now targets /propose-register (#11), with a test.
+
+Every batch kept the ae-node unit suite green (795 tests) and, for the consensus
+and network changes, the 3-validator LAN test green.
+
 ## Multi-node bring-up audit (August 16 – September 2, 2026)
 
 Running the network across real machines: two laptops first, then a dedicated
@@ -1362,6 +1409,59 @@ including History.tsx, the explorer, and anything added later.
    blocks, the state root cannot be enforced. The
    `POST /miners/vouches/:id/withdraw` route adds one more such writer,
    consistent with `createVouch` beside it but moving the wrong way.
+
+### Remaining after the Sept 3 audit: the large four
+
+Four confirmed findings were deliberately NOT fixed this session, because each
+is a large, correctness-critical change that must be built and validated as its
+own unit (the way the deadlock fix was), not rushed inside a sweep. The interim
+mitigations already applied are noted.
+
+1. **percentHuman and value are not chain state (#4, critical) and neither are
+   tags (#16) — the "state must come only from the chain" cluster.** This is one
+   architectural change, not several. `replayTransaction` /
+   `acceptPendingTransaction` take `fee` / `netAmount` off the wire and apply
+   them verbatim; only `processTransaction` on the origin node re-derives them
+   from the sender's `percentHuman`. So a crafted transaction can claim full
+   value for a 0% sybil and every other node applies the inflated number — an
+   unbounded mint. The reason the code trusts the wire is that `percentHuman`
+   itself is node-local (written by `verification/panel.ts` from a REST call),
+   so re-deriving locally would make honest nodes disagree and FORK. Both halves
+   only become safe once `percentHuman`, miner status, and tag submissions are
+   chain-ordered, replicated operations — the same pattern `AccountRegistration`
+   already uses (schema v13): a signed op, a pending queue drained by the
+   proposer, a hash folded into `computeBlockHash`, applied deterministically at
+   commit on both the live and sync paths. Do that, then re-derive value locally
+   and reject wire mismatches. Interim already in place: the daily mint no longer
+   reads node-local miner state, miner iteration is ordered, and the fee pool is
+   in the state root so this class of drift is at least visible. Do NOT ship the
+   "re-derive and reject" half before percentHuman is replicated — it trades the
+   mint exploit for a chain halt.
+
+2. **State root stays diagnostic (blocker 1 above).** Same root cause as the
+   cluster above and blocked on the same work: fold a state-root hash into the
+   block hash only AFTER account state (registrations, percentHuman, tags) is a
+   pure function of the chain, or the deadlock moves into hash verification.
+
+3. **Full domain separation of the signing scheme (#3).** The interim guard
+   rejects a transaction-shaped payload at the auth layer and signatures are no
+   longer published, which closes the demonstrated exploit. The complete fix
+   binds a per-purpose domain tag (and ideally accountId + method + path) into
+   the signed bytes, in the node AND both apps in lockstep. It is ~30 signing
+   call sites across ae-app/ae-miner that must move together; safe to do, but it
+   needs the apps built and exercised, so it belongs in a session that can run
+   them, not a node-only sweep.
+
+4. **Validate-before-relay for gossip (#9).** Bans now expire, so one bad block
+   no longer permanently partitions the network. The remaining half: relay a
+   block only after it passes `validateIncomingBlock`, and attribute a bad block
+   to its signed producer identity rather than the relay hop, so a relayer is
+   never punished for forwarding. Touches the block:received emit contract.
+
+Lower-priority, not blocking: `computeStateRoot` is O(accounts) and now runs each
+commit (#26) — fine below ~50k accounts, wants an incremental accumulator or a
+cache-per-height before then; the share-history endpoint still needs its per-day
+snapshot table for the distinct-id flood case (#12).
 
 ### Real multi-node check
 

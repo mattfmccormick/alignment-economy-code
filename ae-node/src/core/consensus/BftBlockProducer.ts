@@ -751,11 +751,29 @@ export class BftBlockProducer {
   private onCommit(height: number, hash: string, cert: CommitCertificate): void {
     const payload = this.stash.get(hash);
     if (!payload) {
-      // Block content didn't make it through. In a proper rollout this
-      // would trigger a "fetch block by hash" sync request. For now we
-      // log and bail; the round will be retried (committed cert exists,
-      // we just can't apply locally).
-      return;
+      // We hold a commit certificate for a block whose CONTENT never reached
+      // us (audit #23). Returning here silently advanced the consensus height
+      // without applying the block, which writes a permanent hole in this
+      // node's chain: the next block builds on a height this node never
+      // applied, and every descendant hash then mismatches.
+      //
+      // Throw instead, so BftDriver's fail-stop engages and this node halts
+      // loudly at this height rather than diverging - the same "halting beats
+      // diverging" rule the apply path below relies on. Recovery is a restart
+      // + sync, which refetches the block, instead of a silent fork discovered
+      // blocks later.
+      //
+      // Not reachable while quorum equals the validator count (n<=3): a commit
+      // certificate then requires every validator to have precommitted, which
+      // requires every validator to have validated - and therefore stashed -
+      // the block. It becomes reachable at n>=4, where a node can see a cert
+      // formed by a quorum that does not include it. A "fetch block by hash"
+      // request is the graceful upgrade; halting is the correct floor.
+      throw new Error(
+        `Committed block ${height} (${hash.slice(0, 12)}…) has no local content ` +
+          `to apply. Halting rather than skipping the height. Restart to sync ` +
+          `the missing block from a peer.`,
+      );
     }
 
     const block = payloadToBlock(payload);
