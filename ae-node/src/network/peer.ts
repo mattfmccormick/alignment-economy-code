@@ -96,7 +96,19 @@ export class PeerManager extends EventEmitter {
   private networkId: string;
   private identity: NodeIdentity;
   /** Banned peer publicKeys (hex). Survives node restarts only if persisted by the caller. */
-  private bannedKeys = new Set<string>();
+  // Time-based bans with escalating backoff (audit #9).
+  //
+  // Bans used to be a permanent Set, cleared only by restarting the banning
+  // node. Because a node relays a block before validating it, one crafted bad
+  // block made every honest node that relayed it get banned by its neighbours -
+  // permanently - so a single message could partition the whole network until
+  // every node was restarted. An expiring ban keeps the punishment for a real
+  // misbehaving peer while letting an honest node that relayed one bad payload
+  // recover on its own. Strikes escalate the duration for a genuinely bad peer.
+  private bannedKeys = new Map<string, { until: number; strikes: number }>();
+  // Sockets THIS node opened (outbound dials), as opposed to inbound accepts.
+  // Used only for the deterministic duplicate-connection tiebreak in addPeer.
+  private outboundSockets = new WeakSet<WebSocket>();
 
   constructor(
     identity: NodeIdentity,
@@ -147,8 +159,18 @@ export class PeerManager extends EventEmitter {
   }
 
   /** Ban a peer by their long-lived public key. The friendly nodeId is spoofable; the public key is not. */
+  private static readonly BAN_BASE_MS = 30_000; // first strike: 30s
+  private static readonly BAN_MAX_MS = 3_600_000; // cap: 1h
+
   banPeer(publicKey: string, reason?: string): void {
-    this.bannedKeys.add(publicKey);
+    const prior = this.bannedKeys.get(publicKey);
+    const strikes = (prior?.strikes ?? 0) + 1;
+    // 30s, 60s, 120s, ... capped at 1h. Repeat offenders stay out longer.
+    const duration = Math.min(
+      PeerManager.BAN_BASE_MS * 2 ** (strikes - 1),
+      PeerManager.BAN_MAX_MS,
+    );
+    this.bannedKeys.set(publicKey, { until: Date.now() + duration, strikes });
     // Disconnect any open connection from this key.
     for (const [id, peer] of this.peers) {
       if (peer.info.publicKey === publicKey) {
@@ -161,7 +183,14 @@ export class PeerManager extends EventEmitter {
   }
 
   isBanned(publicKey: string): boolean {
-    return this.bannedKeys.has(publicKey);
+    const entry = this.bannedKeys.get(publicKey);
+    if (!entry) return false;
+    if (entry.until <= Date.now()) {
+      // Expired. Keep the strike history so a re-offender escalates, but the
+      // key is no longer blocked.
+      return false;
+    }
+    return true;
   }
 
   /** Test/admin helper: clear the ban list. */
@@ -170,7 +199,10 @@ export class PeerManager extends EventEmitter {
   }
 
   getBannedKeys(): string[] {
-    return Array.from(this.bannedKeys);
+    const now = Date.now();
+    return Array.from(this.bannedKeys.entries())
+      .filter(([, v]) => v.until > now)
+      .map(([k]) => k);
   }
 
   connectToPeer(host: string, port: number): void {
@@ -188,6 +220,7 @@ export class PeerManager extends EventEmitter {
 
     try {
       const ws = new WebSocket(url);
+      this.outboundSockets.add(ws);
 
       ws.on('open', () => {
         const handshake = buildHandshake(this.identity, {
@@ -287,7 +320,7 @@ export class PeerManager extends EventEmitter {
 
   private handleMessageInner(msg: NetworkMessage, ws: WebSocket, host: string, port: number): void {
     // parseMessage already verified the embedded signature; reject banned senders here.
-    if (this.bannedKeys.has(msg.publicKey)) {
+    if (this.isBanned(msg.publicKey)) {
       ws.close(4002, 'banned');
       return;
     }
@@ -461,7 +494,7 @@ export class PeerManager extends EventEmitter {
       ws.close(4003, 'self-connection');
       return false;
     }
-    if (this.bannedKeys.has(hs.publicKey)) {
+    if (this.isBanned(hs.publicKey)) {
       ws.close(4002, 'banned');
       return false;
     }
@@ -532,11 +565,41 @@ export class PeerManager extends EventEmitter {
     // that stops the harm: it caps live connections at one per peer no matter
     // how often we redial.
     if (existing && existing.ws !== ws) {
-      try {
-        existing.ws.close(4005, 'replaced by newer connection');
-      } catch {
-        // Already closing or dead. Nothing to do, and it must not stop us
-        // registering the new connection.
+      // Deterministic duplicate-connection tiebreak (audit #22).
+      //
+      // When two validators dial each other within one round trip, each ends up
+      // with two sockets to the same peer: one it dialed, one it accepted. If
+      // both sides just "keep the newer" they can close opposite sockets and
+      // lose the peer entirely for a full reconnect interval. Instead both sides
+      // agree to keep the connection DIALED BY THE LOWER PUBLIC KEY - a verdict
+      // each computes identically from data it already has, so exactly one
+      // socket survives on both ends.
+      const iAmDialer = this.identity.publicKey < hs.publicKey;
+      const newIsOutbound = this.outboundSockets.has(ws);
+      const existingIsOutbound = this.outboundSockets.has(existing.ws);
+      // The socket to KEEP is outbound-on-my-side iff I am the intended dialer.
+      const keepOutbound = iAmDialer;
+      let keepNew: boolean;
+      if (newIsOutbound !== existingIsOutbound) {
+        keepNew = newIsOutbound === keepOutbound;
+      } else {
+        // Same direction on both (unusual) - fall back to keeping the newer.
+        keepNew = true;
+      }
+      if (keepNew) {
+        try {
+          existing.ws.close(4005, 'replaced by newer connection');
+        } catch {
+          /* already closing */
+        }
+      } else {
+        // Keep the existing socket; drop the new one and do not re-register.
+        try {
+          ws.close(4005, 'duplicate connection; keeping existing');
+        } catch {
+          /* already closing */
+        }
+        return;
       }
     }
 

@@ -41,10 +41,23 @@ export class PeerDiscovery {
       this.peerManager.requestPeers();
     }, this.config.peerExchangeInterval);
 
-    // Periodic reconnect to maintain minimum peers
-    this.reconnectTimer = setInterval(() => {
-      this.maintainConnections();
-    }, this.config.reconnectInterval);
+    // Periodic reconnect to maintain minimum peers.
+    //
+    // Jittered (audit #22). Two nodes that lost each other and redial on the
+    // same fixed interval keep colliding round after round - each dial races
+    // the other's, and the duplicate-connection tiebreak has to fire every
+    // time. A random offset per tick breaks the phase lock so one redial lands
+    // cleanly. The deterministic tiebreak in PeerManager.addPeer is the
+    // correctness guarantee; this just makes the collision rare.
+    const scheduleReconnect = () => {
+      const base = this.config.reconnectInterval;
+      const jitter = Math.floor((Math.random() - 0.5) * base * 0.6); // +/-30%
+      this.reconnectTimer = setTimeout(() => {
+        this.maintainConnections();
+        scheduleReconnect();
+      }, base + jitter);
+    };
+    scheduleReconnect();
   }
 
   stop(): void {
@@ -53,7 +66,7 @@ export class PeerDiscovery {
       this.exchangeTimer = null;
     }
     if (this.reconnectTimer) {
-      clearInterval(this.reconnectTimer);
+      clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
   }
