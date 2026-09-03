@@ -30,7 +30,23 @@ import { recordLog } from '../transaction.js';
 import { SqliteValidatorSet } from './SqliteValidatorSet.js';
 import type { IValidatorSet, ValidatorInfo } from './IValidatorSet.js';
 
-export const MIN_VALIDATOR_STAKE: bigint = 100_00n; // 100.00 points (display * 100)
+// WRONG SCALE, KNOWN, NOT SILENTLY CHANGED. See CLAUDE.md "Known Issues".
+//
+// This is written as `100_00n` on the assumption of 2-decimal fixed point
+// ("100.00 points"), but PRECISION is 10^8. Every caller converts display units
+// with PRECISION and then compares against this, so the minimum a validator
+// actually has to stake is 10000 / 10^8 = 0.0001 points, not 100.
+//
+// That is four orders of magnitude below the intent, and it is the parameter
+// that is supposed to make the validator set expensive to flood. Anyone with a
+// fraction of a point currently clears it.
+//
+// Left as-is deliberately: raising it to 100n * PRECISION is a consensus
+// parameter change. Every genesis spec, every registered validator and a
+// dozen tests are written against 10000n, so changing it needs a coordinated
+// restart of every node rather than a quiet edit. Raise it before the network
+// has validators worth attacking; the comment stays until it moves.
+export const MIN_VALIDATOR_STAKE: bigint = 100_00n; // = 0.0001 points at PRECISION 10^8
 
 function isHex32(s: string): boolean {
   return typeof s === 'string' && /^[0-9a-fA-F]{64}$/.test(s);

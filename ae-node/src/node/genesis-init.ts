@@ -85,7 +85,9 @@ export interface BuildGenesisSetOptions {
   initialEarnedDisplay?: number;
   /**
    * Stake locked per validator in DISPLAY units. Default 200. Must be
-   * >= MIN_VALIDATOR_STAKE / PRECISION (1.00 in display units, currently).
+   * >= MIN_VALIDATOR_STAKE / PRECISION, which is 0.0001 display units today.
+   * That number is wrong on purpose and known to be wrong - see the comment on
+   * MIN_VALIDATOR_STAKE in core/consensus/registration.ts.
    */
   stakeDisplay?: number;
   /**

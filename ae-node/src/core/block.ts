@@ -15,6 +15,7 @@ import type { ITransactionStore } from './stores/ITransactionStore.js';
 import { commitBlockSideEffects } from '../mining/rewards.js';
 import { getParam } from '../config/params.js';
 import { runTransaction } from '../db/connection.js';
+import { recordStateRoot } from './state-root.js';
 
 export function blockStore(db: DatabaseSync): IBlockStore {
   return new SqliteBlockStore(db);
@@ -248,6 +249,14 @@ export function createBlock(
   // Distribute the block's fees per the WP economics (20% Tier 1, 80% Tier 2
   // with a 60/40 lottery/baseline split). Idempotent â€” safe to re-call.
   commitBlockSideEffects(db, block.number, block.hash);
+  // Fingerprint the state this block produced, same as the two BFT paths.
+  //
+  // Easy to miss, because the runner's Authority handler already records a root
+  // for blocks it RECEIVES from an authority - but blocks the authority itself
+  // produces come through here, so without this the producing node is the one
+  // node on the network with no recorded root, and a snapshot exported from it
+  // would have nothing for the verify step to check against.
+  recordStateRoot(db, block.number);
   return block;
 }
 

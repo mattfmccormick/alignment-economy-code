@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { accountRoutes, type AccountBroadcaster } from './routes/accounts.js';
 import { transactionRoutes, type TxBroadcaster } from './routes/transactions.js';
 import { networkRoutes } from './routes/network.js';
-import { healthRoutes } from './routes/health.js';
+import { healthRoutes, type NodeIdentitySummary } from './routes/health.js';
 import { adminRoutes } from './routes/admin.js';
 import { contactRoutes } from './routes/contacts.js';
 import { minerRoutes } from './routes/miners.js';
@@ -47,6 +47,18 @@ export interface CreateAppOptions {
    * default only governs callers that construct the app by hand.
    */
   executionMode?: 'receipt' | 'commit';
+  /**
+   * Who this node is, surfaced on GET /api/v1/status.
+   *
+   * Answers a question an operator otherwise cannot answer from outside the
+   * process: which validator is this, and is it currently in the active set?
+   * That matters because a validator-change request only reaches the chain if
+   * the node receiving it is a proposer — it queues locally and is drained when
+   * that node next proposes. POST a registration at a non-validator and it sits
+   * in a queue forever, with no error anywhere. scripts checking this before
+   * submitting is the difference between a clear message and an afternoon.
+   */
+  nodeIdentity?: NodeIdentitySummary;
 }
 
 export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
@@ -74,7 +86,7 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
     transactionRoutes(db, opts.txBroadcaster, opts.executionMode ?? 'receipt'),
   );
   app.use('/api/v1/network', networkRoutes(db));
-  app.use('/api/v1', healthRoutes(db));
+  app.use('/api/v1', healthRoutes(db, opts.nodeIdentity));
   app.use('/api/v1/admin', adminRoutes(db));
   app.use('/api/v1/contacts', contactRoutes(db));
   app.use('/api/v1/miners', minerRoutes(db));

@@ -8,11 +8,13 @@
  * the operator has everything needed to boot a node that talks to an
  * existing AE network.
  *
- * What this CLI does NOT do (yet — Phase E):
- *   - Fetch the genesis spec from a seed node automatically.
- *   - Sign and submit the on-chain validator/register transaction. That
- *     still needs to be done via API once the node is running and the
- *     account has enough Earned points to stake.
+ * What this CLI does NOT do:
+ *   - Fetch the genesis spec from a seed node automatically. Get genesis.json
+ *     from an existing operator.
+ *   - Submit the on-chain registration. That is `npm run validator:register`,
+ *     which signs the intent with the account key in this keystore and POSTs it
+ *     to an existing validator. Run it after the account exists on-chain and
+ *     holds the stake.
  *
  * Usage:
  *
@@ -202,15 +204,24 @@ function main(): void {
   console.log(`       ${join(outputDir, 'genesis.json')}`);
   console.log('     (Without it the node will boot a private chain instead of joining.)');
   console.log('');
-  console.log('  2. Boot the node:');
-  console.log(`       AE_CONFIG_FILE=${configPath} npm run dev   # from ae-node/`);
+  console.log('  2. Boot the node (from ae-node/):');
+  console.log(`       npm run dev -- --config=${configPath}`);
   console.log('');
   console.log('  3. Earn the minimum validator stake (or have someone send you Earned points).');
   console.log('     Validator registration requires earnedBalance >= MIN_VALIDATOR_STAKE.');
   console.log('');
-  console.log('  4. Submit a signed validator/register transaction via the API to enter the');
-  console.log('     active validator set. Until then your node syncs the chain but does not');
-  console.log('     produce blocks.');
+  console.log('  4. Register on-chain (from ae-node/):');
+  console.log(`       npm run validator:register --`);
+  console.log(`         --keystore ${keystorePath}`);
+  console.log('         --node http://<an-existing-validator>:3000 --stake <points>');
+  console.log('');
+  console.log('     --node must be a node ALREADY in the validator set, usually not');
+  console.log('     your own. The change is queued locally and drained only when that');
+  console.log('     node proposes a block, so sending it to a non-validator means it');
+  console.log('     never reaches the chain and nothing reports an error.');
+  console.log('');
+  console.log('     Until the registration commits your node syncs the chain but does');
+  console.log('     not produce blocks.');
   console.log('');
   console.log('NEVER share keystore.json. The node key controls your validator identity; the');
   console.log('account key controls your funds. Loss = lose access. Disclosure = lose stake.');

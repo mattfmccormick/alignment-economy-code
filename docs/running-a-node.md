@@ -162,20 +162,119 @@ about.** It holds the chain.
 
 ---
 
+## Joining a chain that already has history
+
+A new node replays every block from genesis. That is correct and fully
+trustless, and it is O(chain length): at a 10-second block interval the chain
+grows by 8,640 blocks a day, so the wait grows without bound. Bringing a machine
+online at five thousand blocks already took hours.
+
+**Snapshot sync skips the replay.** An existing operator exports their database,
+you check it against the network, you import it, and the node syncs forward only
+from that height.
+
+**On a machine that is already on the network:**
+
+```powershell
+cd $HOMEalignment-economy-codeae-node
+node scripts/snapshot.mjs export
+```
+
+Safe while the node is running. It prints the file path, its height, and its
+state root. Send the file across (USB, LAN share, whatever — it is not secret,
+it is public chain state).
+
+**On the joining machine, verify BEFORE importing:**
+
+```powershell
+node scripts/snapshot.mjs verify <file> --peer http://<a-node>:3000
+```
+
+Two different checks happen here, and the difference matters:
+
+- Without `--peer`, all it proves is that the file is internally consistent —
+  not truncated, not a torn copy. Anyone who can hand you a file can hand you a
+  consistent fake.
+- With `--peer`, it asks that node for the state root it recorded at the
+  snapshot's height and requires them to match. **That** is the check with teeth.
+  Repeat `--peer` for each independent node you want to ask. Trust the snapshot
+  as far as you trust the peers you checked it against; asking one node run by
+  the person who gave you the file proves nothing.
+
+**Then import and start:**
+
+```powershell
+node scripts/snapshot.mjs import <file>
+npm run dev -- --config=./node-config.json
+```
+
+Import keeps a timestamped backup of any existing database, and refuses to run
+while a node is using it. Your keystore is a separate file and is not touched,
+so the machine keeps its own identity.
+
+This is operator-assisted, the same model as Bitcoin's `assumeutxo` and
+Solana's snapshot download — not trustless peer-to-peer state sync. The state
+root is not yet folded into the block hash (see `core/state-root.ts` for why
+doing that today deadlocks the chain), so cross-checking peers is what makes it
+sound rather than the file checking itself.
+
+**Comparing two machines** without moving anything:
+
+```powershell
+curl http://<node-a>:3000/api/v1/network/state-root?height=5000
+curl http://<node-b>:3000/api/v1/network/state-root?height=5000
+```
+
+Same 64 hex characters means the two nodes hold identical account state at that
+height. Different, persistently, means real drift — usually a direct SQL write
+such as `scripts/dev-bump-ph.mjs` run on some nodes and not others.
+
+---
+
 ## Adding another node
 
 **A machine that is not a validator** can sync and serve reads: clone, build,
 copy `genesis.json`, leave `nodeKeyPath` unset, point `seedNodes` at an existing
-node.
+node. Use snapshot sync above rather than waiting out a full replay.
 
-**A new validator** has to be registered on-chain — the change rides in a
-committed block, so the existing validators must be up and producing at the
-time. It also needs earned points to stake. See `POST /api/v1/validators/register`.
+**A new validator** takes three steps.
+
+**1. Generate an identity** on the new machine:
+
+```powershell
+cd $HOMEalignment-economy-codeae-node
+npm run validator:setup -- --network-id <network> --output $HOMEae-validator
+```
+
+This writes a keystore and a config. Copy `genesis.json` in beside them, then
+start the node so it syncs.
+
+**2. Fund the account.** Registration stakes *earned* points, so the account has
+to exist on-chain and hold them. Daily active, supportive and ambient points
+expire nightly and cannot be staked.
+
+**3. Register on-chain:**
+
+```powershell
+npm run validator:register -- --keystore $HOMEae-validatorkeystore.json --node http://<existing-validator>:3000 --stake <points>
+```
+
+**`--node` must be a node that is ALREADY an active validator, and it is
+usually not your own.** A validator change is not gossiped like a transaction:
+the API writes it to a local queue on the node that received it, and that queue
+is drained in exactly one place — when *that* node proposes a block. A candidate
+node is not in the set yet, so it never proposes, so the change sits in its queue
+forever. The POST returns 200 and nothing anywhere reports an error. The CLI
+checks the target's `/status` and refuses rather than let that happen.
+
+Confirm it landed:
+
+```powershell
+curl http://<existing-validator>:3000/api/v1/validators
+```
+
+Look for your account id with `isActive` true, then restart the new node.
 
 Three validators is meaningfully better than two: quorum becomes 2 of 3, so one
 machine can go down without halting the chain. With two, either one stopping
 halts everything.
-
-**Known limitation:** joining today means replaying the entire chain from
-genesis, and that gets slower as the chain grows. See "Sync does not scale" in
-CLAUDE.md — snapshot sync is the fix and the groundwork exists.

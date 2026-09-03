@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -133,7 +133,22 @@ const TABLES = `
     -- Gossip fixed the live case; persisting registrations in the block
     -- fixes the offline one, because a node syncing months later replays
     -- them from the chain like any other state change.
-    account_registrations TEXT
+    account_registrations TEXT,
+    -- Hash of account state as it stood AFTER this block was applied
+    -- (schema v16). Same digest computeStateRoot produces.
+    --
+    -- Previously the root existed only in the gossip payload, so it was
+    -- compared once at receive time and then discarded. Persisting it makes it
+    -- (a) queryable, so two operators can compare a specific height instead of
+    -- eyeballing live logs, and (b) the anchor a joining node checks a state
+    -- snapshot against.
+    --
+    -- NOT yet folded into the block hash, so it is not consensus-enforced -
+    -- see "the state root is diagnostic" in CLAUDE.md for why voting on it
+    -- currently deadlocks the chain. Until it is, a snapshot verified against
+    -- this value is only as trustworthy as the quorum of peers that agree on
+    -- it, which is why the joiner cross-checks rather than trusting one peer.
+    state_root TEXT
   );
 
   CREATE TABLE IF NOT EXISTS rebase_events (
@@ -797,6 +812,15 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
     `);
+  }
+  if (from < 16) {
+    // blocks.state_root. Existing rows get NULL, which is correct: those blocks
+    // were committed before the root was recorded, and it cannot be
+    // reconstructed after the fact without replaying the whole chain.
+    const cols = db.prepare('PRAGMA table_info(blocks)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'state_root')) {
+      db.exec('ALTER TABLE blocks ADD COLUMN state_root TEXT');
+    }
   }
   if (from < 15) {
     // miners.bootstrap_admitted. Existing rows default to 0, which is the safe

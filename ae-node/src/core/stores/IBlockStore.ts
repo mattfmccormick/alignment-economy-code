@@ -72,4 +72,24 @@ export interface IBlockStore {
    * feature). When non-null, this is the set that signed cert(N).
    */
   findValidatorSnapshot(blockNumber: number): ValidatorInfo[] | null;
+
+  /**
+   * Record the account-state fingerprint as it stood after block N was fully
+   * applied (transactions, fee distribution, validator changes and any day
+   * cycle that block's timestamp triggered).
+   *
+   * The root already travelled in the gossip payload, where it was compared
+   * once and thrown away. Persisting it is what lets a joining node check a
+   * state snapshot against a height instead of trusting whoever handed it the
+   * bytes, and lets two operators diff a specific height after the fact rather
+   * than watching live logs scroll past.
+   */
+  saveStateRoot(blockNumber: number, root: string): void;
+
+  /**
+   * The recorded state root at block N, or null for blocks committed before
+   * this was recorded (it cannot be reconstructed after the fact without
+   * replaying the chain from genesis).
+   */
+  findStateRoot(blockNumber: number): string | null;
 }

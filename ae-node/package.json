@@ -15,7 +15,9 @@
     "seed:test": "tsx src/scripts/seed-test.ts",
     "gen:openapi": "tsx src/scripts/gen-openapi.ts",
     "genesis:init": "tsx src/scripts/init-genesis.ts",
-    "validator:setup": "tsx src/scripts/setup-validator.ts"
+    "validator:setup": "tsx src/scripts/setup-validator.ts",
+    "validator:register": "tsx src/scripts/register-validator.ts",
+    "snapshot": "node scripts/snapshot.mjs"
   },
   "bin": {
     "ae-node": "dist/node/cli.js"

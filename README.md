@@ -48,6 +48,33 @@ rather than in a long environment-variable line. Includes the four checks that
 account for every multi-machine failure so far, none of which were consensus
 bugs.
 
+## Joining a chain that already has history
+
+Replaying from genesis is O(chain length) and gets strictly worse with time — at
+a 10-second block interval the chain grows 8,640 blocks a day. Snapshot sync
+skips the replay:
+
+```bash
+node scripts/snapshot.mjs export
+```
+
+```bash
+node scripts/snapshot.mjs verify <file> --peer http://<a-node>:3000
+```
+
+```bash
+node scripts/snapshot.mjs import <file>
+```
+
+Run all three from `ae-node/`. **The `--peer` flag is the check that matters.**
+Without it, verify only proves the file is internally consistent — anyone who can
+hand you a file can hand you a consistent fake. With it, independent nodes have
+to agree on the state root at that height. This is operator-assisted snapshot
+sync, the same model as Bitcoin's `assumeutxo`, not trustless P2P state sync.
+
+Full procedure, including adding a third validator, in
+[docs/running-a-node.md](docs/running-a-node.md).
+
 ## Quick start (dev)
 
 Run each project from its own directory:
@@ -140,6 +167,13 @@ To compare two machines without changing anything:
 node scripts/dev-bump-ph.mjs --check          # prints STATE ROOT only
 ```
 
+Or, without stopping either node, ask both for the root they recorded at the
+same height:
+
+```bash
+curl http://<node>:3000/api/v1/network/state-root?height=5000
+```
+
 The state root is computed by the node's own `computeStateRoot`, not a copy, so
 a match is meaningful rather than cosmetic.
 
@@ -205,6 +239,6 @@ the env var but a missing or wrong header, it returns 401 with
 ## CI
 
 GitHub Actions runs the `ae-node` test suite on every push and PR. See
-`.github/workflows/test.yml`. Required job covers all 503 protocol tests
+`.github/workflows/test.yml`. Required job covers all 781 protocol tests
 except the documented multi-runner BFT timing flakes (phase60, smoke-
 multiblock), which run in a separate non-blocking job.

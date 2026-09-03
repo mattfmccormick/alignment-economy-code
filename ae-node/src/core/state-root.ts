@@ -106,3 +106,28 @@ export function computeStateRoot(db: DatabaseSync): string {
 
   return sha256(`ae.stateRoot.v1\n${canonical}`);
 }
+
+/**
+ * Compute the root for the state as it stands right now and record it against
+ * `blockNumber`.
+ *
+ * Call this at the END of a block's commit — after transactions replay, after
+ * fee distribution and validator changes, and after the day cycle the block's
+ * timestamp may have triggered. That is a well-defined point every node reaches
+ * with identical inputs, so honest nodes record identical values. Calling it
+ * earlier (say inside the apply transaction, before the day cycle) would record
+ * a root that differs depending on whether a mint had fired yet, which is
+ * exactly the kind of near-miss that makes a fingerprint worse than useless.
+ *
+ * Never throws into the caller. A commit path must not fail because a
+ * diagnostic write failed, and the root is not consensus-enforced, so a missing
+ * row costs a joiner the ability to verify at that one height and nothing else.
+ */
+export function recordStateRoot(db: DatabaseSync, blockNumber: number): void {
+  try {
+    const root = computeStateRoot(db);
+    db.prepare('UPDATE blocks SET state_root = ? WHERE number = ?').run(root, blockNumber);
+  } catch {
+    // Telemetry-grade write; swallow rather than disturb consensus.
+  }
+}

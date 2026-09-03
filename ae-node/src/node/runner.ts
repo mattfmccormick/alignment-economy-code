@@ -41,6 +41,7 @@ import {
 } from '../core/consensus/validator-change.js';
 import type { IValidatorSet } from '../core/consensus/IValidatorSet.js';
 import { eventBus } from '../api/websocket.js';
+import { recordStateRoot } from '../core/state-root.js';
 import { logger, setLogLevel } from './logger.js';
 import type { AENodeConfig } from './config.js';
 import type { TransactionRow } from '../core/stores/ITransactionStore.js';
@@ -289,6 +290,11 @@ export class AENodeRunner {
       txBroadcaster,
       accountBroadcaster,
       executionMode: this.config.executionMode,
+      nodeIdentity: {
+        accountId: this.config.bftLocalAccountId ?? null,
+        consensusMode: this.config.consensusMode ?? 'authority',
+        blockIntervalMs: this.config.blockIntervalMs,
+      },
     });
     logger.info('api', `API server listening on ${this.config.apiHost}:${this.config.apiPort}`);
   }
@@ -476,6 +482,11 @@ export class AENodeRunner {
             void err;
           }
 
+          // Same point in the sequence as the live commit path, which is the
+          // whole point: a node that catches up by sync must end each height
+          // with the same fingerprint as the validators that produced it live.
+          recordStateRoot(this.db, block.number);
+
           this.p2pNode.consensus.notifyHeightAdvanced?.(block.number);
           logger.info(
             'blocks',
@@ -519,6 +530,11 @@ export class AENodeRunner {
           blockStore(this.db).insert(block, /* isGenesis */ false);
           commitBlockSideEffects(this.db, block.number, block.hash);
         });
+
+        // Authority mode has no chain-driven day cycle (it runs on the
+        // wall-clock timer in this file), so end-of-block is simply
+        // end-of-apply here.
+        recordStateRoot(this.db, block.number);
 
         this.p2pNode.consensus.notifyHeightAdvanced?.(block.number);
         logger.info(

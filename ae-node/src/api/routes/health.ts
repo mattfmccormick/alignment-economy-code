@@ -5,7 +5,16 @@ import { countActiveParticipants } from '../../core/account.js';
 import { getCycleState } from '../../core/day-cycle.js';
 import { getConnectedClients } from '../websocket.js';
 
-export function healthRoutes(db: DatabaseSync) {
+export interface NodeIdentitySummary {
+  /** The account this node validates as, or null in Authority/observer mode. */
+  accountId: string | null;
+  /** 'bft' or 'authority'. */
+  consensusMode: string;
+  /** Target seconds between blocks, so peers can be checked for agreement. */
+  blockIntervalMs: number;
+}
+
+export function healthRoutes(db: DatabaseSync, identity?: NodeIdentitySummary) {
   const router = Router();
 
   // Basic health check (for load balancers, Docker HEALTHCHECK)
@@ -35,6 +44,23 @@ export function healthRoutes(db: DatabaseSync) {
           version: '0.1.0',
           uptime: Math.floor(uptime),
           pid: process.pid,
+          accountId: identity?.accountId ?? null,
+          consensusMode: identity?.consensusMode ?? null,
+          blockIntervalMs: identity?.blockIntervalMs ?? null,
+          // Whether this node can currently propose. A validator-change request
+          // sent to a node where this is false queues locally and never reaches
+          // a block, because the queue is drained only by the proposer.
+          isActiveValidator: identity?.accountId
+            ? Boolean(
+                (
+                  db
+                    .prepare(
+                      'SELECT 1 AS ok FROM validators WHERE account_id = ? AND is_active = 1',
+                    )
+                    .get(identity.accountId) as { ok: number } | undefined
+                )?.ok,
+              )
+            : false,
         },
         chain: {
           blockHeight: latest?.number ?? 0,

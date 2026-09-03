@@ -20,12 +20,14 @@ algorithm. The failures were in the seams — between packages, between the live
 path and the sync path, between what a screen said and what the code did, and
 in the test harness meant to catch all of it.
 
-**Current state:** chain live across two machines, 749 tests / 118 suites green,
-LAN 3-validator 5/5. Blocks paced at 10s.
+**Current state:** chain live across two machines, 781 tests / 124 suites green,
+blocks paced at 10s. Snapshot sync ships, so joining no longer means replaying
+from genesis.
 
-**The one thing to fix before real users:** joining requires replaying every
-block. See "Sync does not scale" below — the primitive for the fix already
-exists.
+**Next up:** a third validator on the live network, so quorum becomes 2 of 3 and
+one machine can go down without halting the chain. The tooling for it now exists
+end to end (`validator:setup` → fund → `validator:register`); what remains is
+running it with both existing machines up.
 
 
 
@@ -554,6 +556,30 @@ Fixed with `taskkill /T /F` synchronously. After: **baseline 4/5, with 10s
 pacing 5/5**, no orphans. Treat pre-fix LAN results as unreliable, including the
 peering work earlier in the audit.
 
+**Correction (September 3): 5/5 was a lucky sample, and quoting it as the
+current state was wrong.** A larger run measured **baseline 3/4 and 4/7 with
+this session's changes** — statistically the same, and both well short of
+reliable. The number was re-measured because a single failing run looked like a
+regression from the state-root work; it was not, and neither is the flake new.
+
+What the failure actually looks like is sharper than "timing flake", and worth
+recording because it points somewhere different. In a passing run block 1
+commits within a second of the startup delay elapsing, then 2 and 3 arrive on
+the 10s pacing — the whole thing is done in ~32s of a 90s budget. In a failing
+run **nothing happens at all**: all three nodes log "BFT consensus loop
+started" and then go completely silent for the full 90 seconds. Never a partial
+commit, never a stalled height, never an error. So this is not the deadline
+being too tight; round 0 never produces a block and no later round recovers,
+even though propose/prevote/precommit timeouts (3s/1s/1s, scaling per round)
+should burn through dozens of rounds in the remaining 78 seconds. That reads as
+the nodes never meshing rather than as a consensus-logic stall, and peer
+connections are not logged at info level, so the current logs cannot tell the
+two apart. **Next step is logging peer connect/disconnect at info, not tuning a
+timeout.**
+
+For a 3-node network this is more than test noise: it is "the chain sometimes
+does not start."
+
 ### Sync does not scale, and pacing only buys time
 
 The block interval is a constant-factor win, not a fix. Sync time still grows
@@ -571,14 +597,122 @@ chain small:
 - **Solana** never pretended replay was viable; validators start from a
   snapshot.
 
-**AE should do the same, and the hard part already exists.** `computeStateRoot`
-is precisely what makes a snapshot trustworthy: a joining node hashes the
-account state it was handed and checks it against a committed block's root, so
-it verifies rather than trusts the peer. The remaining work is serving account
-state over the wire and a join path that starts from a verified root.
+**AE now does the same.** Shipped as `ae-node/scripts/snapshot.mjs`
+(`export` / `verify` / `import`), backed by schema v16, which records the state
+root on every block.
 
-Do this before real users. At 30k blocks it is a feature; at 30M it is a
-migration.
+**The blocker was that the root was not persisted.** `computeStateRoot` existed,
+but the value only ever travelled in the gossip payload: a receiver compared it
+once, logged on mismatch, and threw it away. Nothing could answer "what was the
+state at height N?" after the fact, so a joiner had nothing authenticated to
+check a snapshot against and a malicious donor could serve fabricated state with
+a matching fabricated root. `blocks.state_root` (v16) closes that, written by
+`recordStateRoot` at the end of all three commit paths — BFT commit, BFT sync
+replay, Authority apply.
+
+**Recorded after the day cycle, not before.** A block crossing 08:59 UTC expires,
+rebases and mints; a root taken before that describes state no node ever settles
+on. All three paths record at the same point in the sequence, from the same
+inputs, which is what makes two machines' roots comparable at all.
+
+**What it is, said plainly:** operator-assisted snapshot sync, the same model as
+Bitcoin's `assumeutxo` and Solana's snapshot download. It is NOT trustless P2P
+state sync, and the distinction is not hedging:
+
+- The file carries its own root, so `verify` catches truncation, corruption and
+  the torn copy you get from `cp`-ing a live WAL database. It cannot catch a
+  donor who fabricated both the state and the root, because nothing in the chain
+  commits to the root yet.
+- So the check with teeth is `--peer`: ask independent nodes for their recorded
+  root at that height and require agreement. A donor would have to control every
+  node you ask. Verifying against one node run by the person who gave you the
+  file proves nothing, and the CLI says so when you skip `--peer`.
+
+**Whole database, not a state-only extract.** The cost being removed is replay
+time, not disk. A state-only snapshot leaves the joiner with no blocks below the
+snapshot height, which breaks parent lookups, chain validation and its ability
+to serve sync onward — that needs a "this chain starts at height H" concept
+threaded through the store layer, which is a real feature and not something to
+fake with a truncated file. Export uses `VACUUM INTO` rather than a file copy,
+because on a WAL database the newest committed pages live in the `-wal` sidecar
+and a hand copy silently omits them.
+
+**Still open:** folding the root into `computeBlockHash` so it is
+consensus-enforced. Order matters and it is not next: account state has to
+become a pure function of the chain first (registrations are on-chain as of
+schema v13, but gossip still front-runs them). Fold it in first and the deadlock
+just moves into hash verification. Until then, cross-checking peers is what makes
+a snapshot sound.
+
+### Storage: validator snapshots stored on change, not on every block
+
+Every block carried a full JSON copy of the validator set — about 617 bytes
+recording something that changes a handful of times in a chain's life. On the
+live chain that was 30,932 near-identical copies of a two-validator list, and
+roughly 30% of total storage.
+
+Dropping the duplicates is only safe because the READ resolves *the set in force
+at height N* (most recent row at or before N), not *the row stored at height N*.
+A height with no row inherits the earlier one, which is the same answer. The
+write now compares against the set already in force and returns early when it
+matches, ordering by accountId first so a different `listAll()` ordering is not
+mistaken for a real change — that would defeat the deduplication without being
+incorrect, which is the kind of bug that hides for months.
+`validator-snapshot-dedupe.test.ts` pins the equivalence: what a caller gets
+back is identical to what the old store-on-every-block scheme returned.
+
+Deliberately NOT the same lookup shape as the new state root, which is
+exact-match. A validator set persists until something changes it, so inheriting
+is correct. A state root describes one height and nothing else, so inheriting
+would let a snapshot verify against state it does not contain — a false pass on
+the one check that matters.
+
+### Third validator: the missing step was tooling, not protocol
+
+The on-chain machinery has worked since Session 59. What did not exist was a way
+for an operator to actually use it: `validator:setup` generated keys and then
+said "submit a signed validator/register transaction via the API", which is not
+an instruction anyone can follow. New `npm run validator:register` closes it —
+reads the keystore, signs the intent with the account's ML-DSA key, POSTs it.
+
+**The trap it exists to prevent.** A validator change is not gossiped like a
+transaction. The API writes it to a *local* queue (`enqueueValidatorChange`),
+and that queue is drained in exactly one place: when **that** node proposes a
+block. A candidate's own node is not in the set yet, so it never proposes, so the
+change sits in its queue forever. The POST returns 200, the queue row is real,
+and nothing anywhere reports an error. From the outside it is indistinguishable
+from a slow network.
+
+So `--node` must point at a node ALREADY in the active set, usually not your
+own. The CLI checks the target's `/status` and refuses rather than let that
+happen, and it checks the other two preconditions before signing anything: the
+candidate's account exists on that chain, and holds the stake in *earned* points
+(daily points expire and cannot be staked). A named precondition beats a
+`REGISTER_FAILED` arriving after the fact.
+
+`GET /api/v1/status` now reports `node.accountId`, `node.consensusMode` and
+`node.isActiveValidator`, which is what makes that check possible from outside
+the process — and answers "which node am I looking at?" generally.
+
+### MIN_VALIDATOR_STAKE is off by four orders of magnitude
+
+Found while wiring the register CLI, **not fixed**, deliberately.
+
+`MIN_VALIDATOR_STAKE` is `100_00n`, written on the assumption of 2-decimal fixed
+point and commented "100.00 points". `PRECISION` is `10^8`. Every caller converts
+display units with `PRECISION` and then compares against this constant, so the
+minimum a validator actually has to stake is **0.0001 points, not 100**. A second
+comment in `genesis-init.ts` claimed "1.00 in display units", also wrong. Both
+comments now state the real number.
+
+This is the parameter that is supposed to make the validator set expensive to
+flood. Anyone holding a fraction of a point currently clears it.
+
+Not silently changed because raising it to `100n * PRECISION` is a consensus
+parameter change: every genesis spec, every registered validator and about a
+dozen tests are written against `10000n`, so it needs a coordinated restart of
+every node rather than a quiet edit. **Matt's call.** Do it before the network
+has validators worth attacking — the cost of the change only goes up.
 
 ### Audit status (court + verification panels)
 
@@ -1288,14 +1422,36 @@ commit. Two determinism hazards recur at every site and must be fixed in the
 same change: `uuid()` for row ids (every node would store a different primary
 key) and `Date.now()` for timestamps (use the block timestamp).
 
-Until that lands, `computeStateRoot` stays diagnostic — it is carried in the
-block payload and logged on mismatch, but not enforced, because honest nodes
-can legitimately differ.
+Until that lands, `computeStateRoot` stays diagnostic — carried in the block
+payload, logged on mismatch, and (as of schema v16) recorded in
+`blocks.state_root` — but **not** folded into `computeBlockHash` and not
+enforced, because honest nodes can legitimately differ.
+
+Persisting it is what snapshot sync rests on, and it is worth being precise
+about how much that buys: a joiner can now check a snapshot against a height,
+but only as far as it trusts the peers it asked, since nothing in the chain
+commits to the value. Enforcement waits on this section's list being cleared.
+Folding the root into the block hash before then just relocates the deadlock
+into hash verification.
 
 **Not verified:** the audit's verification stage was cut short by a session
 usage limit, so 26 of 33 checks never ran. The vouching findings below were
 confirmed by hand. The court and panel findings above are from the mapping
 pass only and should be re-checked before anyone acts on them.
+
+### Open: MIN_VALIDATOR_STAKE is four orders of magnitude too low
+
+`MIN_VALIDATOR_STAKE = 100_00n` assumes 2-decimal fixed point; `PRECISION` is
+`10^8`. Callers convert display units with `PRECISION` and compare against the
+constant, so the real floor is **0.0001 points, not the 100 the comment claimed**.
+Anyone holding a fraction of a point clears the bar that is supposed to make the
+validator set expensive to flood.
+
+Comments in `registration.ts` and `genesis-init.ts` now state the true number.
+The constant itself is unchanged on purpose: raising it to `100n * PRECISION` is
+a consensus parameter change touching every genesis spec, every registered
+validator and about a dozen tests, so it needs a coordinated restart rather than
+a quiet edit. **Matt's call**, and cheaper the sooner it happens.
 
 ### Done (Fixed)
 

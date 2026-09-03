@@ -42,7 +42,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { runTransaction } from '../../db/connection.js';
 import { logger } from '../../node/logger.js';
-import { computeStateRoot } from '../state-root.js';
+import { computeStateRoot, recordStateRoot } from '../state-root.js';
 import {
   applyAccountRegistration,
   computeAccountRegistrationsHash,
@@ -855,6 +855,12 @@ export class BftBlockProducer {
       // committed — the cycle is a separate state machine.
       void err;
     }
+
+    // Fingerprint the resulting state. Deliberately AFTER the day cycle: a
+    // block that crosses 08:59 UTC expires, rebases and mints, and a root
+    // taken before that describes state no node ever settles on. Every node
+    // records at this same point from the same inputs, so honest nodes agree.
+    recordStateRoot(this.db, block.number);
 
     this.onBlockCommitted?.(block, cert);
   }
