@@ -1423,8 +1423,13 @@ mitigations already applied are noted.
    `acceptPendingTransaction` take `fee` / `netAmount` off the wire and apply
    them verbatim; only `processTransaction` on the origin node re-derives them
    from the sender's `percentHuman`. So a crafted transaction can claim full
-   value for a 0% sybil and every other node applies the inflated number — an
-   unbounded mint. The reason the code trusts the wire is that `percentHuman`
+   value for a 0% sybil and every other node applies the inflated number. The
+   truly-unlimited case (crediting MORE than the sender spends) is already
+   blocked: accept/replay enforce `netAmount + fee <= amount`. What remains is
+   discount evasion - an unverified account's daily allocation, which should
+   burn entirely at 0%, delivered as real value instead. Bounded by daily-mint x
+   sybil-count, so serious at scale, not literally infinite. The reason the code
+   trusts the wire is that `percentHuman`
    itself is node-local (written by `verification/panel.ts` from a REST call),
    so re-deriving locally would make honest nodes disagree and FORK. Both halves
    only become safe once `percentHuman`, miner status, and tag submissions are
