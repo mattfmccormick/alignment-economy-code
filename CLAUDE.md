@@ -17,18 +17,25 @@ Deployment-stage and operations work (NAT traversal, public bootstrap nodes, pic
 Before opening the network up, an eight-dimension adversarial audit read the
 whole codebase (consensus, economics, crypto/auth, determinism, scale, network,
 operations, app surface). Every finding was verified against the source by a
-second reviewer instructed to refute it; 28 survived. This session fixed 24 of
-them. The four that remain are large and are scoped at the end of "Known
-Issues" below.
+second reviewer instructed to refute it; 28 survived. This session fixed 25 of
+them and began the largest of the rest - the "all state comes from the chain"
+cluster (#4/#16) - by putting vouching fully on-chain. What remains: miner
+registration and verification panels on-chain, then re-deriving transaction
+value; plus the complete (post-interim) versions of #3 and #9. All scoped at the
+end of "Known Issues" below.
 
 **The one that mattered most is fixed: the BFT deadlock (#1).** A locked
 proposer never re-proposed its locked value, so a locked validator voted NIL on
 every fresh proposal forever and the height deadlocked in silence - the 3-node
 "all quiet for 90s" flake, roughly 1 run in 3. The proposer now re-serves its
-locked block. The LAN 3-validator test went from ~1/3 failing to 15/15 green,
-with the 2-node canary still clean.
+locked block, and the early-round prevote/precommit timeouts were raised from
+1000ms to 2500ms so the staggered cold-start nodes align on round 0 instead of
+the first one timing out and voting NIL. Together these took the 3-node startup
+from ~1-in-3 failing to 13 consecutive clean runs, with the 2-node canary still
+clean. (At n=3, quorum = n = unanimity, so this is the pragmatic fix; the full
+valid-value/POL rule is the deeper large-set work.)
 
-**Fixed and pushed this session (24 of 28):**
+**Fixed and pushed this session (25 of 28, plus the vouch slice of #4/#16):**
 - Consensus: the deadlock (#1) - a locked proposer now re-proposes its locked
   value AND the early-round prevote/precommit timeouts were raised from 1000ms to
   2500ms, which together took the 3-node startup deadlock from ~1-in-3 to 0 in 13
@@ -74,8 +81,10 @@ algorithm. The failures were in the seams — between packages, between the live
 path and the sync path, between what a screen said and what the code did, and
 in the test harness meant to catch all of it.
 
-**Current state:** chain live across two machines, 781 tests / 124 suites green,
-blocks paced at 10s. Snapshot sync ships, so joining no longer means replaying
+**Current state:** chain live across machines, 806 ae-node tests green (+ 92 app
+tests), blocks paced at 10s. Snapshot sync ships. The startup deadlock is
+effectively gone (13/13 LAN runs). Vouching is chain-ordered end to end (node +
+both apps) and gossiped for fast inclusion. Joining no longer means replaying
 from genesis.
 
 **Next up:** more validators on the live network. Note the quorum math, which an
