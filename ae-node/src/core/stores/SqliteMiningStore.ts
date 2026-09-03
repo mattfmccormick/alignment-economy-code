@@ -52,11 +52,14 @@ export class SqliteMiningStore implements IMiningStore {
     let rows: Array<Record<string, unknown>>;
     if (tier !== undefined) {
       rows = this.db
-        .prepare('SELECT * FROM miners WHERE is_active = 1 AND tier = ?')
+        // ORDER BY account_id for a deterministic order (audit #5/#7): fee
+        // distribution and the tier-2 lottery iterate this list, and an
+        // unspecified SQLite row order could differ between nodes.
+        .prepare('SELECT * FROM miners WHERE is_active = 1 AND tier = ? ORDER BY account_id ASC')
         .all(tier) as Array<Record<string, unknown>>;
     } else {
       rows = this.db
-        .prepare('SELECT * FROM miners WHERE is_active = 1')
+        .prepare('SELECT * FROM miners WHERE is_active = 1 ORDER BY account_id ASC')
         .all() as Array<Record<string, unknown>>;
     }
     return rows.map(rowToMiner);

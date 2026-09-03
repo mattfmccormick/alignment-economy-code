@@ -24,10 +24,15 @@ in the test harness meant to catch all of it.
 blocks paced at 10s. Snapshot sync ships, so joining no longer means replaying
 from genesis.
 
-**Next up:** a third validator on the live network, so quorum becomes 2 of 3 and
-one machine can go down without halting the chain. The tooling for it now exists
-end to end (`validator:setup` → fund → `validator:register`); what remains is
-running it with both existing machines up.
+**Next up:** more validators on the live network. Note the quorum math, which an
+earlier version of this file got wrong: quorum is `floor(2n/3)+1`, so 3
+validators need 3 of 3 (a third machine adds a proposer but NO fault tolerance -
+one down still halts the chain, same as two). **Four is the first size that
+survives one machine going down.** The tooling exists end to end
+(`validator:setup` -> fund -> `validator:register`, which now correctly targets
+the chain-replicated `/propose-register` endpoint); what remains is running it
+with the existing machines up. A permanently-dead validator cannot yet be removed
+by anyone but itself (audit #25).
 
 
 

@@ -283,6 +283,25 @@ curl http://<existing-validator>:3000/api/v1/validators
 
 Look for your account id with `isActive` true, then restart the new node.
 
-Three validators is meaningfully better than two: quorum becomes 2 of 3, so one
-machine can go down without halting the chain. With two, either one stopping
-halts everything.
+**How many validators you actually need for fault tolerance.** BFT quorum is
+`floor(2n/3) + 1`, and the chain only makes progress when that many validators
+are up and agreeing. Work it out:
+
+| Validators | Quorum | Can lose |
+|---|---|---|
+| 2 | 2 | 0 |
+| 3 | 3 | 0 |
+| 4 | 3 | 1 |
+| 5 | 4 | 1 |
+
+So **three validators does not tolerate a failure** — quorum is 3 of 3, and any
+one machine stopping halts the chain, exactly like two. **Four is the first size
+that survives one machine going down.** Three is still worth running for the
+extra proposer, but do not treat it as redundancy: it is not.
+
+**And a validator whose machine dies permanently cannot currently be removed by
+anyone but itself.** Deregistration is signed by the leaving validator's own
+key (audit #25), so a dead machine's slot stays in the set forever, dragging the
+quorum up. There is no operator override yet. Until there is, the practical
+advice is: run four so you can lose one, and keep each validator's keystore
+backed up so a dead machine can be rebuilt rather than abandoned.

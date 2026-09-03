@@ -185,22 +185,22 @@ export function mintDaily(db: DatabaseSync): void {
   // Single query, faster than per-account lookups, and idempotent on resume.
   const alreadyMinted = transactionStore(db).findLogAccountIds(refId, 'mint');
 
-  // A miner account is a business, not a person.
+  // The miner exclusion that used to live here was removed (audit #6).
   //
-  // It earns from the fee pool for verification work; it does not receive a
-  // daily allocation. A human who also verifies keeps a separate personal
-  // account — the daily points follow the person, not the service they run.
-  //
-  // This is not in tension with the white paper's "every verified human
-  // receives a daily allocation": the allocation follows the human's personal
-  // account. What it stops is one person drawing a second allocation by also
-  // operating a miner, which is a duplicate-account vector in all but name.
-  const minerAccountIds = new Set(getActiveMiners(db).map((m) => m.accountId));
-
+  // It skipped minting to any account in the local `miners` table, on the
+  // policy that a verifier earns from the fee pool instead of drawing a daily
+  // allocation. The problem is that miner registration is NODE-LOCAL and not
+  // replicated on the chain, so the `miners` table differs between nodes. Two
+  // nodes therefore minted to DIFFERENT sets of accounts at the day boundary
+  // and their ledgers diverged - a silent fork, on the first day after any
+  // miner registered anywhere. Minting to every active individual is
+  // deterministic (getActiveIndividuals is pure chain state) and so is strictly
+  // better than forking. The policy is worth keeping, but only once miner
+  // status is itself chain-replicated (the proper fix); until then the daily
+  // mint must not read node-local state.
   runTransaction(db, () => {
     for (const acct of eligible) {
       if (alreadyMinted.has(acct.id)) continue; // resumed: skip, already credited
-      if (minerAccountIds.has(acct.id)) continue; // business account: earns, is not allocated
 
       updateBalance(db, acct.id, 'active_balance', DAILY_ACTIVE_POINTS);
       recordLog(db, acct.id, 'mint', 'active', DAILY_ACTIVE_POINTS, 0n, DAILY_ACTIVE_POINTS, refId, now);

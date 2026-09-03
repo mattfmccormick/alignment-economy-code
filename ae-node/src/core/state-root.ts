@@ -104,7 +104,20 @@ export function computeStateRoot(db: DatabaseSync): string {
     )
     .join('\n');
 
-  return sha256(`ae.stateRoot.v1\n${canonical}`);
+  // Fold in the fee pool (audit #5/#7). Fee distribution runs at every commit
+  // against the node-local miner registry, so two nodes that disagree on the
+  // active miner set pay different accounts and leave the pool at different
+  // balances - a divergence that touched no account row and so was invisible to
+  // a root built from accounts alone. Including the pool makes that drift
+  // audible through the same channel as balance drift. Reason the v2 bump: the
+  // digest format changed, so a v1 root must never be compared against a v2 one
+  // and read as a disagreement.
+  const pool = db
+    .prepare('SELECT current_balance FROM fee_pool WHERE id = 1')
+    .get() as { current_balance: string } | undefined;
+  const poolLine = `feePool|${pool?.current_balance ?? '0'}`;
+
+  return sha256(`ae.stateRoot.v2\n${canonical}\n${poolLine}`);
 }
 
 /**
