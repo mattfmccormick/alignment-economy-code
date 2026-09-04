@@ -81,17 +81,17 @@ algorithm. The failures were in the seams — between packages, between the live
 path and the sync path, between what a screen said and what the code did, and
 in the test harness meant to catch all of it.
 
-**Current state:** chain live across machines, 821 ae-node tests green (+ 92 app
+**Current state:** chain live across machines, 827 ae-node tests green (+ 97 app
 tests), blocks paced at 10s. Snapshot sync ships. The startup deadlock is
-effectively gone (13/13 LAN runs). Vouching, miner registration, AND
-verification panels are all chain-ordered end to end (node + both apps) and
-gossiped for fast inclusion. With panels done, `percentHuman` became a pure
-function of the chain, and on top of that the **#4 value exploit is now fixed**:
-`replayTransaction`/`acceptPendingTransaction` re-derive each spend's
-fee/netAmount/burn from the local chain-consistent sender row
-(`deriveSpendValue`) instead of trusting the wire, so a malicious node can no
-longer deliver inflated value for a sybil. Joining no longer means replaying from
-genesis.
+effectively gone (13/13 LAN runs). The whole "state must come only from the
+chain" cluster is now complete: vouching, miner registration, verification
+panels, AND products/spaces/tags (#16) are all chain-ordered end to end (node +
+apps) and gossiped for fast inclusion, and the **#4 value exploit is fixed**
+(`replayTransaction`/`acceptPendingTransaction` re-derive each spend's
+fee/netAmount/burn from the local chain-consistent sender row via
+`deriveSpendValue` instead of trusting the wire). Every writer of consensus state
+— balances, percentHuman, miner set, products/spaces/tags — is now a pure
+function of the applied chain. Joining no longer means replaying from genesis.
 
 **Next up:** more validators on the live network. Note the quorum math, which an
 earlier version of this file got wrong: quorum is `floor(2n/3)+1`, so 3
@@ -949,10 +949,7 @@ was introduced.
   Bites at: now - any account that has registered as a miner or deregistered as a validator  
   Fix (small): Stop treating a missing `payload` as an empty signed payload. In authMiddleware reject with 401 when `req.body.payload` is not a present object instead of defaulting to `{}`. Remove the `req.body.payload || req.body` fallback from every route handler and the `'payload' in req.body ? ... : req.body` fallback from validateBody - the envelope shape should be mandatory. That also removes the need for the per-route `claimed*` mismatch guards, which only function when the wrapper exists.
 
-- **[HIGH / determinism] Supportive and ambient payouts at commit are computed from node-local tag tables**  
-  Where: `ae-node/src/core/day-cycle.ts:407, :73-125`  
-  Bites at: the first time any user submits a tag on a multi-node network; the Tag screen auto-saves ~800ms after any edit, so this is normal wallet use, not an edge case  
-  Fix (large): Tags must be chain-ordered like transactions: a signed tag-submission operation admitted to the mempool, included in a block, applied deterministically at commit. Same shape as the commit-time execution change transactions already went through (schema v14). Interim mitigation that keeps the ledger consistent though not correct: gossip tag submissions the way `new_account` is gossiped (network/node.ts:218), which closes the online case but not the sync case.
+- ~~**[HIGH / determinism] Supportive and ambient payouts at commit are computed from node-local tag tables**~~ **FIXED (audit #16).** Products, spaces, and supportive/ambient tag submissions are now one chain-ordered lane: `tagging/tagging-operation.ts` (schema v20, `blocks.tagging_operations` + `pending_tagging_operations`). A signed op is verified + queued + gossiped (`new_tagging_op`) and applied deterministically at commit — before `applyChainDayCycle`, so a submit in the same block as the day boundary is finalized this cycle. All four route POSTs (`/tags/products|spaces|supportive|ambient`) return `{status:'pending'}`; the row appears once the block commits. Deterministic ids replace `uuid()` (signature-derived, one per tag row via index), block timestamp replaces `Date.now()`, re-submission stays DELETE-active-then-INSERT (last-writer-wins by block order), and finalize gained `ORDER BY` for iteration determinism. **The load-bearing subtlety:** tagging ops carry free text (names) and arrays, so the canonical signed bytes are a JSON positional array, NOT the pipe-join vouch/miner use — a `|` in a product name would otherwise break signer/verifier agreement. ae-app's four signers build byte-identical strings, pinned by `ae-app/src/lib/crypto.test.ts`. Missing refs (product/space/manufacturer/entity) are rejected at validate, tolerated (whole-op skip) at apply. Proven by `tests/tagging-operation-determinism.test.ts` (8 cases incl. the pipe/quotes guarantee and two-node convergence) and the 3-validator LAN test (product + supportive tag converge across nodes; state roots identical). The tag VALUE math (`finalizeSupportiveTags`/`finalizeAmbientTags`) was already deterministic and needed no change.
 
 - **[HIGH / scale] The daily cycle runs synchronously inside the block-commit callback and already exceeds one block interval at 10k accounts, growing every day because transaction_log is never pruned**  
   Where: `ae-node/src/core/consensus/BftBlockProducer.ts:851 (applyChainDayCycle inside onCommit)`  
@@ -1511,14 +1508,17 @@ not a leap of faith.
    and correct across sync (transactions apply before this block's percentHuman
    ops, so every node reads the same as-of-prior-block percentHuman).
 
-   **Remaining in the cluster:** tags (#16) — a signed tag-submission operation
-   admitted to a block and applied at commit, same pattern as vouch/miner/panel.
-   The tag VALUE math (`finalizeSupportiveTags`/`finalizeAmbientTags`) is already
-   computed locally from `acct.percentHuman` at commit and takes nothing off the
-   wire, so it is safe; the gap is that the tag ROWS themselves
-   (`supportive_tags`/`ambient_tags`) are written node-locally with no gossip and
-   no on-chain op, so each node finalizes a different tag set at the day boundary.
-   That is the last "state must come only from the chain" item.
+   **The cluster is now COMPLETE.** tags (#16) LANDED: products, spaces, and
+   supportive/ambient tag submissions are one chain-ordered lane
+   (`tagging/tagging-operation.ts`, schema v20), applied at commit before the day
+   cycle so finalization reads the same rows on every node. See the FIXED entry
+   in Known Issues above for the design (JSON canonical encoding, deterministic
+   ids, last-writer-wins re-submission, reject-at-validate/tolerate-at-apply for
+   missing refs). With vouch + miner + panel + the #4 value fix + tags all done,
+   every writer of consensus-relevant state (balances, percentHuman, miner set,
+   products/spaces/tags) is now a pure function of the applied chain. The only
+   remaining node-local inputs are diagnostics (logs) and genuinely local
+   conveniences, none of which feed the state root.
 
 2. **State root stays diagnostic (blocker 1 above).** Same root cause as the
    cluster above and blocked on the same work: fold a state-root hash into the
