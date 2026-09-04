@@ -81,14 +81,17 @@ algorithm. The failures were in the seams — between packages, between the live
 path and the sync path, between what a screen said and what the code did, and
 in the test harness meant to catch all of it.
 
-**Current state:** chain live across machines, 815 ae-node tests green (+ 92 app
+**Current state:** chain live across machines, 820 ae-node tests green (+ 92 app
 tests), blocks paced at 10s. Snapshot sync ships. The startup deadlock is
 effectively gone (13/13 LAN runs). Vouching, miner registration, AND
 verification panels are all chain-ordered end to end (node + both apps) and
-gossiped for fast inclusion. With panels done, `percentHuman` is now a pure
-function of the chain (its three writers - vouch withdraw, panel completion, and
-unwired decay - are all chain-driven or dormant), which unblocks the #4 value
-fix. Joining no longer means replaying from genesis.
+gossiped for fast inclusion. With panels done, `percentHuman` became a pure
+function of the chain, and on top of that the **#4 value exploit is now fixed**:
+`replayTransaction`/`acceptPendingTransaction` re-derive each spend's
+fee/netAmount/burn from the local chain-consistent sender row
+(`deriveSpendValue`) instead of trusting the wire, so a malicious node can no
+longer deliver inflated value for a sybil. Joining no longer means replaying from
+genesis.
 
 **Next up:** more validators on the live network. Note the quorum math, which an
 earlier version of this file got wrong: quorum is `floor(2n/3)+1`, so 3
@@ -884,10 +887,7 @@ was introduced.
   Bites at: now — reproduces roughly 1 run in 3 on the 3-validator LAN test. Any network where a single stale-locked validator breaks quorum (N=3 exactly; N=4-5 needs two such validators) can halt permanently.  
   Fix (large): Implement Tendermint's valid-value/POL rule. Track lockedValue + lockedRound and validValue + validRound in BftDriver, pass them into RoundController, and have the proposer path use them: change `blockProviderFor` so that when the driver holds a lock at this height it re-proposes the locked hash (re-serving the stashed payload) instead of calling buildCandidateBlock, and carry `validRound` on the Proposal so unlocked validators know they may prevote it. Separately add the round-skip rule (on seeing f+1 votes from a round > currentRound, jump to that round) in bft-driver.ts routeVote instead of dropping them, so a staggered node catches up rather than staying one round behind indefinitely.
 
-- **[CRITICAL / economics] percentHuman spend multiplier is node-local and the wire carries netAmount verbatim, so any participant running a node mints unlimited value from sybil accounts**  
-  Where: `ae-node/src/core/transaction.ts:348 (burnedUnverified derived from wire fee/netAmount), :264 (only sanity check), :440-448 (signed payload excludes fee/netAmount), :493-499 (the only place the multiplier is derived)`  
-  Bites at: now — one adversarial node and one sybil account is enough; profit scales linearly with sybil count  
-  Fix (large): Two changes, both needed. (1) In replayTransaction and acceptPendingTransaction, re-derive effectiveAmount/fee/netAmount/burn locally from the sender row exactly as processTransaction does, and reject the transaction if the wire values disagree; better still, drop fee/netAmount from the wire entirely and let every node compute them. (2) That is only sound once percentHuman is chain state, so make verification score changes a signed, block-ordered operation (a panel_score transaction type applied deterministically at commit) rather than a direct write from POST /verification/panels/:id/score. As an interim hard cap that removes the unbounded case without the full refactor, enforce `fee + netAmount <= amount * localPercentHuman / 100` for daily-point spends by individuals on both wire paths, which fails closed for a sender the local node has not seen verified.
+- ~~**[CRITICAL / economics] percentHuman spend multiplier is node-local and the wire carries netAmount verbatim, so any participant running a node mints unlimited value from sybil accounts**~~ **FIXED.** Both halves landed. (2) percentHuman became pure chain state once vouch, miner, and panel operations were all chain-ordered (this is why panels had to come first). (1) `deriveSpendValue(amount, pointType, senderType, percentHuman)` in `core/transaction.ts` is now the single source of the derivation; `processTransaction`, `replayTransaction`, and `acceptPendingTransaction` all call it. replay/accept RE-DERIVE fee/netAmount/burn from the local (chain-consistent) sender row and apply the derived value, so an attacker's inflated wire numbers are inert. We deliberately do NOT reject on a wire mismatch (only log a diagnostic): in commit-time mode a tx can wait in the pending set across blocks, and a legitimate vouch/panel change between receipt and inclusion makes the frozen wire value differ from the derived one — rejecting would fail-stop the chain on an honest tx. Correctness holds across sync because the apply order runs transactions BEFORE this block's percentHuman ops, so a tx reads percentHuman as of end-of-prior-block identically on every node. Proven by `tests/tx-wire-value-verification.test.ts` (inflated wire overridden, accept stores derived, two-node state-root convergence, and the liveness case that dictates override-not-reject) and the 3-validator LAN test (state roots converge with the transfer flowing through the re-deriving replay path). Follow-up (not required for safety): physically drop fee/netAmount from `WireTransaction`; route the supportive/ambient tag finalization through `deriveSpendValue` too for single-source-of-truth. Note: `scripts/dev-bump-ph.mjs` writes percent_human via out-of-band SQL — running it on a subset of nodes now breaks the pure-chain-state premise and will (correctly) diverge, so keep it out of any multi-node run.
 
 - **[CRITICAL / economics] Fee distribution pays miners out of a node-local, never-replicated miners table, so every node credits different accounts for the same block**  
   Where: `ae-node/src/mining/rewards.ts:155-160 and :295-317 (commitBlockSideEffects)`  
@@ -1498,35 +1498,27 @@ not a leap of faith.
 
    **With panels done, percentHuman is now a pure function of the chain** (the
    three writers - vouch withdraw, panel completion, and unwired decay - are all
-   chain-driven or dormant). That was the sole blocker for the #4 value fix: the
-   next step is to re-derive transaction value locally in replayTransaction /
-   acceptPendingTransaction and reject a wire mismatch.
+   chain-driven or dormant). That unblocked the #4 value fix, which has now
+   LANDED (see the FIXED entry in Known Issues above): `deriveSpendValue` is the
+   single derivation, and `replayTransaction`/`acceptPendingTransaction`
+   re-derive from the local chain-consistent sender row instead of trusting the
+   wire. The one design refinement vs. the original plan: we re-derive and USE
+   the local value but do NOT reject on a wire mismatch (only log). Reject would
+   be a liveness bug — a tx can wait in the pending set across blocks and a
+   legitimate percentHuman change between receipt and inclusion makes the frozen
+   wire value differ from the derived one; a throw would fail-stop the chain on
+   an honest tx. Override is equally safe (the wire numbers are simply discarded)
+   and correct across sync (transactions apply before this block's percentHuman
+   ops, so every node reads the same as-of-prior-block percentHuman).
 
-   **Remaining in the cluster:** tags (#16), then re-derive transaction value to
-   close #4 (now unblocked). This is one
-   architectural change, not several. `replayTransaction` /
-   `acceptPendingTransaction` take `fee` / `netAmount` off the wire and apply
-   them verbatim; only `processTransaction` on the origin node re-derives them
-   from the sender's `percentHuman`. So a crafted transaction can claim full
-   value for a 0% sybil and every other node applies the inflated number. The
-   truly-unlimited case (crediting MORE than the sender spends) is already
-   blocked: accept/replay enforce `netAmount + fee <= amount`. What remains is
-   discount evasion - an unverified account's daily allocation, which should
-   burn entirely at 0%, delivered as real value instead. Bounded by daily-mint x
-   sybil-count, so serious at scale, not literally infinite. The reason the code
-   trusts the wire is that `percentHuman`
-   itself is node-local (written by `verification/panel.ts` from a REST call),
-   so re-deriving locally would make honest nodes disagree and FORK. Both halves
-   only become safe once `percentHuman`, miner status, and tag submissions are
-   chain-ordered, replicated operations — the same pattern `AccountRegistration`
-   already uses (schema v13): a signed op, a pending queue drained by the
-   proposer, a hash folded into `computeBlockHash`, applied deterministically at
-   commit on both the live and sync paths. Do that, then re-derive value locally
-   and reject wire mismatches. Interim already in place: the daily mint no longer
-   reads node-local miner state, miner iteration is ordered, and the fee pool is
-   in the state root so this class of drift is at least visible. Do NOT ship the
-   "re-derive and reject" half before percentHuman is replicated — it trades the
-   mint exploit for a chain halt.
+   **Remaining in the cluster:** tags (#16) — a signed tag-submission operation
+   admitted to a block and applied at commit, same pattern as vouch/miner/panel.
+   The tag VALUE math (`finalizeSupportiveTags`/`finalizeAmbientTags`) is already
+   computed locally from `acct.percentHuman` at commit and takes nothing off the
+   wire, so it is safe; the gap is that the tag ROWS themselves
+   (`supportive_tags`/`ambient_tags`) are written node-locally with no gossip and
+   no on-chain op, so each node finalizes a different tag set at the day boundary.
+   That is the last "state must come only from the chain" item.
 
 2. **State root stays diagnostic (blocker 1 above).** Same root cause as the
    cluster above and blocked on the same work: fold a state-root hash into the
