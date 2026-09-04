@@ -7,6 +7,7 @@ import type { AccountRegistration } from './account-registration.js';
 import type { VouchOperation } from '../verification/vouch-operation.js';
 import type { MinerOperation } from '../mining/miner-operation.js';
 import type { PanelOperation } from '../verification/panel-operation.js';
+import type { TaggingOperation } from '../tagging/tagging-operation.js';
 
 export type AccountType = 'individual' | 'company' | 'government' | 'ai_bot';
 export type PointType = 'active' | 'supportive' | 'ambient' | 'earned';
@@ -199,6 +200,14 @@ export interface Block {
    * percentHuman a pure function of the chain. `null` when none.
    */
   panelOperations: PanelOperation[] | null;
+
+  /**
+   * Signed tagging operations carried by this block (schema v20): product and
+   * space registrations, and supportive/ambient tag submissions. Same lifecycle
+   * as the lanes above. These carry the rows day-boundary finalization reads, so
+   * this lane makes tag finalization consensus-consistent. `null` when none.
+   */
+  taggingOperations: TaggingOperation[] | null;
 }
 
 export interface RebaseEvent {

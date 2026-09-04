@@ -331,6 +331,100 @@ async function waitForPercentHumanOnAllNodes(ports, accountId, expected, deadlin
   return null;
 }
 
+// Sign and submit a product_register operation (audit #16). Products are
+// consensus state now (tag finalization credits their manufacturer), so this
+// proves the product set converges via the chain, not node-local writes.
+async function submitProductRegister(apiPort, ks, name, category) {
+  const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
+  const opUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'tagging', 'tagging-operation.js')).href;
+  const { signPayload } = await import(cryptoUrl);
+  const { signProductRegister } = await import(opUrl);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const op = signProductRegister({ accountId: ks.accountId, name, category, timestamp, accountPrivateKey: ks.account.privateKey });
+  const payload = { op };
+  const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tags/products`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: ks.accountId,
+      timestamp,
+      signature: signPayload(payload, timestamp, ks.account.privateKey),
+      payload,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  const body = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, productId: body?.data?.productId ?? null, body };
+}
+
+// Sign and submit a supportive_tag_submit operation for one product on a day.
+async function submitSupportiveTag(apiPort, ks, day, productId, minutesUsed) {
+  const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
+  const opUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'tagging', 'tagging-operation.js')).href;
+  const { signPayload } = await import(cryptoUrl);
+  const { signSupportiveSubmit } = await import(opUrl);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const op = signSupportiveSubmit({ accountId: ks.accountId, day, tags: [{ productId, minutesUsed }], timestamp, accountPrivateKey: ks.account.privateKey });
+  const payload = { op };
+  const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tags/supportive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: ks.accountId,
+      timestamp,
+      signature: signPayload(payload, timestamp, ks.account.privateKey),
+      payload,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+}
+
+async function getTodayDay(apiPort) {
+  const r = await fetchJson(`http://127.0.0.1:${apiPort}/api/v1/tags/today`);
+  return r?.day ?? r?.data?.day ?? null;
+}
+
+// A product converges when every node returns it in the public catalog.
+async function waitForProductOnAllNodes(ports, productId, deadlineMs = 30000) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const flags = [];
+    for (const port of ports) {
+      try {
+        const r = await fetchJson(`http://127.0.0.1:${port}/api/v1/tags/products`);
+        flags.push((r?.products ?? []).some((p) => p.id === productId));
+      } catch {
+        flags.push(false);
+      }
+    }
+    if (flags.every(Boolean)) return true;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return false;
+}
+
+// A supportive tag converges when every node returns the same pointsAllocated
+// for the account+day (the value that flows to the manufacturer at finalization).
+async function waitForSupportiveTagOnAllNodes(ports, accountId, day, deadlineMs = 30000) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const seen = [];
+    for (const port of ports) {
+      try {
+        const r = await fetchJson(`http://127.0.0.1:${port}/api/v1/tags/supportive/${accountId}/${day}`);
+        const tags = r?.tags ?? [];
+        seen.push(tags.length === 1 ? `${tags[0].productId}:${tags[0].pointsAllocated}` : `n=${tags.length}`);
+      } catch {
+        seen.push('err');
+      }
+    }
+    if (seen.every((s) => s === seen[0] && !s.startsWith('n=') && s !== 'err')) return seen;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return null;
+}
+
 async function waitForLockedIncrease(ports, accountId, minLocked, deadlineMs = 30000) {
   const deadline = Date.now() + deadlineMs;
   while (Date.now() < deadline) {
@@ -594,6 +688,42 @@ async function main() {
   }
   log(`panel complete; percentHuman converged to 77 on all nodes: [${ph.join(', ')}]`);
   await waitForHeight(apiPorts, Math.min(...heights) + 10);
+
+  // 4e. Register a product and submit a supportive tag against it (audit #16).
+  // Products/spaces/tags were node-local; finalization read them and forked.
+  // This proves the product row AND the tag's pointsAllocated converge across
+  // nodes via the chain (state root excludes these tables, so we compare the
+  // rows directly through the API).
+  log('submitting product registration: validator 1');
+  const prodRes = await submitProductRegister(apiPorts[0], keystores[0], 'Oak Chair', 'furniture');
+  if (!prodRes.ok || !prodRes.productId) {
+    teardown('product register failed');
+    err(`product register POST failed: HTTP ${prodRes.status} ${JSON.stringify(prodRes.body)}`);
+    process.exit(10);
+  }
+  if (!(await waitForProductOnAllNodes(apiPorts, prodRes.productId))) {
+    teardown('product not on all nodes');
+    err('product registration did not appear on all nodes within the deadline');
+    process.exit(10);
+  }
+  log(`product ${prodRes.productId.slice(0, 12)}… converged on all nodes`);
+
+  const tagDay = await getTodayDay(apiPorts[0]);
+  log(`submitting supportive tag: validator 1, day ${tagDay}, product ${prodRes.productId.slice(0, 12)}…`);
+  const tagRes = await submitSupportiveTag(apiPorts[0], keystores[0], tagDay, prodRes.productId, 120);
+  if (!tagRes.ok) {
+    teardown('supportive tag failed');
+    err(`supportive tag POST failed: HTTP ${tagRes.status} ${JSON.stringify(tagRes.body)}`);
+    process.exit(10);
+  }
+  const tagSeen = await waitForSupportiveTagOnAllNodes(apiPorts, keystores[0].accountId, tagDay);
+  if (!tagSeen) {
+    teardown('supportive tag did not converge');
+    err('supportive tag pointsAllocated did not converge across nodes within the deadline');
+    process.exit(10);
+  }
+  log(`supportive tag converged on all nodes: ${tagSeen[0]}`);
+  await waitForHeight(apiPorts, Math.min(...heights) + 12);
 
   // 5. Compare latest block hashes via /network/blocks?limit=1.
   // Heights matching is necessary but not sufficient — same chain means

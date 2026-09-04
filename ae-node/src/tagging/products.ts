@@ -20,9 +20,14 @@ export function registerProduct(
   category: string,
   createdBy: string,
   manufacturerId?: string,
+  // Chain-ordering (audit #16): when a product_register operation applies at
+  // commit it supplies a deterministic id (derived from the op signature) and
+  // the block timestamp, so every node stores byte-identical rows. Omitted on
+  // the seed/legacy path, which keeps the random uuid + wall clock.
+  opts?: { id?: string; now?: number },
 ): Product {
-  const id = uuid();
-  const now = Math.floor(Date.now() / 1000);
+  const id = opts?.id ?? uuid();
+  const now = opts?.now ?? Math.floor(Date.now() / 1000);
 
   db.prepare(
     `INSERT INTO products (id, name, category, manufacturer_id, created_by, is_active, created_at)

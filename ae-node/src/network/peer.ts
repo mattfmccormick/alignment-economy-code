@@ -89,6 +89,7 @@ export class PeerManager extends EventEmitter {
   private seenVouchOps = new Set<string>();
   private seenMinerOps = new Set<string>();
   private seenPanelOps = new Set<string>();
+  private seenTaggingOps = new Set<string>();
   private seenProposals = new Set<string>();
   private seenVotes = new Set<string>();
   private maxPeers: number;
@@ -477,6 +478,18 @@ export class PeerManager extends EventEmitter {
         if (!key || !this.markSeenAndAccept(this.seenPanelOps, key, 5000)) return;
         this.emit('panel_op:received', msg.data, msg.senderId);
         this.relayGossip('new_panel_op', msg.data, msg.senderId);
+        break;
+      }
+      case 'new_tagging_op': {
+        // Signed tagging operations (product/space register, supportive/ambient
+        // tag submit) gossip to every node's QUEUE, same discipline: applied at
+        // block commit, authenticated + deduped by signature.
+        if (!this.isAuthenticatedSender(msg.publicKey, ws)) return;
+        const op = msg.data as { accountId?: string; signature?: string };
+        const key = String(op?.signature ?? '');
+        if (!key || !this.markSeenAndAccept(this.seenTaggingOps, key, 5000)) return;
+        this.emit('tagging_op:received', msg.data, msg.senderId);
+        this.relayGossip('new_tagging_op', msg.data, msg.senderId);
         break;
       }
       case 'new_vouch_op': {

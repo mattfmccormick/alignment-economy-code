@@ -23,9 +23,12 @@ export function registerSpace(
   parentId?: string,
   entityId?: string,
   collectionRate: number = 0,
+  // Chain-ordering (audit #16): deterministic id + block timestamp on the
+  // space_register apply path; random uuid + wall clock on the seed/legacy path.
+  opts?: { id?: string; now?: number },
 ): Space {
-  const id = uuid();
-  const now = Math.floor(Date.now() / 1000);
+  const id = opts?.id ?? uuid();
+  const now = opts?.now ?? Math.floor(Date.now() / 1000);
 
   if (collectionRate < 0 || collectionRate > 100) {
     throw new ValidationError('Collection rate must be 0-100', 'INVALID_COLLECTION_RATE');

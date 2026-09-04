@@ -31,56 +31,95 @@ import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { getAccount } from '../../core/account.js';
 import { getCycleState } from '../../core/day-cycle.js';
-import { registerProduct } from '../../tagging/products.js';
-import { registerSpace, getSpace } from '../../tagging/spaces.js';
+import { getSupportiveTags } from '../../tagging/supportive.js';
+import { getAmbientTags } from '../../tagging/ambient.js';
 import {
-  submitSupportiveTags,
-  getSupportiveTags,
-  type TagInput,
-} from '../../tagging/supportive.js';
-import {
-  submitAmbientTags,
-  getAmbientTags,
-  type AmbientTagInput,
-} from '../../tagging/ambient.js';
+  enqueueTaggingOperation,
+  verifyTaggingOperation,
+  validateTaggingOperationApplicable,
+  deriveProductId,
+  deriveSpaceId,
+  type TaggingOperation,
+} from '../../tagging/tagging-operation.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { validateBody } from '../middleware/validate.js';
-import * as schemas from '../schemas.js';
-import type { SpaceType } from '../../tagging/types.js';
 
-const VALID_SPACE_TYPES: SpaceType[] = [
-  'room', 'building', 'park', 'road', 'transit', 'city', 'state', 'nation', 'custom',
-];
-
-export function tagRoutes(db: DatabaseSync): Router {
+export function tagRoutes(
+  db: DatabaseSync,
+  // Gossip a signed tagging op so any proposer includes it (audit #16). Absent
+  // outside BFT mode; the op still queues locally and rides this node's blocks.
+  taggingOpBroadcaster?: (op: unknown) => void,
+): Router {
   const router = Router();
+
+  // Shared handler for the four op-bearing POST routes. Verifies the signed op,
+  // confirms it belongs to the authenticated account, checks it applies against
+  // committed chain state, then queues + gossips it. The row appears (products/
+  // spaces/tags) only once the carrying block commits — same pending model as
+  // miner registration and vouches.
+  function submitOp(
+    req: import('express').Request,
+    res: import('express').Response,
+    expectedType: TaggingOperation['type'],
+    dataFor: (op: TaggingOperation) => Record<string, unknown>,
+  ) {
+    const accountId = req.accountId!;
+    // Back-compat identity guard (mirrors miners.ts): a flat-body accountId that
+    // disagrees with the signed caller is a 403 before anything else, so the
+    // auth-hardening regression contract holds regardless of the op envelope.
+    const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
+    if (claimedAccountId && claimedAccountId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'accountId does not match the authenticated account' },
+      });
+    }
+    const account = getAccount(db, accountId);
+    if (!account) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'account not found' } });
+    }
+    const op = (req.body.payload?.op ?? req.body.op) as TaggingOperation | undefined;
+    if (!op || op.type !== expectedType) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_OP', message: `payload.op must be a signed ${expectedType} operation` },
+      });
+    }
+    if (op.accountId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'op.accountId does not match the authenticated account' },
+      });
+    }
+    if (!verifyTaggingOperation(op, account.publicKey)) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'INVALID_OP_SIGNATURE', message: 'tagging operation signature does not verify' },
+      });
+    }
+    const problem = validateTaggingOperationApplicable(db, op);
+    if (problem) {
+      return res.status(400).json({ success: false, error: { code: 'OP_NOT_APPLICABLE', message: problem } });
+    }
+    enqueueTaggingOperation(db, op);
+    taggingOpBroadcaster?.(op);
+    return res.json({
+      success: true,
+      data: { status: 'pending', ...dataFor(op) },
+      meta: { timestamp: Math.floor(Date.now() / 1000) },
+    });
+  }
 
   // ----- Products -----
 
-  // POST /tags/products — auth-required. The signed account is taken to be
-  // the product creator (`createdBy`). Body createdBy is back-compat;
-  // 403 ACCOUNT_MISMATCH if it disagrees with the signature.
-  router.post('/products', authMiddleware(db), validateBody(schemas.registerProduct), (req, res) => {
-    const createdBy = req.accountId!;
-    const { name, category, manufacturerId } = req.body.payload || req.body;
-    const claimedCreatedBy = (req.body.payload && req.body.payload.createdBy) ?? req.body.createdBy;
-    if (claimedCreatedBy && claimedCreatedBy !== createdBy) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'ACCOUNT_MISMATCH', message: 'createdBy does not match the authenticated account' },
-      });
-    }
-    if (!name || !category) {
-      return res.status(400).json({ error: 'name and category are required' });
-    }
-    if (manufacturerId) {
-      const mfg = getAccount(db, manufacturerId);
-      if (!mfg) return res.status(404).json({ error: 'manufacturer account not found' });
-    }
-
-    const product = registerProduct(db, name, category, createdBy, manufacturerId || undefined);
-    res.json({ product });
-  });
+  // POST /tags/products — auth-required. Registration now rides the chain
+  // (audit #16): the client sends a signed product_register op; this route
+  // verifies + queues + gossips it, and it applies at commit on every node. The
+  // product row appears via GET only once the carrying block commits.
+  router.post('/products', authMiddleware(db), (req, res) =>
+    submitOp(req, res, 'product_register', (op) => ({
+      productId: deriveProductId(op as Extract<TaggingOperation, { type: 'product_register' }>),
+    })),
+  );
 
   router.get('/products', (_req, res) => {
     const rows = db.prepare(
@@ -120,35 +159,15 @@ export function tagRoutes(db: DatabaseSync): Router {
 
   // ----- Spaces -----
 
-  // POST /tags/spaces — auth-required. The signed account is the space
-  // creator. Spaces don't currently track `createdBy` in the schema, but
-  // we still gate on signature so future schema additions or analytics
-  // can attribute correctly.
-  router.post('/spaces', authMiddleware(db), validateBody(schemas.registerSpace), (req, res) => {
-    const { name, type, parentId, entityId, collectionRate } = req.body.payload || req.body;
-    if (!name || !type) {
-      return res.status(400).json({ error: 'name and type are required' });
-    }
-    if (!VALID_SPACE_TYPES.includes(type)) {
-      return res.status(400).json({ error: `type must be one of: ${VALID_SPACE_TYPES.join(', ')}` });
-    }
-    if (parentId && !getSpace(db, parentId)) {
-      return res.status(404).json({ error: 'parent space not found' });
-    }
-    if (entityId && !getAccount(db, entityId)) {
-      return res.status(404).json({ error: 'entity account not found' });
-    }
-
-    const space = registerSpace(
-      db,
-      name,
-      type,
-      parentId || undefined,
-      entityId || undefined,
-      typeof collectionRate === 'number' ? collectionRate : 0,
-    );
-    res.json({ space });
-  });
+  // POST /tags/spaces — auth-required. Chain-ordered like /products: a signed
+  // space_register op is verified, queued, and gossiped; the row appears at
+  // commit. Validity (type, collectionRate, parent/entity existence) is checked
+  // by validateTaggingOperationApplicable against committed chain state.
+  router.post('/spaces', authMiddleware(db), (req, res) =>
+    submitOp(req, res, 'space_register', (op) => ({
+      spaceId: deriveSpaceId(op as Extract<TaggingOperation, { type: 'space_register' }>),
+    })),
+  );
 
   router.get('/spaces', (_req, res) => {
     const rows = db.prepare(
@@ -171,48 +190,13 @@ export function tagRoutes(db: DatabaseSync): Router {
 
   // ----- Supportive tags -----
 
-  // POST /tags/supportive — auth-required. The signed account is taken to
-  // be the tag owner; a top-level `accountId` in the body is back-compat
-  // only and rejected with 403 if it disagrees with the signed caller.
-  router.post('/supportive', authMiddleware(db), validateBody(schemas.submitTags), (req, res) => {
-    const accountId = req.accountId!;
-    const { day, tags } = req.body.payload || req.body;
-    const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
-    if (claimedAccountId && claimedAccountId !== accountId) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'ACCOUNT_MISMATCH', message: 'accountId does not match the authenticated account' },
-      });
-    }
-    if (day === undefined || !Array.isArray(tags)) {
-      return res.status(400).json({ error: 'day and tags[] are required' });
-    }
-    const owner = getAccount(db, accountId);
-    if (!owner) return res.status(404).json({ error: 'account not found' });
-
-    const inputs: TagInput[] = tags.map((t: Record<string, unknown>) => ({
-      productId: String(t.productId),
-      minutesUsed: Number(t.minutesUsed),
-    }));
-
-    try {
-      const out = submitSupportiveTags(db, accountId, Number(day), inputs);
-      res.json({
-        tags: out.map((t) => ({
-          id: t.id,
-          accountId: t.accountId,
-          day: t.day,
-          productId: t.productId,
-          minutesUsed: t.minutesUsed,
-          pointsAllocated: t.pointsAllocated.toString(),
-          status: t.status,
-        })),
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'invalid submission';
-      res.status(400).json({ error: message });
-    }
-  });
+  // POST /tags/supportive — auth-required. Chain-ordered (audit #16): a signed
+  // supportive_tag_submit op is verified, queued, and gossiped. The tag rows and
+  // their pointsAllocated appear (via GET) once the block commits; the client
+  // shows a live local preview until then.
+  router.post('/supportive', authMiddleware(db), (req, res) =>
+    submitOp(req, res, 'supportive_tag_submit', () => ({})),
+  );
 
   router.get('/supportive/:owner/:day', (req, res) => {
     const day = Number(req.params.day);
@@ -232,46 +216,11 @@ export function tagRoutes(db: DatabaseSync): Router {
 
   // ----- Ambient tags -----
 
-  // POST /tags/ambient — auth-required. Mirrors /supportive's auth shape.
-  router.post('/ambient', authMiddleware(db), validateBody(schemas.submitTags), (req, res) => {
-    const accountId = req.accountId!;
-    const { day, tags } = req.body.payload || req.body;
-    const claimedAccountId = (req.body.payload && req.body.payload.accountId) ?? req.body.accountId;
-    if (claimedAccountId && claimedAccountId !== accountId) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'ACCOUNT_MISMATCH', message: 'accountId does not match the authenticated account' },
-      });
-    }
-    if (day === undefined || !Array.isArray(tags)) {
-      return res.status(400).json({ error: 'day and tags[] are required' });
-    }
-    const owner = getAccount(db, accountId);
-    if (!owner) return res.status(404).json({ error: 'account not found' });
-
-    const inputs: AmbientTagInput[] = tags.map((t: Record<string, unknown>) => ({
-      spaceId: String(t.spaceId),
-      minutesOccupied: Number(t.minutesOccupied),
-    }));
-
-    try {
-      const out = submitAmbientTags(db, accountId, Number(day), inputs);
-      res.json({
-        tags: out.map((t) => ({
-          id: t.id,
-          accountId: t.accountId,
-          day: t.day,
-          spaceId: t.spaceId,
-          minutesOccupied: t.minutesOccupied,
-          pointsAllocated: t.pointsAllocated.toString(),
-          status: t.status,
-        })),
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'invalid submission';
-      res.status(400).json({ error: message });
-    }
-  });
+  // POST /tags/ambient — auth-required. Mirrors /supportive: a signed
+  // ambient_tag_submit op is verified, queued, and gossiped; rows appear at commit.
+  router.post('/ambient', authMiddleware(db), (req, res) =>
+    submitOp(req, res, 'ambient_tag_submit', () => ({})),
+  );
 
   router.get('/ambient/:owner/:day', (req, res) => {
     const day = Number(req.params.day);

@@ -74,6 +74,8 @@ export interface CreateAppOptions {
   minerOpBroadcaster?: (op: unknown) => void;
   /** Gossip a signed panel operation to peers (the last percentHuman writer). */
   panelOpBroadcaster?: (op: unknown) => void;
+  /** Gossip a signed tagging operation to peers (audit #16). */
+  taggingOpBroadcaster?: (op: unknown) => void;
 }
 
 export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
@@ -109,7 +111,7 @@ export function createApp(db: DatabaseSync, opts: CreateAppOptions = {}) {
   app.use('/api/v1/verification', verificationRoutes(db, opts.panelOpBroadcaster));
   app.use('/api/v1/court', courtRoutes(db));
   app.use('/api/v1/validators', validatorRoutes(db));
-  app.use('/api/v1/tags', tagRoutes(db));
+  app.use('/api/v1/tags', tagRoutes(db, opts.taggingOpBroadcaster));
   app.use('/api/v1/founder', founderRoutes());
 
   // Machine-readable API contract, generated from the same zod schemas the

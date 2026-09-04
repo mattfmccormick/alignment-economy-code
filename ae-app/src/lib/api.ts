@@ -302,36 +302,34 @@ export const api = {
   getMyProducts: (ownerId: string) =>
     request<{ products: ProductData[] }>('GET', `/tags/products/mine/${ownerId}`),
 
-  // Auth-required: the signed account is the product creator.
-  registerProduct: (envelope: { accountId: string; timestamp: number; signature: string; payload: { name: string; category: string; manufacturerId?: string } }) =>
-    request<{ product: ProductData }>('POST', '/tags/products', envelope),
+  // Auth-required. Registration rides the chain now (audit #16): the payload
+  // carries a signed product_register op; the row appears via getProducts once
+  // the block commits, so the response is a pending acknowledgement.
+  registerProduct: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
+    request<{ status: string; productId: string }>('POST', '/tags/products', envelope),
 
   getSpaces: () =>
     request<{ spaces: SpaceData[] }>('GET', '/tags/spaces'),
 
-  // Auth-required: signed account is the space creator. Spaces don't store
-  // createdBy in the schema today, but the auth gate is still applied.
-  registerSpace: (envelope: { accountId: string; timestamp: number; signature: string; payload: { name: string; type: string; parentId?: string; entityId?: string; collectionRate?: number } }) =>
-    request<{ space: SpaceData }>('POST', '/tags/spaces', envelope),
+  // Auth-required. Chain-ordered like registerProduct; pending response.
+  registerSpace: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
+    request<{ status: string; spaceId: string }>('POST', '/tags/spaces', envelope),
 
   getSupportiveTags: (accountId: string, day: number) =>
     request<{ tags: SupportiveTagData[] }>('GET', `/tags/supportive/${accountId}/${day}`),
 
-  // Auth-required: caller signs the tag payload with their private key,
-  // ae-node verifies via authMiddleware, accountId is read from the
-  // signature. Without this gate any third party could redirect the
-  // signer's daily 144 supportive points to a product they own.
-  submitSupportiveTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { day: number; tags: Array<{ productId: string; minutesUsed: number }> } }) =>
-    request<{ tags: SupportiveTagData[] }>('POST', '/tags/supportive', envelope),
+  // Auth-required. The payload carries a signed supportive_tag_submit op; the
+  // tag rows and their pointsAllocated appear via getSupportiveTags once the
+  // block commits (the UI shows a live local preview until then).
+  submitSupportiveTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
+    request<{ status: string }>('POST', '/tags/supportive', envelope),
 
   getAmbientTags: (accountId: string, day: number) =>
     request<{ tags: AmbientTagData[] }>('GET', `/tags/ambient/${accountId}/${day}`),
 
-  // Auth-required: same auth shape as submitSupportiveTags. Without this,
-  // a third party could redirect the signer's daily 14.4 ambient points
-  // to a space they own.
-  submitAmbientTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { day: number; tags: Array<{ spaceId: string; minutesOccupied: number }> } }) =>
-    request<{ tags: AmbientTagData[] }>('POST', '/tags/ambient', envelope),
+  // Auth-required. Mirrors submitSupportiveTags; pending response.
+  submitAmbientTags: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
+    request<{ status: string }>('POST', '/tags/ambient', envelope),
 
   getTodayDay: () =>
     request<{ day: number; cyclePhase: string }>('GET', '/tags/today'),

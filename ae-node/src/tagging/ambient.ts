@@ -31,6 +31,9 @@ export function submitAmbientTags(
   accountId: string,
   day: number,
   tags: AmbientTagInput[],
+  // Chain-ordering (audit #16): deterministic id per tag row on the
+  // ambient_tag_submit apply path; random uuids on the legacy path.
+  opts?: { rowIds?: string[] },
 ): AmbientTag[] {
   if (tags.length === 0) return [];
 
@@ -57,9 +60,10 @@ export function submitAmbientTags(
 
   const result: AmbientTag[] = [];
 
-  for (const tag of tags) {
+  for (let i = 0; i < tags.length; i++) {
+    const tag = tags[i];
     const share = BigInt(tag.minutesOccupied) * DAILY_AMBIENT_POINTS / BigInt(totalMinutes);
-    const id = uuid();
+    const id = opts?.rowIds?.[i] ?? uuid();
 
     db.prepare(
       `INSERT INTO ambient_tags (id, account_id, day, space_id, minutes_occupied, points_allocated, status)
@@ -145,7 +149,7 @@ export function finalizeAmbientTags(db: DatabaseSync, accountId: string, day: nu
   distributions: HierarchyDistribution[];
 } {
   const tags = db.prepare(
-    "SELECT * FROM ambient_tags WHERE account_id = ? AND day = ? AND status = 'active'"
+    "SELECT * FROM ambient_tags WHERE account_id = ? AND day = ? AND status = 'active' ORDER BY id ASC"
   ).all(accountId, day) as Array<Record<string, unknown>>;
 
   const acct = getAccount(db, accountId)!;

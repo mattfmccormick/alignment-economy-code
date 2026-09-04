@@ -81,11 +81,17 @@ export function finalizeDailyTags(db: DatabaseSync): {
   // Union of everyone with at least one active tag of either kind today. Most
   // accounts on a young network have none, so this is far cheaper than walking
   // the whole account table.
+  // ORDER BY account_id so the finalize order is identical on every node. Cross
+  // -account credits are additive (commutative) so order does not change today's
+  // balances, but this removes a latent fork trap if a non-commutative step is
+  // ever added, and matches the deterministic-iteration discipline the rebase
+  // and miner-store paths already follow (audit #16).
   const rows = db
     .prepare(
       `SELECT account_id FROM supportive_tags WHERE day = ? AND status = 'active'
        UNION
-       SELECT account_id FROM ambient_tags WHERE day = ? AND status = 'active'`,
+       SELECT account_id FROM ambient_tags WHERE day = ? AND status = 'active'
+       ORDER BY account_id ASC`,
     )
     .all(day, day) as Array<{ account_id: string }>;
 

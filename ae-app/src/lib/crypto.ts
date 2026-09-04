@@ -62,6 +62,96 @@ export function signPanelCreate(
   return { type: 'panel_create', accountId, timestamp, signature: bytesToHex(sig) };
 }
 
+// ─── Tagging operations (audit #16) ─────────────────────────────────────────
+//
+// The canonical bytes are a JSON positional array (type tag first), NOT a
+// pipe-join: product/space names and categories are free text and can contain
+// '|' or quotes, and the tag list is an array. This MUST match ae-node's
+// tagging-operation.ts canonicalBytesFor byte-for-byte, or signatures fail to
+// verify. JSON.stringify over a positional array is unambiguous and identical in
+// V8 here and on the node. A cross-repo byte-match test pins it.
+
+export interface SupportiveTagEntry { productId: string; minutesUsed: number }
+export interface AmbientTagEntry { spaceId: string; minutesOccupied: number }
+
+export function signTagProductRegister(
+  accountId: string,
+  name: string,
+  category: string,
+  manufacturerId: string | null,
+  timestamp: number,
+  privateKeyHex: string,
+): {
+  type: 'product_register';
+  accountId: string;
+  name: string;
+  category: string;
+  manufacturerId: string | null;
+  timestamp: number;
+  signature: string;
+} {
+  const canonical = JSON.stringify([
+    'product_register', accountId, name, category, manufacturerId ?? null, timestamp,
+  ]);
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'product_register', accountId, name, category, manufacturerId: manufacturerId ?? null, timestamp, signature: bytesToHex(sig) };
+}
+
+export function signTagSpaceRegister(
+  accountId: string,
+  name: string,
+  spaceType: string,
+  parentId: string | null,
+  entityId: string | null,
+  collectionRate: number,
+  timestamp: number,
+  privateKeyHex: string,
+): {
+  type: 'space_register';
+  accountId: string;
+  name: string;
+  spaceType: string;
+  parentId: string | null;
+  entityId: string | null;
+  collectionRate: number;
+  timestamp: number;
+  signature: string;
+} {
+  const canonical = JSON.stringify([
+    'space_register', accountId, name, spaceType, parentId ?? null, entityId ?? null, collectionRate, timestamp,
+  ]);
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'space_register', accountId, name, spaceType, parentId: parentId ?? null, entityId: entityId ?? null, collectionRate, timestamp, signature: bytesToHex(sig) };
+}
+
+export function signTagSupportiveSubmit(
+  accountId: string,
+  day: number,
+  tags: SupportiveTagEntry[],
+  timestamp: number,
+  privateKeyHex: string,
+): { type: 'supportive_tag_submit'; accountId: string; day: number; tags: SupportiveTagEntry[]; timestamp: number; signature: string } {
+  const canonical = JSON.stringify([
+    'supportive_tag_submit', accountId, day, tags.map((t) => [t.productId, t.minutesUsed]), timestamp,
+  ]);
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'supportive_tag_submit', accountId, day, tags, timestamp, signature: bytesToHex(sig) };
+}
+
+export function signTagAmbientSubmit(
+  accountId: string,
+  day: number,
+  tags: AmbientTagEntry[],
+  timestamp: number,
+  privateKeyHex: string,
+): { type: 'ambient_tag_submit'; accountId: string; day: number; tags: AmbientTagEntry[]; timestamp: number; signature: string } {
+  const canonical = JSON.stringify([
+    'ambient_tag_submit', accountId, day, tags.map((t) => [t.spaceId, t.minutesOccupied]), timestamp,
+  ]);
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'ambient_tag_submit', accountId, day, tags, timestamp, signature: bytesToHex(sig) };
+}
+
 export function signPayload(payload: object, timestamp: number, privateKeyHex: string): string {
   const message = JSON.stringify(payload) + timestamp.toString();
   const data = new TextEncoder().encode(message);

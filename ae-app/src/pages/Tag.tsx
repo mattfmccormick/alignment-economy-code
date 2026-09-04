@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
-import { signPayload } from '../lib/crypto';
+import {
+  signPayload,
+  signTagProductRegister,
+  signTagSpaceRegister,
+  signTagSupportiveSubmit,
+  signTagAmbientSubmit,
+} from '../lib/crypto';
 import { displayPoints } from '../lib/formatting';
 
 const DAILY_SUPPORTIVE = '14400000000';   // 144.00 supportive points (raw units)
@@ -154,8 +160,17 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
     const w = loadWallet();
     if (!w) { setSaving(false); setError('No wallet loaded'); return; }
     try {
+      // Tagging rides the chain now (audit #16): sign a supportive_tag_submit op
+      // and send { op }. The auth envelope signs the same { op } payload.
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { day, tags: submit.map((t) => ({ productId: t.productId, minutesUsed: t.minutesUsed })) };
+      const op = signTagSupportiveSubmit(
+        accountId,
+        day,
+        submit.map((t) => ({ productId: t.productId, minutesUsed: t.minutesUsed })),
+        ts,
+        w.privateKey,
+      );
+      const payload = { op };
       const signature = signPayload(payload, ts, w.privateKey);
       const r = await api.submitSupportiveTags({
         accountId,
@@ -166,7 +181,10 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
       if (r.success) {
         setSavedAt(Date.now());
         setDirty(false);
-        refresh();
+        // Do NOT refresh() here: the op is pending until the next block commits,
+        // so a GET would return the stale/empty server set and wipe the user's
+        // just-entered minutes. Local tagRows stay the source of truth (with the
+        // live pointsAllocated preview) until the block lands.
       } else {
         setError(r.error?.message || 'Failed to save');
       }
@@ -303,12 +321,18 @@ function AddProductForm({ accountId, onCreated }: { accountId: string; onCreated
     setSubmitting(true); setErr(null);
     const w = loadWallet();
     if (!w) { setSubmitting(false); setErr('No wallet loaded'); return; }
+    // Registration rides the chain now (audit #16): sign a product_register op
+    // and send { op }. The product appears in the catalog once the block commits.
     const ts = Math.floor(Date.now() / 1000);
-    const payload = {
-      name: name.trim(),
+    const op = signTagProductRegister(
+      accountId,
+      name.trim(),
       category,
-      manufacturerId: manufacturerId.trim() || undefined,
-    };
+      manufacturerId.trim() || null,
+      ts,
+      w.privateKey,
+    );
+    const payload = { op };
     const signature = signPayload(payload, ts, w.privateKey);
     const r = await api.registerProduct({ accountId, timestamp: ts, signature, payload });
     setSubmitting(false);
@@ -415,8 +439,16 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
     const w = loadWallet();
     if (!w) { setSaving(false); setError('No wallet loaded'); return; }
     try {
+      // Chain-ordered (audit #16): sign an ambient_tag_submit op, send { op }.
       const ts = Math.floor(Date.now() / 1000);
-      const payload = { day, tags: submit.map((t) => ({ spaceId: t.spaceId, minutesOccupied: t.minutesOccupied })) };
+      const op = signTagAmbientSubmit(
+        accountId,
+        day,
+        submit.map((t) => ({ spaceId: t.spaceId, minutesOccupied: t.minutesOccupied })),
+        ts,
+        w.privateKey,
+      );
+      const payload = { op };
       const signature = signPayload(payload, ts, w.privateKey);
       const r = await api.submitAmbientTags({
         accountId,
@@ -427,7 +459,7 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
       if (r.success) {
         setSavedAt(Date.now());
         setDirty(false);
-        refresh();
+        // Pending until the next block; keep local tagRows (see supportive save).
       } else {
         setError(r.error?.message || 'Failed to save');
       }
@@ -557,12 +589,21 @@ function AddSpaceForm({ onCreated }: { onCreated: () => void }) {
     setSubmitting(true); setErr(null);
     const w = loadWallet();
     if (!w) { setSubmitting(false); setErr('No wallet loaded'); return; }
+    // Chain-ordered (audit #16): sign a space_register op, send { op }. parentId
+    // and collectionRate are supported by the op but not surfaced in this form
+    // yet, so they default to null / 0 (a top-level space with no parent levy).
     const ts = Math.floor(Date.now() / 1000);
-    const payload = {
-      name: name.trim(),
+    const op = signTagSpaceRegister(
+      w.accountId,
+      name.trim(),
       type,
-      entityId: entityId.trim() || undefined,
-    };
+      null,
+      entityId.trim() || null,
+      0,
+      ts,
+      w.privateKey,
+    );
+    const payload = { op };
     const signature = signPayload(payload, ts, w.privateKey);
     const r = await api.registerSpace({ accountId: w.accountId, timestamp: ts, signature, payload });
     setSubmitting(false);

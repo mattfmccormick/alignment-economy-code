@@ -73,6 +73,11 @@ import {
   type PanelOperation,
 } from '../verification/panel-operation.js';
 import {
+  computeTaggingOperationsHash,
+  verifyTaggingOperation,
+  type TaggingOperation,
+} from '../tagging/tagging-operation.js';
+import {
   computeAccountRegistrationsHash,
   type AccountRegistration,
 } from '../core/account-registration.js';
@@ -200,6 +205,7 @@ export interface IncomingBlockPayload {
   vouchOperations?: VouchOperation[];
   minerOperations?: MinerOperation[];
   panelOperations?: PanelOperation[];
+  taggingOperations?: TaggingOperation[];
 }
 
 export interface ValidationResult {
@@ -388,6 +394,10 @@ export function validateIncomingBlock(
     payload.panelOperations && payload.panelOperations.length > 0
       ? computePanelOperationsHash(payload.panelOperations)
       : null;
+  const taggingOperationsHash =
+    payload.taggingOperations && payload.taggingOperations.length > 0
+      ? computeTaggingOperationsHash(payload.taggingOperations)
+      : null;
   const expectedHash = computeBlockHash(
     payload.number,
     payload.previousHash,
@@ -400,6 +410,7 @@ export function validateIncomingBlock(
     vouchOperationsHash,
     minerOperationsHash,
     panelOperationsHash,
+    taggingOperationsHash,
   );
   if (payload.hash !== expectedHash) {
     return {
@@ -671,6 +682,34 @@ export function validateIncomingBlock(
     }
   }
 
+  if (payload.taggingOperations && payload.taggingOperations.length > 0) {
+    if (!Array.isArray(payload.taggingOperations)) {
+      return { valid: false, error: 'taggingOperations must be an array' };
+    }
+    const aStore = accountStore(db);
+    for (let i = 0; i < payload.taggingOperations.length; i++) {
+      const op = payload.taggingOperations[i];
+      // All four tagging op types are signed by op.accountId (the registrant /
+      // tagger), so one key resolves the signer.
+      if (typeof op?.accountId !== 'string') {
+        return { valid: false, error: `taggingOperations[${i}] missing accountId` };
+      }
+      const account = aStore.findById(op.accountId);
+      if (!account) {
+        return {
+          valid: false,
+          error: `taggingOperations[${i}].accountId ${op.accountId} not found locally`,
+        };
+      }
+      if (!verifyTaggingOperation(op, account.publicKey)) {
+        return {
+          valid: false,
+          error: `taggingOperations[${i}] signature does not verify against ${op.accountId}`,
+        };
+      }
+    }
+  }
+
   return { valid: true };
 }
 
@@ -715,6 +754,10 @@ export function payloadToBlock(payload: IncomingBlockPayload): Block {
     panelOperations:
       payload.panelOperations && payload.panelOperations.length > 0
         ? payload.panelOperations
+        : null,
+    taggingOperations:
+      payload.taggingOperations && payload.taggingOperations.length > 0
+        ? payload.taggingOperations
         : null,
   };
 }

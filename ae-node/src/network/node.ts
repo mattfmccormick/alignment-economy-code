@@ -18,6 +18,11 @@ import {
   enqueuePanelOperation,
   type PanelOperation,
 } from '../verification/panel-operation.js';
+import {
+  verifyTaggingOperation,
+  enqueueTaggingOperation,
+  type TaggingOperation,
+} from '../tagging/tagging-operation.js';
 import { getAccount } from '../core/account.js';
 import { AuthorityConsensus } from './consensus.js';
 import type { IConsensusEngine } from '../core/consensus/IConsensusEngine.js';
@@ -279,6 +284,22 @@ export class AENode {
         logger.warn('p2p', `Rejected gossiped panel op: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
+
+    this.peerManager.on('tagging_op:received', (data: unknown) => {
+      try {
+        const op = data as TaggingOperation;
+        const acct = op?.accountId ? getAccount(this.db, op.accountId) : null;
+        if (!acct) return;
+        if (!verifyTaggingOperation(op, acct.publicKey)) {
+          logger.warn('p2p', 'Rejected gossiped tagging op: signature does not verify');
+          return;
+        }
+        enqueueTaggingOperation(this.db, op);
+        logger.info('p2p', `Queued gossiped tagging op (${op.type}) from ${op.accountId.slice(0, 12)}…`);
+      } catch (err) {
+        logger.warn('p2p', `Rejected gossiped tagging op: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   }
 
   /** Broadcast a newly created account so every peer can replay its txs. */
@@ -299,6 +320,11 @@ export class AENode {
   /** Gossip a signed panel operation so every node queues it for the next block. */
   broadcastPanelOp(op: PanelOperation): void {
     this.peerManager.broadcast('new_panel_op', op as unknown as Record<string, unknown>);
+  }
+
+  /** Gossip a signed tagging operation so every node queues it for the next block. */
+  broadcastTaggingOp(op: TaggingOperation): void {
+    this.peerManager.broadcast('new_tagging_op', op as unknown as Record<string, unknown>);
   }
 
   /** Start the P2P WebSocket server and connect to the network */

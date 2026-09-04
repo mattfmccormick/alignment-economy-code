@@ -57,6 +57,11 @@ import {
   drainPanelOperations,
   removeAppliedPanelOperations,
 } from '../verification/panel-operation.js';
+import {
+  applyTaggingOperation,
+  drainTaggingOperations,
+  removeAppliedTaggingOperations,
+} from '../tagging/tagging-operation.js';
 import { logger, setLogLevel } from './logger.js';
 import type { AENodeConfig } from './config.js';
 import type { TransactionRow } from '../core/stores/ITransactionStore.js';
@@ -326,6 +331,10 @@ export class AENodeRunner {
         this.config.consensusMode === 'bft'
           ? (op) => this.p2pNode?.broadcastPanelOp(op as never)
           : undefined,
+      taggingOpBroadcaster:
+        this.config.consensusMode === 'bft'
+          ? (op) => this.p2pNode?.broadcastTaggingOp(op as never)
+          : undefined,
     });
     logger.info('api', `API server listening on ${this.config.apiHost}:${this.config.apiPort}`);
   }
@@ -497,6 +506,12 @@ export class AENodeRunner {
             // node reaches the same percentHuman.
             for (const op of payload.panelOperations ?? []) {
               applyPanelOperation(this.db, op, block.timestamp);
+            }
+            // Tagging operations (audit #16), in block-array order, before the
+            // day cycle below reads the rows. Matches the live commit path so a
+            // syncing node reaches the same products/spaces/tags and finalize.
+            for (const op of payload.taggingOperations ?? []) {
+              applyTaggingOperation(this.db, op, block.timestamp);
             }
 
             // Distribute fees per WP economics. Idempotent — matches the
@@ -782,6 +797,13 @@ export class AENodeRunner {
           }
         } catch (err) {
           void err;
+        }
+      },
+      pendingTaggingOperations: () => drainTaggingOperations(this.db),
+      onTaggingOperationsApplied: (ops) => {
+        const removed = removeAppliedTaggingOperations(this.db, ops);
+        if (removed > 0) {
+          logger.info('tags', `${removed} tagging operation(s) committed on-chain and drained`);
         }
       },
       onBlockCommitted: (block) => {

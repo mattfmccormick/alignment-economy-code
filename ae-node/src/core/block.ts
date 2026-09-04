@@ -104,6 +104,10 @@ export function computeBlockHash(
   // prior hash. Panel completion writes percentHuman, so this lane is what makes
   // percentHuman consensus-enforced rather than node-local.
   panelOperationsHash: string | null = null,
+  // Appended last, '' for empty, so a block with no tagging operations keeps its
+  // prior hash. Carries product/space/tag rows that day-boundary finalization
+  // reads, so this lane makes tag finalization consensus-consistent (audit #16).
+  taggingOperationsHash: string | null = null,
 ): string {
   const certPart = prevCommitCertHash ?? '';
   const changesPart = validatorChangesHash ?? '';
@@ -111,8 +115,9 @@ export function computeBlockHash(
   const vouchPart = vouchOperationsHash ?? '';
   const minerPart = minerOperationsHash ?? '';
   const panelPart = panelOperationsHash ?? '';
+  const taggingPart = taggingOperationsHash ?? '';
   return sha256(
-    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}${vouchPart}${minerPart}${panelPart}`,
+    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}${vouchPart}${minerPart}${panelPart}${taggingPart}`,
   );
 }
 
@@ -134,6 +139,7 @@ export function createGenesisBlockWithStore(store: IBlockStore): Block {
     vouchOperations: null,
     minerOperations: null,
     panelOperations: null,
+    taggingOperations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,
@@ -182,6 +188,7 @@ export function createBlockWithStore(
     vouchOperations: null,
     minerOperations: null,
     panelOperations: null,
+    taggingOperations: null,
   };
 
   store.insert(block, /* isGenesis */ false);

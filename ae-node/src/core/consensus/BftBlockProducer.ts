@@ -63,6 +63,11 @@ import {
   applyPanelOperation,
   type PanelOperation,
 } from '../../verification/panel-operation.js';
+import {
+  computeTaggingOperationsHash,
+  applyTaggingOperation,
+  type TaggingOperation,
+} from '../../tagging/tagging-operation.js';
 
 /**
  * Sentinel thrown to unwind a successful dry run so runTransaction rolls it
@@ -308,6 +313,10 @@ export interface BftBlockProducerConfig {
   pendingPanelOperations?: () => PanelOperation[];
   /** Fired after a block's panel operations applied locally; must be idempotent. */
   onPanelOperationsApplied?: (ops: PanelOperation[]) => void;
+  /** Pull signed tagging operations to include in the next block this node proposes. */
+  pendingTaggingOperations?: () => TaggingOperation[];
+  /** Fired after a block's tagging operations applied locally; must be idempotent. */
+  onTaggingOperationsApplied?: (ops: TaggingOperation[]) => void;
   /**
    * Fired after a block's transactions have been applied to balances.
    *
@@ -363,6 +372,8 @@ export class BftBlockProducer {
   private readonly onMinerOperationsApplied: ((ops: MinerOperation[]) => void) | undefined;
   private readonly pendingPanelOperations: (() => PanelOperation[]) | undefined;
   private readonly onPanelOperationsApplied: ((ops: PanelOperation[]) => void) | undefined;
+  private readonly pendingTaggingOperations: (() => TaggingOperation[]) | undefined;
+  private readonly onTaggingOperationsApplied: ((ops: TaggingOperation[]) => void) | undefined;
   private readonly pendingAccountRegistrations: (() => AccountRegistration[]) | undefined;
   private readonly onAccountRegistrationsApplied:
     | ((regs: AccountRegistration[]) => void)
@@ -386,6 +397,8 @@ export class BftBlockProducer {
     this.onMinerOperationsApplied = config.onMinerOperationsApplied;
     this.pendingPanelOperations = config.pendingPanelOperations;
     this.onPanelOperationsApplied = config.onPanelOperationsApplied;
+    this.pendingTaggingOperations = config.pendingTaggingOperations;
+    this.onTaggingOperationsApplied = config.onTaggingOperationsApplied;
     this.onTransactionsApplied = config.onTransactionsApplied;
 
     const latest = getLatestBlock(this.db);
@@ -729,6 +742,12 @@ export class BftBlockProducer {
     const panelOperationsHash =
       panelOperations.length > 0 ? computePanelOperationsHash(panelOperations) : null;
 
+    const taggingOperations: TaggingOperation[] = this.pendingTaggingOperations
+      ? this.pendingTaggingOperations()
+      : [];
+    const taggingOperationsHash =
+      taggingOperations.length > 0 ? computeTaggingOperationsHash(taggingOperations) : null;
+
     const hash = computeBlockHash(
       height,
       previousHash,
@@ -741,6 +760,7 @@ export class BftBlockProducer {
       vouchOperationsHash,
       minerOperationsHash,
       panelOperationsHash,
+      taggingOperationsHash,
     );
 
     // Session 53 fix: include parentCertificate + parentValidatorSnapshot
@@ -792,6 +812,7 @@ export class BftBlockProducer {
       ...(vouchOperations.length > 0 ? { vouchOperations } : {}),
       ...(minerOperations.length > 0 ? { minerOperations } : {}),
       ...(panelOperations.length > 0 ? { panelOperations } : {}),
+      ...(taggingOperations.length > 0 ? { taggingOperations } : {}),
       ...(parentCert ? { parentCertificate: parentCert } : {}),
       ...(parentSnapshot ? { parentValidatorSnapshot: parentSnapshot } : {}),
     };
@@ -852,6 +873,7 @@ export class BftBlockProducer {
     const vouchOperations: VouchOperation[] = payload.vouchOperations ?? [];
     const minerOperations: MinerOperation[] = payload.minerOperations ?? [];
     const panelOperations: PanelOperation[] = payload.panelOperations ?? [];
+    const taggingOperations: TaggingOperation[] = payload.taggingOperations ?? [];
 
     // Everything below is one DB transaction, so a throw anywhere rolls the
     // whole block back — the node keeps a consistent view of height N-1 rather
@@ -940,6 +962,16 @@ export class BftBlockProducer {
           applyPanelOperation(this.db, op, block.timestamp);
         }
 
+        // Tagging operations (audit #16): product/space registrations and
+        // supportive/ambient tag submits. Applied in the block's array order,
+        // idempotent, block timestamp. Runs inside this transaction so the rows
+        // are committed before applyChainDayCycle (below, after this block) reads
+        // them at a day boundary — a submit in the same block as the boundary is
+        // finalized this cycle, identically on every node.
+        for (const op of taggingOperations) {
+          applyTaggingOperation(this.db, op, block.timestamp);
+        }
+
         // Distribute the block's fees per WP economics. Idempotent — every
         // node (proposer + followers replaying via this same path) reaches
         // the same balances.
@@ -1006,6 +1038,14 @@ export class BftBlockProducer {
     if (panelOperations.length > 0 && this.onPanelOperationsApplied) {
       try {
         this.onPanelOperationsApplied(panelOperations);
+      } catch (err) {
+        void err;
+      }
+    }
+
+    if (taggingOperations.length > 0 && this.onTaggingOperationsApplied) {
+      try {
+        this.onTaggingOperationsApplied(taggingOperations);
       } catch (err) {
         void err;
       }

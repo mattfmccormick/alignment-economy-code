@@ -1,10 +1,16 @@
 import { describe, it, expect } from 'vitest';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import {
   newMnemonic,
   isValidMnemonic,
   mnemonicToKeypair,
   signPayload,
   deriveAccountId,
+  signTagProductRegister,
+  signTagSpaceRegister,
+  signTagSupportiveSubmit,
+  signTagAmbientSubmit,
+  hexToBytes,
 } from './crypto';
 
 // A fixed valid BIP39 phrase so key derivation is reproducible in the test.
@@ -89,5 +95,51 @@ describe('signPayload', () => {
     const sig = signPayload({ to: 'x', amount: '100000000' }, 1_700_000_000, privateKey);
     expect(sig).toMatch(/^[0-9a-f]+$/);
     expect(sig.length).toBeGreaterThan(0);
+  });
+});
+
+// The tagging signers' canonical bytes MUST match ae-node's tagging-operation.ts
+// canonicalBytesFor byte-for-byte, or every signature fails verify. The encoding
+// is a JSON positional array (NOT a pipe-join) so free-text names and the tag
+// array are unambiguous. These reconstruct the exact expected string, confirm
+// the op's signature verifies against it, and pin the wire format against drift.
+describe('tagging operation signers (audit #16 canonical bytes)', () => {
+  const { publicKey, privateKey } = mnemonicToKeypair(PHRASE);
+  const accountId = deriveAccountId(publicKey);
+  const TS = 1_700_000_000;
+  const verifies = (sigHex: string, canonical: string) =>
+    ml_dsa65.verify(hexToBytes(sigHex), new TextEncoder().encode(canonical), hexToBytes(publicKey));
+
+  it('product_register: signature verifies against the JSON positional-array bytes', () => {
+    const op = signTagProductRegister(accountId, 'Oak Chair', 'furniture', null, TS, privateKey);
+    const canonical = JSON.stringify(['product_register', accountId, 'Oak Chair', 'furniture', null, TS]);
+    expect(verifies(op.signature, canonical)).toBe(true);
+    expect(op.manufacturerId).toBe(null);
+  });
+
+  it('product name containing a pipe and quotes is unambiguous (the reason for JSON, not pipe-join)', () => {
+    const op = signTagProductRegister(accountId, 'A|B "x"', 'c', 'mfg1', TS, privateKey);
+    const canonical = JSON.stringify(['product_register', accountId, 'A|B "x"', 'c', 'mfg1', TS]);
+    expect(verifies(op.signature, canonical)).toBe(true);
+  });
+
+  it('space_register: signature verifies against the JSON positional-array bytes', () => {
+    const op = signTagSpaceRegister(accountId, 'Room 1', 'room', 'parent1', 'ent1', 5, TS, privateKey);
+    const canonical = JSON.stringify(['space_register', accountId, 'Room 1', 'room', 'parent1', 'ent1', 5, TS]);
+    expect(verifies(op.signature, canonical)).toBe(true);
+  });
+
+  it('supportive_tag_submit: nested tag array is serialized in signed order', () => {
+    const tags = [{ productId: 'p1', minutesUsed: 60 }, { productId: 'p2', minutesUsed: 120 }];
+    const op = signTagSupportiveSubmit(accountId, 3, tags, TS, privateKey);
+    const canonical = JSON.stringify(['supportive_tag_submit', accountId, 3, [['p1', 60], ['p2', 120]], TS]);
+    expect(verifies(op.signature, canonical)).toBe(true);
+  });
+
+  it('ambient_tag_submit: nested tag array is serialized in signed order', () => {
+    const tags = [{ spaceId: 's1', minutesOccupied: 200 }];
+    const op = signTagAmbientSubmit(accountId, 3, tags, TS, privateKey);
+    const canonical = JSON.stringify(['ambient_tag_submit', accountId, 3, [['s1', 200]], TS]);
+    expect(verifies(op.signature, canonical)).toBe(true);
   });
 });

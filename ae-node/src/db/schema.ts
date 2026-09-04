@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -164,7 +164,14 @@ const TABLES = `
     -- rode the block. Folded into the block hash like the lanes above. Panel
     -- completion (median → percentHuman) is the last percentHuman writer, so
     -- this lane is what makes percentHuman a pure function of the chain.
-    panel_operations TEXT
+    panel_operations TEXT,
+    -- Signed tagging operations carried by THIS block (schema v20). JSON-encoded
+    -- TaggingOperation[] (product_register, space_register, supportive_tag_submit,
+    -- ambient_tag_submit). NULL when none rode the block. Folded into the block
+    -- hash like the lanes above. These carry the products/spaces/tag rows that
+    -- day-boundary finalization reads, so this lane is what stops finalization
+    -- from forking across nodes.
+    tagging_operations TEXT
   );
 
   CREATE TABLE IF NOT EXISTS rebase_events (
@@ -591,6 +598,18 @@ const TABLES = `
     op_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+
+  -- Signed tagging operations (product/space register, supportive/ambient tag
+  -- submit) awaiting inclusion in a block this node proposes (schema v20). Same
+  -- shape and lifecycle as pending_panel_operations. The products/spaces/tag
+  -- rows these carry are read by day-boundary finalization, so they must ride
+  -- the chain rather than be written node-locally. See tagging/tagging-operation.ts.
+  CREATE TABLE IF NOT EXISTS pending_tagging_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL,
+    op_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `;
 
 const INDEXES = `
@@ -630,6 +649,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_pending_vouch_ops_created ON pending_vouch_operations(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_miner_ops_created ON pending_miner_operations(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_panel_ops_created ON pending_panel_operations(created_at);
+  CREATE INDEX IF NOT EXISTS idx_pending_tagging_ops_created ON pending_tagging_operations(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created ON pending_account_registrations(created_at);
 `;
 
@@ -876,6 +896,26 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       );
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
+    `);
+  }
+  if (from < 20) {
+    // Tagging operations lane (audit #16): a pending queue + a per-block column.
+    // Carries product/space registrations and supportive/ambient tag submits, so
+    // the rows day-boundary finalization reads stop being node-local. Additive;
+    // existing blocks get NULL (they carried no tagging ops).
+    const blockCols = db.prepare('PRAGMA table_info(blocks)').all() as Array<{ name: string }>;
+    if (!blockCols.some((c) => c.name === 'tagging_operations')) {
+      db.exec('ALTER TABLE blocks ADD COLUMN tagging_operations TEXT');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_tagging_operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT NOT NULL,
+        op_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_tagging_ops_created
+        ON pending_tagging_operations(created_at);
     `);
   }
   if (from < 19) {

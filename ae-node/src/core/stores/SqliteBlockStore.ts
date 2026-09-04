@@ -15,6 +15,7 @@ import type { AccountRegistration } from '../account-registration.js';
 import type { VouchOperation } from '../../verification/vouch-operation.js';
 import type { MinerOperation } from '../../mining/miner-operation.js';
 import type { PanelOperation } from '../../verification/panel-operation.js';
+import type { TaggingOperation } from '../../tagging/tagging-operation.js';
 
 /**
  * JSON encoder/decoder for ValidatorInfo[] that survives the bigint stake.
@@ -44,6 +45,7 @@ function rowToBlock(row: Record<string, unknown>): Block {
   const rawVouchOps = row.vouch_operations as string | null | undefined;
   const rawMinerOps = row.miner_operations as string | null | undefined;
   const rawPanelOps = row.panel_operations as string | null | undefined;
+  const rawTaggingOps = row.tagging_operations as string | null | undefined;
   return {
     number: row.number as number,
     day: row.day as number,
@@ -61,6 +63,7 @@ function rowToBlock(row: Record<string, unknown>): Block {
     vouchOperations: rawVouchOps ? (JSON.parse(rawVouchOps) as VouchOperation[]) : null,
     minerOperations: rawMinerOps ? (JSON.parse(rawMinerOps) as MinerOperation[]) : null,
     panelOperations: rawPanelOps ? (JSON.parse(rawPanelOps) as PanelOperation[]) : null,
+    taggingOperations: rawTaggingOps ? (JSON.parse(rawTaggingOps) as TaggingOperation[]) : null,
   };
 }
 
@@ -90,6 +93,11 @@ function minerOperationsToColumn(block: Block): string | null {
 function panelOperationsToColumn(block: Block): string | null {
   if (!block.panelOperations || block.panelOperations.length === 0) return null;
   return JSON.stringify(block.panelOperations);
+}
+
+function taggingOperationsToColumn(block: Block): string | null {
+  if (!block.taggingOperations || block.taggingOperations.length === 0) return null;
+  return JSON.stringify(block.taggingOperations);
 }
 
 function rebaseEventToColumn(block: Block): string | null {
@@ -125,10 +133,10 @@ export class SqliteBlockStore implements IBlockStore {
   insert(block: Block, isGenesis: boolean): void {
     const cols =
       'number, day, timestamp, previous_hash, hash, merkle_root, transaction_count, ' +
-      'rebase_event, prev_commit_cert_hash, validator_changes, account_registrations, vouch_operations, miner_operations, panel_operations';
+      'rebase_event, prev_commit_cert_hash, validator_changes, account_registrations, vouch_operations, miner_operations, panel_operations, tagging_operations';
     const sql = isGenesis
-      ? `INSERT OR IGNORE INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      : `INSERT INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      ? `INSERT OR IGNORE INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      : `INSERT INTO blocks (${cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     this.db
       .prepare(sql)
       .run(
@@ -146,6 +154,7 @@ export class SqliteBlockStore implements IBlockStore {
         vouchOperationsToColumn(block),
         minerOperationsToColumn(block),
         panelOperationsToColumn(block),
+        taggingOperationsToColumn(block),
       );
   }
 

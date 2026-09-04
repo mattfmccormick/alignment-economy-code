@@ -75,11 +75,14 @@ function makeAccount(db: DatabaseSync, percentHuman = 100) {
 const BAD_CASES = [
   { name: 'POST /miners/evidence (missing evidenceHash)', path: '/api/v1/miners/evidence', payload: { evidenceTypeId: 'gov_id' } },
   { name: 'POST /verification/evidence (missing evidenceHash)', path: '/api/v1/verification/evidence', payload: { evidenceTypeId: 'gov_id' } },
-  { name: 'POST /tags/ambient (tags not an array)', path: '/api/v1/tags/ambient', payload: { day: 1, tags: 'nope' } },
-  { name: 'POST /tags/supportive (day not a number)', path: '/api/v1/tags/supportive', payload: { day: 'today', tags: [] } },
   { name: 'POST /contacts (missing contactAccountId)', path: '/api/v1/contacts', payload: {} },
   // POST /miners/vouches no longer uses validateBody: it takes a signed vouch
   // operation and validates that shape itself (see phase71 + vouch-operation).
+  // POST /tags/{products,spaces,supportive,ambient} likewise no longer use
+  // validateBody (audit #16): each takes a signed tagging operation and rejects
+  // a non-op body with INVALID_OP, then validates chain-applicability itself
+  // (see tagging-operation-determinism + the tagging-operation module). Their
+  // rejection shape is covered there, not in this validateBody suite.
 ] as const;
 
 describe('B2: request-body validation on write routes', () => {
