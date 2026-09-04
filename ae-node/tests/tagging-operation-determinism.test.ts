@@ -28,6 +28,7 @@ import {
   verifyTaggingOperation,
   validateTaggingOperationApplicable,
   applyTaggingOperation,
+  orderTaggingOperationsForApply,
   deriveProductId,
   deriveSpaceId,
   type TaggingOperation,
@@ -189,6 +190,82 @@ describe('tagging operation determinism across nodes', () => {
     const good = signProductRegister({ accountId: alice.id, name: 'Chair', category: 'furniture', timestamp: TS, accountPrivateKey: alice.priv });
     assert.equal(validateTaggingOperationApplicable(db, good), null);
     db.close();
+  });
+
+  // ── Adversarial-review regression tests (must never throw / must not fork) ──
+
+  it('a validly-signed over-cap submit is SKIPPED at apply, never thrown (chain would halt)', () => {
+    const alice = party();
+    const db = node(alice);
+    const prod = signProductRegister({ accountId: alice.id, name: 'P', category: 'c', timestamp: TS, accountPrivateKey: alice.priv });
+    applyTaggingOperation(db, prod, TS);
+    const productId = deriveProductId(prod);
+    // total 1600 > 1440 cap — submitSupportiveTags THROWS on this; apply must skip.
+    const overCap = signSupportiveSubmit({
+      accountId: alice.id, day: 1,
+      tags: [{ productId, minutesUsed: 1000 }, { productId, minutesUsed: 600 }],
+      timestamp: TS + 1, accountPrivateKey: alice.priv,
+    });
+    assert.doesNotThrow(() => applyTaggingOperation(db, overCap, TS + 1));
+    assert.equal(getSupportiveTags(db, alice.id, 1).length, 0); // nothing written
+    db.close();
+  });
+
+  it('non-positive / non-integer minutes and out-of-range collectionRate are skipped, not thrown', () => {
+    const alice = party();
+    const db = node(alice);
+    const prod = signProductRegister({ accountId: alice.id, name: 'P', category: 'c', timestamp: TS, accountPrivateKey: alice.priv });
+    applyTaggingOperation(db, prod, TS);
+    const productId = deriveProductId(prod);
+    const zero = signSupportiveSubmit({ accountId: alice.id, day: 1, tags: [{ productId, minutesUsed: 0 }], timestamp: TS + 1, accountPrivateKey: alice.priv });
+    assert.doesNotThrow(() => applyTaggingOperation(db, zero, TS + 1));
+    assert.equal(getSupportiveTags(db, alice.id, 1).length, 0);
+    const badRate = signSpaceRegister({ accountId: alice.id, name: 'X', spaceType: 'room', collectionRate: 250, timestamp: TS, accountPrivateKey: alice.priv });
+    assert.doesNotThrow(() => applyTaggingOperation(db, badRate, TS));
+    assert.equal(getSpace(db, deriveSpaceId(badRate)), null); // skipped, not registered
+    db.close();
+  });
+
+  it('a product_register with an UNKNOWN manufacturer account still registers (no getAccount fork)', () => {
+    // Account existence is not chain-pure (accounts gossip ahead of registration),
+    // so apply must NOT gate on getAccount(manufacturerId) or honest nodes fork.
+    const alice = party();
+    const a = node(alice);
+    const b = node(alice);
+    const ghostManufacturer = 'cafebabe'.repeat(5); // no such account on either node
+    const op = signProductRegister({
+      accountId: alice.id, name: 'Widget', category: 'c', manufacturerId: ghostManufacturer, timestamp: TS, accountPrivateKey: alice.priv,
+    });
+    applyTaggingOperation(a, op, TS);
+    applyTaggingOperation(b, op, TS);
+    const id = deriveProductId(op);
+    assert.equal(getProduct(a, id)!.manufacturerId, ghostManufacturer); // stored verbatim
+    assert.deepEqual(getProduct(a, id), getProduct(b, id)); // identical on both nodes
+    a.close();
+    b.close();
+  });
+
+  it('apply order is canonical, not payload order: two orderings reach identical state', () => {
+    // Two supportive submits for the same (account, day) are last-writer-wins;
+    // orderTaggingOperationsForApply must make the result independent of the
+    // order the payload arrived in (the equivocation-fork fix).
+    const alice = party();
+    const a = node(alice);
+    const b = node(alice);
+    const prod = signProductRegister({ accountId: alice.id, name: 'P', category: 'c', timestamp: TS, accountPrivateKey: alice.priv });
+    for (const db of [a, b]) applyTaggingOperation(db, prod, TS);
+    const productId = deriveProductId(prod);
+    const s1 = signSupportiveSubmit({ accountId: alice.id, day: 1, tags: [{ productId, minutesUsed: 60 }], timestamp: TS + 1, accountPrivateKey: alice.priv });
+    const s2 = signSupportiveSubmit({ accountId: alice.id, day: 1, tags: [{ productId, minutesUsed: 200 }], timestamp: TS + 2, accountPrivateKey: alice.priv });
+    // Node A receives [s1, s2]; node B receives the reverse [s2, s1].
+    for (const op of orderTaggingOperationsForApply([s1, s2])) applyTaggingOperation(a, op, TS + 3);
+    for (const op of orderTaggingOperationsForApply([s2, s1])) applyTaggingOperation(b, op, TS + 3);
+    const ta = getSupportiveTags(a, alice.id, 1).filter((t) => t.status === 'active');
+    const tb = getSupportiveTags(b, alice.id, 1).filter((t) => t.status === 'active');
+    assert.equal(ta.length, 1);
+    assert.deepEqual(ta, tb); // same winner regardless of arrival order
+    a.close();
+    b.close();
   });
 
   it('a space_register with a parent applies on two nodes to the same hierarchy', () => {

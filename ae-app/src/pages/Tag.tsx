@@ -269,7 +269,16 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
         {showAdd && (
           <AddProductForm
             accountId={accountId}
-            onCreated={() => { setShowAdd(false); refresh(); }}
+            onCreated={() => {
+              setShowAdd(false);
+              // Registration is chain-ordered now: the product row appears only
+              // once its block commits, so an immediate refresh won't show it.
+              // Poll a few times over the next block interval so it lands without
+              // a manual reload (and the user doesn't re-register thinking it failed).
+              refresh();
+              setTimeout(refresh, 4000);
+              setTimeout(refresh, 11000);
+            }}
           />
         )}
 
@@ -538,7 +547,14 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
         </div>
 
         {showAdd && (
-          <AddSpaceForm onCreated={() => { setShowAdd(false); refresh(); }} />
+          <AddSpaceForm onCreated={() => {
+            setShowAdd(false);
+            // Chain-ordered registration; the space row appears once its block
+            // commits. Poll over the next block interval (see products above).
+            refresh();
+            setTimeout(refresh, 4000);
+            setTimeout(refresh, 11000);
+          }} />
         )}
 
         {spaces.length === 0 && !showAdd ? (

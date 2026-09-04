@@ -66,6 +66,7 @@ import {
 import {
   computeTaggingOperationsHash,
   applyTaggingOperation,
+  orderTaggingOperationsForApply,
   type TaggingOperation,
 } from '../../tagging/tagging-operation.js';
 
@@ -968,7 +969,10 @@ export class BftBlockProducer {
         // are committed before applyChainDayCycle (below, after this block) reads
         // them at a day boundary — a submit in the same block as the boundary is
         // finalized this cycle, identically on every node.
-        for (const op of taggingOperations) {
+        // Canonical order (matches the sorted hash), NOT payload order, so a
+        // Byzantine proposer cannot fork followers by shipping two orderings
+        // that hash identically. See orderTaggingOperationsForApply.
+        for (const op of orderTaggingOperationsForApply(taggingOperations)) {
           applyTaggingOperation(this.db, op, block.timestamp);
         }
 

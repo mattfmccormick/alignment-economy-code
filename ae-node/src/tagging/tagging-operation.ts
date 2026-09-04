@@ -290,21 +290,37 @@ export function computeTaggingOperationsHash(ops: TaggingOperation[]): string {
 
 /**
  * Apply one tagging operation deterministically at commit. Idempotent; uses the
- * block timestamp for every write. A missing reference (product/space/
- * manufacturer/entity) skips the WHOLE op (never a per-row skip — that would
- * change totalMinutes and fork the share denominator). Register ops are skipped
- * if their derived id already exists.
+ * block timestamp for every write.
+ *
+ * NEVER THROWS. Every reason an op cannot apply is turned into a deterministic
+ * whole-op SKIP, because apply runs on the consensus commit path with no
+ * pre-commit applicability filter (the gossip, block-validation, and vote-time
+ * dry-run paths check only the signature). If apply threw on a validly-signed
+ * but non-applicable op — over the minute cap, non-positive/non-integer minutes,
+ * collectionRate out of range — every node would fail-stop at that height and
+ * the certified-but-unappliable block would brick the chain on restart. So we
+ * mirror the tolerate-at-apply discipline of applyVouch/Miner/PanelOperation:
+ * skip, never throw. The skip is a pure function of the op plus CHAIN-PURE state
+ * only (`intrinsicSkip`), so every honest node makes the identical decision.
+ *
+ * Deliberately does NOT check manufacturer/entity ACCOUNT existence: account
+ * rows are not a pure function of the applied chain (they gossip ahead of their
+ * on-chain account_registrations), so a getAccount()-gated skip here would fork
+ * honest nodes. The ref is stored verbatim and day-boundary finalization, which
+ * runs much later once accounts are settled, decides whether it pays out.
+ * Product/space refs ARE chain-pure (chain-ordered), so those are checked.
  */
 export function applyTaggingOperation(
   db: DatabaseSync,
   op: TaggingOperation,
   blockTimestampSec: number,
 ): void {
+  if (intrinsicSkip(db, op)) return;
   switch (op.type) {
     case 'product_register': {
       const id = deriveProductId(op);
       if (getProduct(db, id)) return; // already applied
-      if (op.manufacturerId && !getAccount(db, op.manufacturerId)) return; // tolerate missing ref
+      // Store the manufacturerId verbatim — no getAccount() gate (see above).
       registerProduct(db, op.name, op.category, op.accountId, op.manufacturerId ?? undefined, {
         id,
         now: blockTimestampSec,
@@ -314,8 +330,8 @@ export function applyTaggingOperation(
     case 'space_register': {
       const id = deriveSpaceId(op);
       if (getSpace(db, id)) return; // already applied
-      if (op.parentId && !getSpace(db, op.parentId)) return; // tolerate missing ref
-      if (op.entityId && !getAccount(db, op.entityId)) return;
+      // parentId/entityId stored verbatim; getSpaceAncestors + finalization
+      // tolerate a missing parent/entity at the day boundary.
       registerSpace(
         db,
         op.name,
@@ -328,33 +344,79 @@ export function applyTaggingOperation(
       return;
     }
     case 'supportive_tag_submit': {
-      if (op.tags.length === 0) return;
       const rowIds = op.tags.map((_, i) => deriveSupportiveRowId(op, i));
-      // Re-delivery / same-block double-apply: first derived row id present.
-      const seen = db
-        .prepare('SELECT 1 FROM supportive_tags WHERE id = ? LIMIT 1')
-        .get(rowIds[0]);
-      if (seen) return;
-      // Whole-op skip if any product is unknown (tolerate at apply; validate
-      // already rejected it for honest proposers).
-      for (const t of op.tags) {
-        if (!getProduct(db, t.productId)) return;
-      }
       submitSupportiveTags(db, op.accountId, op.day, op.tags, { rowIds });
       return;
     }
     case 'ambient_tag_submit': {
-      if (op.tags.length === 0) return;
       const rowIds = op.tags.map((_, i) => deriveAmbientRowId(op, i));
-      const seen = db.prepare('SELECT 1 FROM ambient_tags WHERE id = ? LIMIT 1').get(rowIds[0]);
-      if (seen) return;
-      for (const t of op.tags) {
-        if (!getSpace(db, t.spaceId)) return;
-      }
       submitAmbientTags(db, op.accountId, op.day, op.tags, { rowIds });
       return;
     }
   }
+}
+
+/**
+ * Should this op be skipped at apply? A pure function of the op plus chain-pure
+ * state (products/spaces are chain-ordered; accounts are NOT consulted). Covers
+ * everything the underlying submit / register helpers would otherwise THROW on,
+ * plus idempotent re-delivery. Identical decision on every node.
+ */
+function intrinsicSkip(db: DatabaseSync, op: TaggingOperation): boolean {
+  switch (op.type) {
+    case 'product_register':
+      return false; // registerProduct never throws; verbatim store
+    case 'space_register':
+      // registerSpace throws on collectionRate out of range.
+      return typeof op.collectionRate !== 'number' || op.collectionRate < 0 || op.collectionRate > 100;
+    case 'supportive_tag_submit': {
+      if (!Array.isArray(op.tags) || op.tags.length === 0) return true;
+      // Idempotent re-delivery: this op's first derived row already present.
+      if (db.prepare('SELECT 1 FROM supportive_tags WHERE id = ? LIMIT 1').get(deriveSupportiveRowId(op, 0))) {
+        return true;
+      }
+      let total = 0;
+      for (const t of op.tags) {
+        if (!Number.isInteger(t.minutesUsed) || t.minutesUsed <= 0) return true;
+        if (!getProduct(db, t.productId)) return true; // chain-pure ref
+        total += t.minutesUsed;
+      }
+      return total > 1440;
+    }
+    case 'ambient_tag_submit': {
+      if (!Array.isArray(op.tags) || op.tags.length === 0) return true;
+      if (db.prepare('SELECT 1 FROM ambient_tags WHERE id = ? LIMIT 1').get(deriveAmbientRowId(op, 0))) {
+        return true;
+      }
+      let total = 0;
+      for (const t of op.tags) {
+        if (!Number.isInteger(t.minutesOccupied) || t.minutesOccupied <= 0) return true;
+        if (!getSpace(db, t.spaceId)) return true; // chain-pure ref
+        total += t.minutesOccupied;
+      }
+      return total > 1440;
+    }
+  }
+}
+
+/**
+ * Canonical apply order for a block's tagging operations.
+ *
+ * computeTaggingOperationsHash sorts the ops, so the block hash is INDEPENDENT
+ * of the payload array order. Apply must therefore not depend on payload order
+ * either, or a Byzantine proposer could ship two orderings that hash identically
+ * yet apply to different state (two submits for the same account+day are
+ * last-writer-wins), forking honest followers under one certificate. Applying in
+ * the same canonical order the hash uses closes that: every node applies the
+ * same sequence regardless of the order it received. Callers MUST iterate this,
+ * not the raw payload array.
+ */
+export function orderTaggingOperationsForApply(ops: TaggingOperation[]): TaggingOperation[] {
+  return [...ops].sort((a, b) => {
+    const ka = canonicalBytesFor(a);
+    const kb = canonicalBytesFor(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
 }
 
 /**

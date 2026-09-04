@@ -59,6 +59,7 @@ import {
 } from '../verification/panel-operation.js';
 import {
   applyTaggingOperation,
+  orderTaggingOperationsForApply,
   drainTaggingOperations,
   removeAppliedTaggingOperations,
 } from '../tagging/tagging-operation.js';
@@ -510,7 +511,7 @@ export class AENodeRunner {
             // Tagging operations (audit #16), in block-array order, before the
             // day cycle below reads the rows. Matches the live commit path so a
             // syncing node reaches the same products/spaces/tags and finalize.
-            for (const op of payload.taggingOperations ?? []) {
+            for (const op of orderTaggingOperationsForApply(payload.taggingOperations ?? [])) {
               applyTaggingOperation(this.db, op, block.timestamp);
             }
 
