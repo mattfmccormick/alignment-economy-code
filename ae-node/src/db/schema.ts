@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -154,7 +154,11 @@ const TABLES = `
     -- state. Persisted so a node syncing past blocks re-applies them like any
     -- other on-chain state change. Folded into the block hash the same way
     -- validator_changes and account_registrations are.
-    vouch_operations TEXT
+    vouch_operations TEXT,
+    -- Signed miner operations carried by THIS block (schema v18). JSON-encoded
+    -- MinerOperation[]. NULL when none rode the block. Folded into the block hash
+    -- like the lanes above.
+    miner_operations TEXT
   );
 
   CREATE TABLE IF NOT EXISTS rebase_events (
@@ -549,6 +553,18 @@ const TABLES = `
     op_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+
+  -- Signed miner register/deregister operations awaiting inclusion in a block
+  -- this node proposes (schema v18). Same shape and lifecycle as
+  -- pending_vouch_operations. Who is a miner is consensus state (fee split, fee
+  -- lottery, panel assignment), so it must ride the chain rather than be applied
+  -- node-locally. See mining/miner-operation.ts.
+  CREATE TABLE IF NOT EXISTS pending_miner_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL,
+    op_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `;
 
 const INDEXES = `
@@ -586,6 +602,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_validators_active ON validators(is_active);
   CREATE INDEX IF NOT EXISTS idx_pending_changes_created ON pending_validator_changes(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_vouch_ops_created ON pending_vouch_operations(created_at);
+  CREATE INDEX IF NOT EXISTS idx_pending_miner_ops_created ON pending_miner_operations(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created ON pending_account_registrations(created_at);
 `;
 
@@ -832,6 +849,24 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       );
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
+    `);
+  }
+  if (from < 18) {
+    // Miner operations lane (audit #5/#6/#7): a pending queue + a per-block
+    // column. Additive; existing blocks get NULL.
+    const cols = db.prepare('PRAGMA table_info(blocks)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'miner_operations')) {
+      db.exec('ALTER TABLE blocks ADD COLUMN miner_operations TEXT');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_miner_operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT NOT NULL,
+        op_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_miner_ops_created
+        ON pending_miner_operations(created_at);
     `);
   }
   if (from < 17) {

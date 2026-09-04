@@ -8,6 +8,11 @@ import {
   enqueueVouchOperation,
   type VouchOperation,
 } from '../verification/vouch-operation.js';
+import {
+  verifyMinerOperation,
+  enqueueMinerOperation,
+  type MinerOperation,
+} from '../mining/miner-operation.js';
 import { getAccount } from '../core/account.js';
 import { AuthorityConsensus } from './consensus.js';
 import type { IConsensusEngine } from '../core/consensus/IConsensusEngine.js';
@@ -222,6 +227,22 @@ export class AENode {
     // (do not apply on receipt - it applies deterministically at block commit).
     // This lets the next proposer, whoever it is, include the op, instead of it
     // waiting for the submitting node's own turn to propose.
+    this.peerManager.on('miner_op:received', (data: unknown) => {
+      try {
+        const op = data as MinerOperation;
+        const acct = op?.accountId ? getAccount(this.db, op.accountId) : null;
+        if (!acct) return;
+        if (!verifyMinerOperation(op, acct.publicKey)) {
+          logger.warn('p2p', 'Rejected gossiped miner op: signature does not verify');
+          return;
+        }
+        enqueueMinerOperation(this.db, op);
+        logger.info('p2p', `Queued gossiped miner op from ${op.accountId.slice(0, 12)}…`);
+      } catch (err) {
+        logger.warn('p2p', `Rejected gossiped miner op: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
     this.peerManager.on('vouch_op:received', (data: unknown) => {
       try {
         const op = data as VouchOperation;
@@ -247,6 +268,11 @@ export class AENode {
   /** Gossip a signed vouch operation so every node queues it for the next block. */
   broadcastVouchOp(op: VouchOperation): void {
     this.peerManager.broadcast('new_vouch_op', op as unknown as Record<string, unknown>);
+  }
+
+  /** Gossip a signed miner operation so every node queues it for the next block. */
+  broadcastMinerOp(op: MinerOperation): void {
+    this.peerManager.broadcast('new_miner_op', op as unknown as Record<string, unknown>);
   }
 
   /** Start the P2P WebSocket server and connect to the network */

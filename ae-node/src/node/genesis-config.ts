@@ -324,6 +324,7 @@ export function applyGenesisSpec(db: DatabaseSync, spec: GenesisSpec): Block {
     // network's identity in the P2P handshake.
     accountRegistrations: null,
     vouchOperations: null,
+    minerOperations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,

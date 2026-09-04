@@ -97,13 +97,17 @@ export function computeBlockHash(
   // block that carries no vouch operations - every block until this lane is
   // wired - hashes exactly as it did before. No flag day.
   vouchOperationsHash: string | null = null,
+  // Appended last, '' for empty (audit #5/#6/#7), so a block with no miner
+  // operations keeps its prior hash.
+  minerOperationsHash: string | null = null,
 ): string {
   const certPart = prevCommitCertHash ?? '';
   const changesPart = validatorChangesHash ?? '';
   const registrationsPart = accountRegistrationsHash ?? '';
   const vouchPart = vouchOperationsHash ?? '';
+  const minerPart = minerOperationsHash ?? '';
   return sha256(
-    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}${vouchPart}`,
+    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}${vouchPart}${minerPart}`,
   );
 }
 
@@ -123,6 +127,7 @@ export function createGenesisBlockWithStore(store: IBlockStore): Block {
     validatorChanges: null,
     accountRegistrations: null,
     vouchOperations: null,
+    minerOperations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,
@@ -169,6 +174,7 @@ export function createBlockWithStore(
     // account already exists locally.
     accountRegistrations: null,
     vouchOperations: null,
+    minerOperations: null,
   };
 
   store.insert(block, /* isGenesis */ false);

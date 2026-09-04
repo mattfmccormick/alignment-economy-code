@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { saveMinerWalletFromMnemonic, saveMinerWallet } from '../lib/keys';
-import { newMnemonic, mnemonicToKeypair, isValidMnemonic, signPayload } from '../lib/crypto';
+import { newMnemonic, mnemonicToKeypair, isValidMnemonic, signPayload, signMinerRegister } from '../lib/crypto';
 
 type Mode = 'signin' | 'create';
 type Step =
@@ -229,8 +229,10 @@ export default function Login() {
       // /miners/register is now auth-required: the registrant signs an
       // empty payload with their private key to prove key possession.
       // _privateKey is in state from the create-account or sign-in flow.
+      // Miner registration rides the chain: sign a MinerOperation and send it.
       const ts = Math.floor(Date.now() / 1000);
-      const payload = {};
+      const op = signMinerRegister(accountId.trim(), ts, _privateKey);
+      const payload = { op };
       const signature = signPayload(payload, ts, _privateKey);
       const res = await api.registerMiner({
         accountId: accountId.trim(),

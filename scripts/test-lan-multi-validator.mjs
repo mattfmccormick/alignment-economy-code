@@ -223,6 +223,48 @@ async function submitVouch(apiPort, voucherKs, vouchedKs, stakePercent) {
   return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
 }
 
+// Sign and submit a miner registration operation (audit #5/#6/#7). Proves the
+// miner set converges across nodes via the chain, not node-local writes.
+async function submitMinerRegister(apiPort, ks) {
+  const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
+  const opUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'mining', 'miner-operation.js')).href;
+  const { signPayload } = await import(cryptoUrl);
+  const { signMinerRegister } = await import(opUrl);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const op = signMinerRegister({ accountId: ks.accountId, timestamp, accountPrivateKey: ks.account.privateKey });
+  const payload = { op };
+  const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/miners/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: ks.accountId,
+      timestamp,
+      signature: signPayload(payload, timestamp, ks.account.privateKey),
+      payload,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+}
+
+async function waitForMinerOnAllNodes(ports, accountId, deadlineMs = 30000) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const flags = [];
+    for (const port of ports) {
+      try {
+        const r = await fetchJson(`http://127.0.0.1:${port}/api/v1/miners/status/${accountId}`);
+        flags.push(r.isMiner === true);
+      } catch {
+        flags.push(false);
+      }
+    }
+    if (flags.every(Boolean)) return true;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return false;
+}
+
 async function waitForLockedIncrease(ports, accountId, minLocked, deadlineMs = 30000) {
   const deadline = Date.now() + deadlineMs;
   while (Date.now() < deadline) {
@@ -438,6 +480,24 @@ async function main() {
   }
   log(`vouch applied on all nodes; voucher locked balances: [${vouchLocked.join(', ')}]`);
   await waitForHeight(apiPorts, Math.min(...heights) + 4);
+
+  // 4d. Register a miner on-chain (validator 1). Who is a miner is consensus
+  // state; this proves the miner op converges across nodes (audit #5/#6/#7).
+  log('submitting miner registration: validator 1');
+  const minerRes = await submitMinerRegister(apiPorts[0], keystores[1]);
+  if (!minerRes.ok) {
+    teardown('miner register failed');
+    err(`miner register POST failed: HTTP ${minerRes.status} ${JSON.stringify(minerRes.body)}`);
+    process.exit(8);
+  }
+  const minerOk = await waitForMinerOnAllNodes(apiPorts, keystores[1].accountId);
+  if (!minerOk) {
+    teardown('miner not registered on all nodes');
+    err('miner registration did not appear on all nodes within the deadline');
+    process.exit(8);
+  }
+  log('miner registration applied on all nodes');
+  await waitForHeight(apiPorts, Math.min(...heights) + 6);
 
   // 5. Compare latest block hashes via /network/blocks?limit=1.
   // Heights matching is necessary but not sufficient — same chain means

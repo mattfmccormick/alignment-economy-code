@@ -50,6 +50,7 @@ export type MessageType =
   // sender, dedupe by id, relay onward.
   | 'new_account'
   | 'new_vouch_op'
+  | 'new_miner_op'
   | 'get_blocks'
   | 'blocks'
   | 'ping'

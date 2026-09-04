@@ -63,6 +63,11 @@ import {
   type VouchOperation,
 } from '../verification/vouch-operation.js';
 import {
+  computeMinerOperationsHash,
+  verifyMinerOperation,
+  type MinerOperation,
+} from '../mining/miner-operation.js';
+import {
   computeAccountRegistrationsHash,
   type AccountRegistration,
 } from '../core/account-registration.js';
@@ -188,6 +193,7 @@ export interface IncomingBlockPayload {
    */
   validatorChanges?: ValidatorChange[];
   vouchOperations?: VouchOperation[];
+  minerOperations?: MinerOperation[];
 }
 
 export interface ValidationResult {
@@ -368,6 +374,10 @@ export function validateIncomingBlock(
     payload.vouchOperations && payload.vouchOperations.length > 0
       ? computeVouchOperationsHash(payload.vouchOperations)
       : null;
+  const minerOperationsHash =
+    payload.minerOperations && payload.minerOperations.length > 0
+      ? computeMinerOperationsHash(payload.minerOperations)
+      : null;
   const expectedHash = computeBlockHash(
     payload.number,
     payload.previousHash,
@@ -378,6 +388,7 @@ export function validateIncomingBlock(
     validatorChangesHash,
     accountRegistrationsHash,
     vouchOperationsHash,
+    minerOperationsHash,
   );
   if (payload.hash !== expectedHash) {
     return {
@@ -595,6 +606,32 @@ export function validateIncomingBlock(
     }
   }
 
+  if (payload.minerOperations && payload.minerOperations.length > 0) {
+    if (!Array.isArray(payload.minerOperations)) {
+      return { valid: false, error: 'minerOperations must be an array' };
+    }
+    const aStore = accountStore(db);
+    for (let i = 0; i < payload.minerOperations.length; i++) {
+      const op = payload.minerOperations[i];
+      if (typeof op?.accountId !== 'string') {
+        return { valid: false, error: `minerOperations[${i}] missing accountId` };
+      }
+      const account = aStore.findById(op.accountId);
+      if (!account) {
+        return {
+          valid: false,
+          error: `minerOperations[${i}].accountId ${op.accountId} not found locally`,
+        };
+      }
+      if (!verifyMinerOperation(op, account.publicKey)) {
+        return {
+          valid: false,
+          error: `minerOperations[${i}] signature does not verify against ${op.accountId}`,
+        };
+      }
+    }
+  }
+
   return { valid: true };
 }
 
@@ -631,6 +668,10 @@ export function payloadToBlock(payload: IncomingBlockPayload): Block {
     vouchOperations:
       payload.vouchOperations && payload.vouchOperations.length > 0
         ? payload.vouchOperations
+        : null,
+    minerOperations:
+      payload.minerOperations && payload.minerOperations.length > 0
+        ? payload.minerOperations
         : null,
   };
 }

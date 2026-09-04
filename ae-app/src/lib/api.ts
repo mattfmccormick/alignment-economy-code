@@ -180,7 +180,7 @@ export const api = {
 
   // Miners
   // Auth-required: only the account being registered can register itself.
-  registerMiner: (envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
+  registerMiner: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
     request<{ miner: MinerData }>('POST', '/miners/register', envelope),
 
   getMinerStatus: (accountId: string) =>

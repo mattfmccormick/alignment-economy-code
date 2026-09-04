@@ -22,6 +22,16 @@ export function signPayload(payload: object, timestamp: number, privateKeyHex: s
   return bytesToHex(sig);
 }
 
+export function signMinerRegister(
+  accountId: string,
+  timestamp: number,
+  privateKeyHex: string,
+): { type: 'miner_register'; accountId: string; timestamp: number; signature: string } {
+  const canonical = `miner_register|${accountId}|${timestamp}`;
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'miner_register', accountId, timestamp, signature: bytesToHex(sig) };
+}
+
 // ─── Vouch operations (audit #4/#16) ─────────────────────────────────────
 //
 // A vouch now rides the chain, so the client signs a VouchOperation over its

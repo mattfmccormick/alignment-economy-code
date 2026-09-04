@@ -12,6 +12,13 @@ import {
   type VouchOperation,
 } from '../../verification/vouch-operation.js';
 import { getAccount } from '../../core/account.js';
+import {
+  enqueueMinerOperation,
+  verifyMinerOperation,
+  validateMinerOperationApplicable,
+  deriveMinerId,
+  type MinerOperation,
+} from '../../mining/miner-operation.js';
 import { verificationStore } from '../../verification/panel.js';
 import { recordHeartbeat } from '../../mining/heartbeat.js';
 import { getLatestBlock } from '../../core/block.js';
@@ -20,7 +27,11 @@ import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
 import { v4 as uuid } from 'uuid';
 
-export function minerRoutes(db: DatabaseSync, vouchOpBroadcaster?: (op: unknown) => void) {
+export function minerRoutes(
+  db: DatabaseSync,
+  vouchOpBroadcaster?: (op: unknown) => void,
+  minerOpBroadcaster?: (op: unknown) => void,
+) {
   const router = Router();
 
   // POST /miners/register - register as a miner. Auth-required: only the
@@ -43,12 +54,40 @@ export function minerRoutes(db: DatabaseSync, vouchOpBroadcaster?: (op: unknown)
     const existing = getMinerByAccount(db, accountId);
     if (existing) return res.status(409).json({ error: 'Already registered as miner', miner: existing });
 
-    try {
-      const miner = registerMiner(db, accountId);
-      res.json({ miner });
-    } catch (err) {
-      res.status(400).json({ error: String(err) });
+    // Miner registration rides the chain now (audit #5/#6/#7): who is a miner is
+    // consensus state (fee split, lottery, panel assignment), so applying it
+    // node-locally forked the set. The client signs a MinerOperation; this route
+    // verifies + queues + gossips it, and it applies at commit on every node.
+    const op = (req.body.payload?.op ?? req.body.op) as MinerOperation | undefined;
+    if (!op || op.type !== 'miner_register') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_OP', message: 'payload.op must be a signed miner_register operation' },
+      });
     }
+    if (op.accountId !== accountId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_MISMATCH', message: 'op.accountId does not match the authenticated account' },
+      });
+    }
+    if (!verifyMinerOperation(op, account.publicKey)) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'INVALID_OP_SIGNATURE', message: 'miner operation signature does not verify' },
+      });
+    }
+    const problem = validateMinerOperationApplicable(db, op);
+    if (problem) {
+      return res.status(400).json({ success: false, error: { code: 'OP_NOT_APPLICABLE', message: problem } });
+    }
+    enqueueMinerOperation(db, op);
+    minerOpBroadcaster?.(op);
+    return res.json({
+      success: true,
+      data: { status: 'pending', minerId: deriveMinerId(op) },
+      meta: { timestamp: Math.floor(Date.now() / 1000) },
+    });
   });
 
   // GET /miners/status/:accountId - get miner status

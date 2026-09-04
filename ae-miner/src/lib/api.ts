@@ -304,7 +304,7 @@ export const api = {
     request<ApiResponse<MinerStatus>>('GET', `/miners/status/${accountId}`),
 
   // Auth-required: only the account being registered can register itself.
-  registerMiner: (envelope: { accountId: string; timestamp: number; signature: string; payload: Record<string, never> }) =>
+  registerMiner: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
     request<ApiResponse<{ miner: MinerStatus['miner'] }>>('POST', '/miners/register', envelope),
 
   // Verification panels (miner-facing).

@@ -53,6 +53,11 @@ import {
   applyVouchOperation,
   type VouchOperation,
 } from '../../verification/vouch-operation.js';
+import {
+  computeMinerOperationsHash,
+  applyMinerOperation,
+  type MinerOperation,
+} from '../../mining/miner-operation.js';
 
 /**
  * Sentinel thrown to unwind a successful dry run so runTransaction rolls it
@@ -289,11 +294,11 @@ export interface BftBlockProducerConfig {
    * feeds a block; receivers apply whatever arrives in the payload.
    */
   pendingVouchOperations?: () => VouchOperation[];
-  /**
-   * Fired after a block's vouch operations have been applied locally, so the
-   * proposer can drain its queue. Every node calls it, so it must be idempotent.
-   */
   onVouchOperationsApplied?: (ops: VouchOperation[]) => void;
+  /** Pull signed miner operations to include in the next block this node proposes. */
+  pendingMinerOperations?: () => MinerOperation[];
+  /** Fired after a block's miner operations applied locally; must be idempotent. */
+  onMinerOperationsApplied?: (ops: MinerOperation[]) => void;
   /**
    * Fired after a block's transactions have been applied to balances.
    *
@@ -345,6 +350,8 @@ export class BftBlockProducer {
     | undefined;
   private readonly pendingVouchOperations: (() => VouchOperation[]) | undefined;
   private readonly onVouchOperationsApplied: ((ops: VouchOperation[]) => void) | undefined;
+  private readonly pendingMinerOperations: (() => MinerOperation[]) | undefined;
+  private readonly onMinerOperationsApplied: ((ops: MinerOperation[]) => void) | undefined;
   private readonly pendingAccountRegistrations: (() => AccountRegistration[]) | undefined;
   private readonly onAccountRegistrationsApplied:
     | ((regs: AccountRegistration[]) => void)
@@ -364,6 +371,8 @@ export class BftBlockProducer {
     this.onAccountRegistrationsApplied = config.onAccountRegistrationsApplied;
     this.pendingVouchOperations = config.pendingVouchOperations;
     this.onVouchOperationsApplied = config.onVouchOperationsApplied;
+    this.pendingMinerOperations = config.pendingMinerOperations;
+    this.onMinerOperationsApplied = config.onMinerOperationsApplied;
     this.onTransactionsApplied = config.onTransactionsApplied;
 
     const latest = getLatestBlock(this.db);
@@ -695,6 +704,12 @@ export class BftBlockProducer {
     const vouchOperationsHash =
       vouchOperations.length > 0 ? computeVouchOperationsHash(vouchOperations) : null;
 
+    const minerOperations: MinerOperation[] = this.pendingMinerOperations
+      ? this.pendingMinerOperations()
+      : [];
+    const minerOperationsHash =
+      minerOperations.length > 0 ? computeMinerOperationsHash(minerOperations) : null;
+
     const hash = computeBlockHash(
       height,
       previousHash,
@@ -705,6 +720,7 @@ export class BftBlockProducer {
       validatorChangesHash,
       accountRegistrationsHash,
       vouchOperationsHash,
+      minerOperationsHash,
     );
 
     // Session 53 fix: include parentCertificate + parentValidatorSnapshot
@@ -754,6 +770,7 @@ export class BftBlockProducer {
       ...(accountRegistrations.length > 0 ? { accountRegistrations } : {}),
       ...(validatorChanges.length > 0 ? { validatorChanges } : {}),
       ...(vouchOperations.length > 0 ? { vouchOperations } : {}),
+      ...(minerOperations.length > 0 ? { minerOperations } : {}),
       ...(parentCert ? { parentCertificate: parentCert } : {}),
       ...(parentSnapshot ? { parentValidatorSnapshot: parentSnapshot } : {}),
     };
@@ -812,6 +829,7 @@ export class BftBlockProducer {
 
     const validatorChanges: ValidatorChange[] = payload.validatorChanges ?? [];
     const vouchOperations: VouchOperation[] = payload.vouchOperations ?? [];
+    const minerOperations: MinerOperation[] = payload.minerOperations ?? [];
 
     // Everything below is one DB transaction, so a throw anywhere rolls the
     // whole block back — the node keeps a consistent view of height N-1 rather
@@ -886,6 +904,12 @@ export class BftBlockProducer {
           applyVouchOperation(this.db, op, block.timestamp);
         }
 
+        // Miner operations in the fixed block order, after vouches. Idempotent,
+        // block timestamp, so every node's miner set matches.
+        for (const op of minerOperations) {
+          applyMinerOperation(this.db, op, block.timestamp);
+        }
+
         // Distribute the block's fees per WP economics. Idempotent — every
         // node (proposer + followers replaying via this same path) reaches
         // the same balances.
@@ -936,6 +960,14 @@ export class BftBlockProducer {
     if (vouchOperations.length > 0 && this.onVouchOperationsApplied) {
       try {
         this.onVouchOperationsApplied(vouchOperations);
+      } catch (err) {
+        void err;
+      }
+    }
+
+    if (minerOperations.length > 0 && this.onMinerOperationsApplied) {
+      try {
+        this.onMinerOperationsApplied(minerOperations);
       } catch (err) {
         void err;
       }

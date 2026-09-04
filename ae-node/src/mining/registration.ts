@@ -17,7 +17,16 @@ export function miningStore(db: DatabaseSync): IMiningStore {
   return new SqliteMiningStore(db);
 }
 
-export function registerMiner(db: DatabaseSync, accountId: string): Miner {
+export function registerMiner(
+  db: DatabaseSync,
+  accountId: string,
+  // Deterministic overrides for the chain-ordered path (audit #5/#6/#7): when a
+  // registration rides a block, every node must store the miner with the SAME id
+  // and timestamp, or the miners table (and every fee split and panel assignment
+  // after it) diverges. The block supplies both. Omitted on the legacy direct
+  // path (tests, seeding), which keeps uuid()/Date.now().
+  opts?: { id?: string; now?: number },
+): Miner {
   const acct = getAccount(db, accountId);
   if (!acct) throw new NotFoundError(`Account not found: ${accountId}`);
   if (acct.type !== 'individual') throw new ValidationError('Only individual accounts can become miners', 'NOT_INDIVIDUAL');
@@ -53,8 +62,8 @@ export function registerMiner(db: DatabaseSync, accountId: string): Miner {
     throw new ConflictError('Account already has an active miner', 'MINER_EXISTS');
   }
 
-  const id = uuid();
-  const now = Math.floor(Date.now() / 1000);
+  const id = opts?.id ?? uuid();
+  const now = opts?.now ?? Math.floor(Date.now() / 1000);
 
   // Record WHETHER the exemption was actually used, not merely that it existed.
   // The tier evaluator needs to tell "admitted below the floor on purpose" from
@@ -88,8 +97,13 @@ export function getActiveMiners(db: DatabaseSync, tier?: 1 | 2): Miner[] {
   return miningStore(db).findActiveMiners(tier);
 }
 
-export function deactivateMiner(db: DatabaseSync, minerId: string, _reason: string): void {
-  miningStore(db).deactivateMiner(minerId, Math.floor(Date.now() / 1000));
+export function deactivateMiner(
+  db: DatabaseSync,
+  minerId: string,
+  _reason: string,
+  nowOverride?: number,
+): void {
+  miningStore(db).deactivateMiner(minerId, nowOverride ?? Math.floor(Date.now() / 1000));
 }
 
 export function setMinerTier(

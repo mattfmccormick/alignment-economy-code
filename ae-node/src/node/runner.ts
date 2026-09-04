@@ -47,6 +47,11 @@ import {
   drainVouchOperations,
   removeAppliedVouchOperations,
 } from '../verification/vouch-operation.js';
+import {
+  applyMinerOperation,
+  drainMinerOperations,
+  removeAppliedMinerOperations,
+} from '../mining/miner-operation.js';
 import { logger, setLogLevel } from './logger.js';
 import type { AENodeConfig } from './config.js';
 import type { TransactionRow } from '../core/stores/ITransactionStore.js';
@@ -308,6 +313,10 @@ export class AENodeRunner {
         this.config.consensusMode === 'bft'
           ? (op) => this.p2pNode?.broadcastVouchOp(op as never)
           : undefined,
+      minerOpBroadcaster:
+        this.config.consensusMode === 'bft'
+          ? (op) => this.p2pNode?.broadcastMinerOp(op as never)
+          : undefined,
     });
     logger.info('api', `API server listening on ${this.config.apiHost}:${this.config.apiPort}`);
   }
@@ -470,6 +479,9 @@ export class AENodeRunner {
             // the live commit path so a syncing node reaches identical state.
             for (const op of payload.vouchOperations ?? []) {
               applyVouchOperation(this.db, op, block.timestamp);
+            }
+            for (const op of payload.minerOperations ?? []) {
+              applyMinerOperation(this.db, op, block.timestamp);
             }
 
             // Distribute fees per WP economics. Idempotent — matches the
@@ -717,6 +729,13 @@ export class AENodeRunner {
         const removed = removeAppliedVouchOperations(this.db, ops);
         if (removed > 0) {
           logger.info('vouch', `${removed} vouch operation(s) committed on-chain and drained`);
+        }
+      },
+      pendingMinerOperations: () => drainMinerOperations(this.db),
+      onMinerOperationsApplied: (ops) => {
+        const removed = removeAppliedMinerOperations(this.db, ops);
+        if (removed > 0) {
+          logger.info('miner', `${removed} miner operation(s) committed on-chain and drained`);
         }
       },
       onBlockCommitted: (block) => {

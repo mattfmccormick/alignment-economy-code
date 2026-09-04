@@ -17,7 +17,7 @@ import { truncateId } from '../lib/formatting';
 import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
 import type { MinerStatus } from '../lib/types';
-import { signPayload } from '../lib/crypto';
+import { signPayload, signMinerRegister } from '../lib/crypto';
 import { SessionReauthModal } from '../components/SessionReauthModal';
 import { supportedLanguages, RTL_LANGUAGES } from '../lib/i18n';
 
@@ -274,8 +274,11 @@ export function More() {
     try {
       // Sign an empty payload to prove key possession; the route now
       // requires an authenticated caller.
+      // Miner registration rides the chain now: sign a MinerOperation and send
+      // it. The auth envelope signs the same { op } payload.
       const ts = Math.floor(Date.now() / 1000);
-      const payload = {};
+      const op = signMinerRegister(wallet.accountId, ts, wallet.privateKey);
+      const payload = { op };
       const signature = signPayload(payload, ts, wallet.privateKey);
       const res = await api.registerMiner({
         accountId: wallet.accountId,

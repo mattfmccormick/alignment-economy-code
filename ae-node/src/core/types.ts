@@ -5,6 +5,7 @@
 import type { ValidatorChange } from './consensus/validator-change.js';
 import type { AccountRegistration } from './account-registration.js';
 import type { VouchOperation } from '../verification/vouch-operation.js';
+import type { MinerOperation } from '../mining/miner-operation.js';
 
 export type AccountType = 'individual' | 'company' | 'government' | 'ai_bot';
 export type PointType = 'active' | 'supportive' | 'ambient' | 'earned';
@@ -183,6 +184,12 @@ export interface Block {
    * blocks keep exactly the digest they always had.
    */
   vouchOperations: VouchOperation[] | null;
+
+  /**
+   * Signed miner register/deregister operations carried by this block (schema
+   * v18). Same lifecycle as vouchOperations. `null` when none.
+   */
+  minerOperations: MinerOperation[] | null;
 }
 
 export interface RebaseEvent {
