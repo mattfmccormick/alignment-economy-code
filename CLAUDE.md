@@ -1463,7 +1463,16 @@ not a leap of faith.
    balance + state root identical on all three nodes). Use
    verification/vouch-operation.ts as the template for the rest.
 
-   **Remaining in the cluster:** panels and tags, then re-derive value.
+   **Progress: miner registration is now chain-ordered too (commit 9779063).**
+   Register/deregister ride a block as signed operations (deterministic id +
+   timestamp), gossiped for fast inclusion, applied at commit - so the active
+   miner set (fee split, lottery, panel assignment) is identical on every node.
+   The 3-validator LAN test now converges after a transfer, a vouch, AND a miner
+   registration. See mining/miner-operation.ts.
+
+   **Remaining in the cluster:** verification panels (the main percentHuman
+   writer - now possible to assign jurors deterministically since miners are
+   chain-state), tags, then re-derive transaction value to close #4.
    This is one
    architectural change, not several. `replayTransaction` /
    `acceptPendingTransaction` take `fee` / `netAmount` off the wire and apply
