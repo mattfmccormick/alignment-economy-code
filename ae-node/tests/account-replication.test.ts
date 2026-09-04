@@ -31,7 +31,7 @@ import {
   getAccount,
   updateBalance,
 } from '../src/core/account.js';
-import { replayTransaction } from '../src/core/transaction.js';
+import { replayTransaction, calculateFee } from '../src/core/transaction.js';
 import { generateKeyPair, deriveAccountId, signPayload } from '../src/core/crypto.js';
 
 function freshDb(): DatabaseSync {
@@ -164,13 +164,19 @@ describe('account replication between nodes', () => {
       recipientIsHuman: false,
       memo: '',
     };
+    // Honest wire values. replayTransaction re-derives fee/netAmount from local
+    // chain state now (audit #4) and applies the DERIVED value, so the wire must
+    // carry the true numbers or the assertions below would measure a fiction.
+    // Earned points take no percentHuman discount but still pay the fee.
+    const fee = calculateFee(amount);
+    const net = amount - fee;
     const wireTx = {
       id: 'tx-cross-node-1',
       from: sender.account.id,
       to: recipient.account.id,
       amount,
-      fee: 0n,
-      netAmount: amount,
+      fee,
+      netAmount: net,
       pointType: 'earned' as const,
       isInPerson: false,
       recipientIsHuman: false,
@@ -202,7 +208,7 @@ describe('account replication between nodes', () => {
 
     replayTransaction(nodeB, wireTx, 1);
 
-    assert.equal(getAccount(nodeB, recipient.account.id)!.earnedBalance, amount);
+    assert.equal(getAccount(nodeB, recipient.account.id)!.earnedBalance, net);
     assert.equal(
       getAccount(nodeB, sender.account.id)!.earnedBalance,
       500_00000000n - amount,

@@ -14,6 +14,7 @@ import { addToFeePool } from './fee-pool.js';
 import { runTransaction } from '../db/connection.js';
 import { NotFoundError, ValidationError, ForbiddenError, InsufficientBalanceError } from './errors.js';
 import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
+import { logger } from '../node/logger.js';
 import { SqliteTransactionStore } from './stores/SqliteTransactionStore.js';
 import type { ITransactionStore } from './stores/ITransactionStore.js';
 import type { Transaction, PointType, ChangeType } from './types.js';
@@ -43,6 +44,42 @@ function getBalanceForType(
 
 export function calculateFee(amount: bigint): bigint {
   return (amount * TRANSACTION_FEE_RATE) / FEE_DENOMINATOR;
+}
+
+/**
+ * The spend-value derivation, in ONE place (audit #4).
+ *
+ * A spend's real value is `amount * percentHuman / 100` for daily-point spends by
+ * individuals; earned points and non-individual (company/government) senders pass
+ * at full value. The fee is charged on the POST-discount effectiveAmount, the
+ * recipient gets effectiveAmount minus fee, and the discounted remainder burns.
+ *
+ * This used to live only inside processTransaction (the ORIGIN path), which then
+ * put fee/netAmount on the wire; replayTransaction / acceptPendingTransaction —
+ * the paths every OTHER node runs — trusted those wire numbers verbatim. Since a
+ * spend's value depends on percentHuman and percentHuman was node-local, the wire
+ * had to be trusted or honest nodes would fork. That let a malicious node hand a
+ * follower a block whose netAmount was computed as if a 0% sybil were 100%
+ * (audit #4). Now that percentHuman is pure chain state (vouch/panel/miner ops
+ * are all chain-ordered), every node can re-derive the value itself and the wire
+ * numbers become inert. This is that single derivation.
+ *
+ * bigint op order is load-bearing: effectiveAmount first (truncating /100n), then
+ * the fee on it (truncating /FEE_DENOMINATOR), then net, then burn. Reordering
+ * changes the truncation dust and would fork the chain.
+ */
+export function deriveSpendValue(
+  amount: bigint,
+  pointType: PointType,
+  senderType: string,
+  percentHuman: number,
+): { effectiveAmount: bigint; fee: bigint; netAmount: bigint; burnedUnverified: bigint } {
+  const applyDiscount = pointType !== 'earned' && senderType === 'individual';
+  const effectiveAmount = applyDiscount ? (amount * BigInt(percentHuman)) / 100n : amount;
+  const fee = calculateFee(effectiveAmount);
+  const netAmount = effectiveAmount - fee;
+  const burnedUnverified = amount - effectiveAmount;
+  return { effectiveAmount, fee, netAmount, burnedUnverified };
 }
 
 export interface TransactionInput {
@@ -265,14 +302,22 @@ export function acceptPendingTransaction(db: DatabaseSync, input: ReplayInput): 
     throw new Error(`Pending: malformed tx ${input.id}: fee + netAmount > amount`);
   }
 
+  // Store the DERIVED fee/netAmount, not the wire's (audit #4). Balances only
+  // move later in replayTransaction, which re-derives anyway, so the wire values
+  // never drive state — but persisting them here would let an attacker's inflated
+  // numbers sit in the mempool row and be re-gossiped via txRowToWire. Deriving
+  // from the local sender keeps the pending row honest. Signature verification
+  // stays ABOVE this so the invalid-signature path is unchanged.
+  const derived = deriveSpendValue(input.amount, input.pointType, sender.type, sender.percentHuman);
+
   txStore.insertTransaction(
     {
       id: input.id,
       from: input.from,
       to: input.to,
       amount: input.amount.toString(),
-      fee: input.fee.toString(),
-      netAmount: input.netAmount.toString(),
+      fee: derived.fee.toString(),
+      netAmount: derived.netAmount.toString(),
       pointType: input.pointType,
       isInPerson: input.isInPerson,
       recipientIsHuman: input.recipientIsHuman,
@@ -345,10 +390,37 @@ export function replayTransaction(
     );
   }
 
-  const burnedUnverified = input.amount - input.fee - input.netAmount;
-  if (burnedUnverified < 0n) {
-    throw new Error(`Replay: malformed tx ${input.id}: fee + netAmount > amount`);
+  // Re-derive value from LOCAL chain state instead of trusting the wire
+  // (audit #4). fee/netAmount/burn are a pure function of the sender's
+  // percentHuman + type and the tx's amount/pointType — none of which the wire
+  // fee/netAmount are needed for, and none of which the account signature even
+  // covers. percentHuman is now pure chain state, so every honest node derives
+  // the SAME numbers here; an attacker's inflated wire fee/netAmount are simply
+  // discarded. We do NOT reject on a wire mismatch: in commit-time mode a tx can
+  // sit in the pending set across blocks, and a legitimate vouch-withdraw or
+  // panel-completion committed in an intervening block changes the sender's
+  // percentHuman, so the wire value (frozen at receipt) can differ from the
+  // derived value (as of this block) for an entirely honest tx. Rejecting would
+  // fail-stop the chain on that honest change; overriding is safe and correct.
+  //
+  // Apply-order dependency (load-bearing): this reads sender.percentHuman as of
+  // the END of the previous block, because both the live commit path and the
+  // sync path apply transactions BEFORE this block's vouch/panel percentHuman
+  // ops. If a future change moves a percentHuman writer ahead of transactions
+  // within a block, followers would re-derive against a different percentHuman
+  // and FORK. Keep transactions first.
+  const derived = deriveSpendValue(input.amount, input.pointType, sender.type, sender.percentHuman);
+  if (input.fee !== derived.fee || input.netAmount !== derived.netAmount) {
+    logger.warn(
+      'tx',
+      `Replay: wire value != derived for tx ${input.id.slice(0, 12)}… ` +
+        `(wire fee=${input.fee} net=${input.netAmount}, derived fee=${derived.fee} ` +
+        `net=${derived.netAmount}, sender pH=${sender.percentHuman}). Applying derived ` +
+        `value. Benign if percentHuman changed since receipt; otherwise a tampered ` +
+        `wire value (audit #4) or out-of-band percent_human write (dev-bump-ph.mjs).`,
+    );
   }
+  const burnedUnverified = derived.burnedUnverified;
 
   applyTransactionInternal(db, {
     txId: input.id,
@@ -367,9 +439,9 @@ export function replayTransaction(
     newSenderBalance: senderBalance - input.amount,
     senderField,
     recipientEarnedBefore: recipient.earnedBalance,
-    newRecipientEarned: recipient.earnedBalance + input.netAmount,
-    fee: input.fee,
-    netAmount: input.netAmount,
+    newRecipientEarned: recipient.earnedBalance + derived.netAmount,
+    fee: derived.fee,
+    netAmount: derived.netAmount,
     burnedUnverified,
     senderPercentHuman: sender.percentHuman,
     // The row may already be on disk in an unapplied state (commit-time
@@ -503,16 +575,15 @@ export function processTransaction(
   // WP v2: percentHuman discount applies only to daily-point spends
   // (active/supportive/ambient). Earned-point transactions pass through at
   // full value. Non-individual accounts (company/government) also spend
-  // without discount since they don't receive daily allocations.
-  const isDailyPointType = input.pointType !== 'earned';
-  const isIndividual = sender.type === 'individual';
-  const applyDiscount = isDailyPointType && isIndividual;
-  const effectiveAmount = applyDiscount
-    ? (input.amount * BigInt(sender.percentHuman)) / 100n
-    : input.amount;
-  const fee = calculateFee(effectiveAmount);
-  const netAmount = effectiveAmount - fee;
-  const burnedUnverified = input.amount - effectiveAmount;
+  // without discount since they don't receive daily allocations. The origin
+  // and every replaying node derive this the same way (audit #4) — see
+  // deriveSpendValue.
+  const { fee, netAmount, burnedUnverified } = deriveSpendValue(
+    input.amount,
+    input.pointType,
+    sender.type,
+    sender.percentHuman,
+  );
 
   // Deterministic id derived from the signed content, NOT a random uuid.
   //
@@ -544,10 +615,10 @@ export function processTransaction(
     // of that happens when the block carrying this transaction commits, on
     // every node, in the order the chain fixed.
     //
-    // The fee/netAmount/burn computed above still ride the row and the wire,
-    // because replayTransaction applies them verbatim so that every node
-    // reaches identical numbers rather than each recomputing against its own
-    // view of the sender's percentHuman.
+    // The fee/netAmount/burn computed above ride the row and the wire for
+    // display/history, but they are NO LONGER trusted for state: replayTransaction
+    // re-derives them from the sender's chain-state percentHuman at commit and
+    // applies the derived value (audit #4). The wire copies are advisory.
     transactionStore(db).insertTransaction(
       {
         id: txId,
