@@ -88,6 +88,7 @@ export class PeerManager extends EventEmitter {
   private seenAccounts = new Set<string>();
   private seenVouchOps = new Set<string>();
   private seenMinerOps = new Set<string>();
+  private seenPanelOps = new Set<string>();
   private seenProposals = new Set<string>();
   private seenVotes = new Set<string>();
   private maxPeers: number;
@@ -464,6 +465,18 @@ export class PeerManager extends EventEmitter {
         if (!key || !this.markSeenAndAccept(this.seenMinerOps, key, 5000)) return;
         this.emit('miner_op:received', msg.data, msg.senderId);
         this.relayGossip('new_miner_op', msg.data, msg.senderId);
+        break;
+      }
+      case 'new_panel_op': {
+        // Signed panel operations (create / score) gossip to every node's QUEUE,
+        // same as vouch/miner ops: they apply deterministically at block commit,
+        // never on receipt. Authenticated + deduped by signature.
+        if (!this.isAuthenticatedSender(msg.publicKey, ws)) return;
+        const op = msg.data as { accountId?: string; signature?: string };
+        const key = String(op?.signature ?? '');
+        if (!key || !this.markSeenAndAccept(this.seenPanelOps, key, 5000)) return;
+        this.emit('panel_op:received', msg.data, msg.senderId);
+        this.relayGossip('new_panel_op', msg.data, msg.senderId);
         break;
       }
       case 'new_vouch_op': {

@@ -100,14 +100,19 @@ export function computeBlockHash(
   // Appended last, '' for empty (audit #5/#6/#7), so a block with no miner
   // operations keeps its prior hash.
   minerOperationsHash: string | null = null,
+  // Appended last, '' for empty, so a block with no panel operations keeps its
+  // prior hash. Panel completion writes percentHuman, so this lane is what makes
+  // percentHuman consensus-enforced rather than node-local.
+  panelOperationsHash: string | null = null,
 ): string {
   const certPart = prevCommitCertHash ?? '';
   const changesPart = validatorChangesHash ?? '';
   const registrationsPart = accountRegistrationsHash ?? '';
   const vouchPart = vouchOperationsHash ?? '';
   const minerPart = minerOperationsHash ?? '';
+  const panelPart = panelOperationsHash ?? '';
   return sha256(
-    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}${vouchPart}${minerPart}`,
+    `${number}${previousHash}${timestamp}${merkleRoot}${day}${certPart}${changesPart}${registrationsPart}${vouchPart}${minerPart}${panelPart}`,
   );
 }
 
@@ -128,6 +133,7 @@ export function createGenesisBlockWithStore(store: IBlockStore): Block {
     accountRegistrations: null,
     vouchOperations: null,
     minerOperations: null,
+    panelOperations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,
@@ -175,6 +181,7 @@ export function createBlockWithStore(
     accountRegistrations: null,
     vouchOperations: null,
     minerOperations: null,
+    panelOperations: null,
   };
 
   store.insert(block, /* isGenesis */ false);

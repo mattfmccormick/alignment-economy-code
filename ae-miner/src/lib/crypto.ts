@@ -32,6 +32,20 @@ export function signMinerRegister(
   return { type: 'miner_register', accountId, timestamp, signature: bytesToHex(sig) };
 }
 
+// A signed panel_score operation (a miner scores an open verification panel).
+// Canonical bytes must match ae-node canonicalBytesFor exactly.
+export function signPanelScore(
+  accountId: string,
+  panelId: string,
+  score: number,
+  timestamp: number,
+  privateKeyHex: string,
+): { type: 'panel_score'; accountId: string; panelId: string; score: number; timestamp: number; signature: string } {
+  const canonical = `panel_score|${accountId}|${panelId}|${score}|${timestamp}`;
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'panel_score', accountId, panelId, score, timestamp, signature: bytesToHex(sig) };
+}
+
 // ─── Vouch operations (audit #4/#16) ─────────────────────────────────────
 //
 // A vouch now rides the chain, so the client signs a VouchOperation over its

@@ -325,6 +325,7 @@ export function applyGenesisSpec(db: DatabaseSync, spec: GenesisSpec): Block {
     accountRegistrations: null,
     vouchOperations: null,
     minerOperations: null,
+    panelOperations: null,
   };
   genesis.hash = computeBlockHash(
     genesis.number,

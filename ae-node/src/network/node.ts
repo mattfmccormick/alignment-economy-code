@@ -13,6 +13,11 @@ import {
   enqueueMinerOperation,
   type MinerOperation,
 } from '../mining/miner-operation.js';
+import {
+  verifyPanelOperation,
+  enqueuePanelOperation,
+  type PanelOperation,
+} from '../verification/panel-operation.js';
 import { getAccount } from '../core/account.js';
 import { AuthorityConsensus } from './consensus.js';
 import type { IConsensusEngine } from '../core/consensus/IConsensusEngine.js';
@@ -258,6 +263,22 @@ export class AENode {
         logger.warn('p2p', `Rejected gossiped vouch op: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
+
+    this.peerManager.on('panel_op:received', (data: unknown) => {
+      try {
+        const op = data as PanelOperation;
+        const acct = op?.accountId ? getAccount(this.db, op.accountId) : null;
+        if (!acct) return;
+        if (!verifyPanelOperation(op, acct.publicKey)) {
+          logger.warn('p2p', 'Rejected gossiped panel op: signature does not verify');
+          return;
+        }
+        enqueuePanelOperation(this.db, op);
+        logger.info('p2p', `Queued gossiped panel op (${op.type}) from ${op.accountId.slice(0, 12)}…`);
+      } catch (err) {
+        logger.warn('p2p', `Rejected gossiped panel op: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   }
 
   /** Broadcast a newly created account so every peer can replay its txs. */
@@ -273,6 +294,11 @@ export class AENode {
   /** Gossip a signed miner operation so every node queues it for the next block. */
   broadcastMinerOp(op: MinerOperation): void {
     this.peerManager.broadcast('new_miner_op', op as unknown as Record<string, unknown>);
+  }
+
+  /** Gossip a signed panel operation so every node queues it for the next block. */
+  broadcastPanelOp(op: PanelOperation): void {
+    this.peerManager.broadcast('new_panel_op', op as unknown as Record<string, unknown>);
   }
 
   /** Start the P2P WebSocket server and connect to the network */

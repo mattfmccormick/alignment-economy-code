@@ -14,7 +14,19 @@ vi.mock('../lib/keys', () => ({
   loadMinerWallet: () => ({ accountId: 'miner-me', privateKey: 'priv', publicKey: 'pub' }),
 }));
 
-vi.mock('../lib/crypto', () => ({ signPayload: () => 'sig' }));
+vi.mock('../lib/crypto', () => ({
+  signPayload: () => 'sig',
+  // The score now rides the chain as a signed panel_score op. The mock echoes
+  // the score so the test can assert the op carried the value the miner set.
+  signPanelScore: (accountId: string, panelId: string, score: number) => ({
+    type: 'panel_score',
+    accountId,
+    panelId,
+    score,
+    timestamp: 0,
+    signature: 'opsig',
+  }),
+}));
 vi.mock('../lib/websocket', () => ({ wsClient: { on: vi.fn(() => () => {}) } }));
 
 vi.mock('../lib/api', () => ({
@@ -78,7 +90,7 @@ describe('Verify panel-score flow', () => {
   it('submits the score the miner chose, signed as the miner', async () => {
     mockApi.submitPanelScore.mockResolvedValue({
       success: true,
-      data: { recorded: true, panelComplete: false, medianScore: null },
+      data: { status: 'pending', reviewId: 'r1' },
     });
 
     render(<Verify />);
@@ -92,22 +104,24 @@ describe('Verify panel-score flow', () => {
     expect(envelope).toMatchObject({
       accountId: 'miner-me',
       signature: 'sig',
-      payload: { score: 65 }, // exactly what the miner set — there is no default
+      // The signed panel_score op carries exactly the score the miner set —
+      // there is no default. The op, not a bare { score }, is what rides now.
+      payload: { op: { type: 'panel_score', panelId: 'panel-1', score: 65 } },
     });
   });
 
   it('surfaces the error when the score submission is rejected', async () => {
     mockApi.submitPanelScore.mockResolvedValue({
       success: false,
-      data: { recorded: false, panelComplete: false, medianScore: null },
-      error: { code: 'NOT_ASSIGNED', message: 'You are not assigned to this panel' },
+      data: { status: 'error', reviewId: '' },
+      error: { code: 'OP_NOT_APPLICABLE', message: 'panel already complete' },
     });
 
     render(<Verify />);
     const submitBtn = await openPanelAndScore(65);
     fireEvent.click(submitBtn);
 
-    expect(await screen.findByText('You are not assigned to this panel')).toBeTruthy();
+    expect(await screen.findByText('panel already complete')).toBeTruthy();
   });
 });
 

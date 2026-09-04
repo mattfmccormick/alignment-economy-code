@@ -3,22 +3,34 @@ import { DatabaseSync } from 'node:sqlite';
 import { authMiddleware, minerAuthMiddleware } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
-import { eventBus } from '../websocket.js';
-import { createPanel, submitPanelScore, getPanelReviews, verificationStore } from '../../verification/panel.js';
+import { getPanelReviews, verificationStore } from '../../verification/panel.js';
 import { getEvidenceForAccount, submitEvidence } from '../../verification/evidence.js';
 import { calculateScore } from '../../verification/scoring.js';
-import { assignMinersToPanel } from '../../mining/fifo-queue.js';
-import { getMiner, getMinerByAccount } from '../../mining/registration.js';
+import { getMinerByAccount } from '../../mining/registration.js';
 import { getAccount } from '../../core/account.js';
+import {
+  verifyPanelOperation,
+  validatePanelOperationApplicable,
+  enqueuePanelOperation,
+  derivePanelId,
+  deriveReviewId,
+  type PanelOperation,
+} from '../../verification/panel-operation.js';
 
-export function verificationRoutes(db: DatabaseSync): Router {
+export function verificationRoutes(
+  db: DatabaseSync,
+  panelOpBroadcaster?: (op: unknown) => void,
+): Router {
   const router = Router();
 
   // ── PARTICIPANT-FACING ────────────────────────────────────────
 
-  // POST /verification/panels - participant requests a verification panel
-  // for their own account. Auth-protected: must sign with the account's key.
-  // FIFO-assigns available miners, transitions panel to in_progress.
+  // POST /verification/panels - participant requests a verification panel for
+  // their own account. The request carries a signed panel_create operation
+  // (payload.op); the panel rides the chain and is created deterministically at
+  // commit on every node, because panel completion writes percentHuman and that
+  // must be consensus state, not a node-local write. Returns the derived panel
+  // id so the client can poll for it once the block commits.
   router.post('/panels', authMiddleware(db), (req, res, next) => {
     try {
       const accountId = req.accountId!;
@@ -28,28 +40,38 @@ export function verificationRoutes(db: DatabaseSync): Router {
         return;
       }
 
-      const panel = createPanel(db, accountId);
-      const assignedMinerIds = assignMinersToPanel(db, panel.id, accountId);
-
-      // Notify each assigned miner over WebSocket so their dashboard updates.
-      for (const minerId of assignedMinerIds) {
-        const miner = getMiner(db, minerId);
-        if (miner) {
-          eventBus.emit('verification:assigned', {
-            accountId: miner.accountId,
-            minerId,
-            panelId: panel.id,
-            applicantAccountId: accountId,
-          });
-        }
+      const op = (req.body.payload?.op ?? req.body.op) as PanelOperation | undefined;
+      if (!op || op.type !== 'panel_create') {
+        res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_OP', message: 'payload.op must be a signed panel_create operation' },
+        });
+        return;
       }
-
+      if (op.accountId !== accountId) {
+        res.status(403).json({
+          success: false,
+          error: { code: 'ACCOUNT_MISMATCH', message: 'op.accountId does not match the authenticated account' },
+        });
+        return;
+      }
+      if (!verifyPanelOperation(op, acct.publicKey)) {
+        res.status(401).json({
+          success: false,
+          error: { code: 'INVALID_OP_SIGNATURE', message: 'panel operation signature does not verify' },
+        });
+        return;
+      }
+      const problem = validatePanelOperationApplicable(db, op);
+      if (problem) {
+        res.status(400).json({ success: false, error: { code: 'OP_NOT_APPLICABLE', message: problem } });
+        return;
+      }
+      enqueuePanelOperation(db, op);
+      panelOpBroadcaster?.(op);
       res.json({
         success: true,
-        data: {
-          panel,
-          assignedMinerCount: assignedMinerIds.length,
-        },
+        data: { status: 'pending', panelId: derivePanelId(op) },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });
     } catch (e) { next(e); }
@@ -94,14 +116,19 @@ export function verificationRoutes(db: DatabaseSync): Router {
 
   // ── MINER-FACING ──────────────────────────────────────────────
 
-  // GET /verification/miners/:accountId/assignments - panels FIFO-assigned to
-  // a miner. Public: the data is derivable from the on-chain assignment records
-  // anyway, and making it auth-protected would force a signed-GET pattern that
-  // the codebase doesn't support. The actual SCORE submission below is the
-  // auth-protected action.
+  // GET /verification/miners/:accountId/assignments - panels a miner can act on.
+  // Public, same rationale as before. Now that panel completion is chain-ordered,
+  // FIFO assignment rows are no longer a consensus step: any active miner may
+  // score any OPEN panel (except their own), and completion fires deterministically
+  // when enough scores are in. So this returns every open panel not yet scored by
+  // this miner (the pending queue) plus the panels this miner already scored (their
+  // history). Deterministic FIFO assignment + conflict-of-interest as an enforced
+  // on-chain check is a documented follow-up; the panel-op path keeps the same
+  // PanelAssignment shape so the miner UI is unchanged.
   router.get('/miners/:accountId/assignments', (req, res, next) => {
     try {
-      const miner = getMinerByAccount(db, req.params.accountId as string);
+      const accountId = req.params.accountId as string;
+      const miner = getMinerByAccount(db, accountId);
       if (!miner) {
         res.json({
           success: true,
@@ -112,13 +139,15 @@ export function verificationRoutes(db: DatabaseSync): Router {
       }
       const minerId = miner.id;
       const rows = db.prepare(
-        `SELECT p.id as panel_id, p.account_id, p.status, p.created_at, p.completed_at, p.median_score,
-                a.assigned_at, a.deadline, a.completed as assignment_completed, a.missed
-         FROM miner_verification_assignments a
-         JOIN verification_panels p ON p.id = a.panel_id
-         WHERE a.miner_id = ?
-         ORDER BY a.assigned_at DESC`
-      ).all(minerId) as Array<Record<string, unknown>>;
+        `SELECT p.id as panel_id, p.account_id, p.status, p.created_at, p.completed_at,
+                p.median_score, p.deadline,
+                EXISTS(SELECT 1 FROM panel_reviews r WHERE r.panel_id = p.id AND r.miner_id = ?) AS reviewed
+         FROM verification_panels p
+         WHERE p.account_id != ?
+           AND (p.status != 'complete'
+                OR EXISTS(SELECT 1 FROM panel_reviews r2 WHERE r2.panel_id = p.id AND r2.miner_id = ?))
+         ORDER BY p.created_at DESC`
+      ).all(minerId, accountId, minerId) as Array<Record<string, unknown>>;
 
       res.json({
         success: true,
@@ -131,10 +160,10 @@ export function verificationRoutes(db: DatabaseSync): Router {
             panelCreatedAt: r.created_at,
             panelCompletedAt: r.completed_at,
             medianScore: r.median_score,
-            assignedAt: r.assigned_at,
+            assignedAt: r.created_at,
             deadline: r.deadline,
-            myReviewSubmitted: (r.assignment_completed as number) === 1,
-            missed: (r.missed as number) === 1,
+            myReviewSubmitted: (r.reviewed as number) === 1,
+            missed: false,
           })),
         },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
@@ -177,66 +206,63 @@ export function verificationRoutes(db: DatabaseSync): Router {
     } catch (e) { next(e); }
   });
 
-  // POST /verification/panels/:id/score - miner submits their %Human score
-  // for an assigned panel. Auth + miner-required. When the last assigned
-  // miner submits, the median is computed and the applicant's percentHuman
-  // is updated atomically inside submitPanelScore.
-  router.post('/panels/:id/score', authMiddleware(db), minerAuthMiddleware(db), validateBody(schemas.scorePanel), (req, res, next) => {
+  // POST /verification/panels/:id/score - miner submits their %Human score for
+  // an open panel. The request carries a signed panel_score operation
+  // (payload.op); the score rides the chain and applies deterministically at
+  // commit on every node. When the applied scores reach the panel's snapshotted
+  // target, completion computes the median and writes percentHuman inside the
+  // same commit — identically on every node. So this route verifies + queues +
+  // gossips the op and returns pending; the completion WS events fire from the
+  // commit path, not here.
+  router.post('/panels/:id/score', authMiddleware(db), minerAuthMiddleware(db), (req, res, next) => {
     try {
-      const minerId = req.minerId!;
+      const accountId = req.accountId!;
       const panelId = req.params.id as string;
-      const { score } = req.body.payload || req.body;
-      if (typeof score !== 'number') {
-        res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'score (number) required' } });
+      const acct = getAccount(db, accountId);
+      if (!acct) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Account not found' } });
         return;
       }
 
-      // Confirm this miner was actually assigned to this panel. Without this
-      // check, any miner could score any panel — defeats the FIFO design.
-      const assignment = db.prepare(
-        'SELECT id, completed FROM miner_verification_assignments WHERE miner_id = ? AND panel_id = ?'
-      ).get(minerId, panelId) as { id: string; completed: number } | undefined;
-
-      if (!assignment) {
-        res.status(403).json({ success: false, error: { code: 'NOT_ASSIGNED', message: 'You are not assigned to this panel' } });
+      const op = (req.body.payload?.op ?? req.body.op) as PanelOperation | undefined;
+      if (!op || op.type !== 'panel_score') {
+        res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_OP', message: 'payload.op must be a signed panel_score operation' },
+        });
         return;
       }
-      if (assignment.completed === 1) {
-        res.status(409).json({ success: false, error: { code: 'ALREADY_SCORED', message: 'You already scored this panel' } });
+      if (op.accountId !== accountId) {
+        res.status(403).json({
+          success: false,
+          error: { code: 'ACCOUNT_MISMATCH', message: 'op.accountId does not match the authenticated account' },
+        });
         return;
       }
-
-      const result = submitPanelScore(db, panelId, minerId, score);
-
-      // Mark the assignment as completed so the FIFO queue treats it as done
-      // and this miner can't score the same panel twice.
-      db.prepare(
-        'UPDATE miner_verification_assignments SET completed = 1 WHERE id = ?'
-      ).run(assignment.id);
-
-      // Notify the applicant when the panel completes so their wallet refreshes.
-      if (result.panelComplete) {
-        const panel = verificationStore(db).findPanelById(panelId);
-        if (panel) {
-          eventBus.emit('verification:complete', {
-            accountId: panel.accountId,
-            panelId,
-            medianScore: result.medianScore,
-          });
-          eventBus.emit('score:changed', {
-            accountId: panel.accountId,
-            newScore: result.medianScore,
-          });
-          eventBus.emit('balance:updated', {
-            accountId: panel.accountId,
-            reason: 'verification:complete',
-          });
-        }
+      if (op.panelId !== panelId) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'PANEL_MISMATCH', message: 'op.panelId does not match the URL' },
+        });
+        return;
       }
-
+      if (!verifyPanelOperation(op, acct.publicKey)) {
+        res.status(401).json({
+          success: false,
+          error: { code: 'INVALID_OP_SIGNATURE', message: 'panel operation signature does not verify' },
+        });
+        return;
+      }
+      const problem = validatePanelOperationApplicable(db, op);
+      if (problem) {
+        res.status(400).json({ success: false, error: { code: 'OP_NOT_APPLICABLE', message: problem } });
+        return;
+      }
+      enqueuePanelOperation(db, op);
+      panelOpBroadcaster?.(op);
       res.json({
         success: true,
-        data: result,
+        data: { status: 'pending', reviewId: deriveReviewId(op) },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });
     } catch (e) { next(e); }

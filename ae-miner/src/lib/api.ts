@@ -317,9 +317,11 @@ export const api = {
   getPanel: (panelId: string) =>
     request<ApiResponse<PanelDetail>>('GET', `/verification/panels/${panelId}`),
 
-  // Submit my %Human score for an assigned panel. (Signed.)
+  // Submit my %Human score for an open panel (signed panel_score op). Chain-
+  // ordered: returns { status: 'pending', reviewId }; the review applies and the
+  // median/percentHuman are written when the block commits.
   submitPanelScore: (panelId: string, signedBody: unknown) =>
-    request<ApiResponse<{ recorded: boolean; panelComplete: boolean; medianScore: number | null }>>(
+    request<ApiResponse<{ status: string; reviewId: string }>>(
       'POST', `/verification/panels/${panelId}/score`, signedBody,
     ),
 

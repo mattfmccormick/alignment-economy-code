@@ -18,6 +18,20 @@ export function verificationStore(db: DatabaseSync): IVerificationStore {
   return new SqliteVerificationStore(db);
 }
 
+// LEGACY, NODE-LOCAL PATH — DO NOT WIRE INTO A ROUTE OR CONSENSUS STEP.
+//
+// createPanel / submitPanelScore below write the panel row, the reviews, and
+// (on completion) percentHuman directly on ONE node. Panel completion is now
+// chain-ordered through verification/panel-operation.ts, which applies the same
+// median → percentHuman deterministically at commit on every node. That is what
+// makes percentHuman a pure function of the chain (the prerequisite for closing
+// audit #4). Calling these node-local functions from production would re-open
+// the fork: two nodes could hold different percentHuman for the same account.
+//
+// They are kept only because their tests (phase3, panel-deadlines,
+// panel-verdict-idempotency) encode the completion, deadline, idempotency and
+// fractional-score semantics the on-chain path must also honour. Read them as
+// the reference spec, not as a callable production API.
 export function createPanel(db: DatabaseSync, accountId: string): VerificationPanel {
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);

@@ -52,6 +52,11 @@ import {
   drainMinerOperations,
   removeAppliedMinerOperations,
 } from '../mining/miner-operation.js';
+import {
+  applyPanelOperation,
+  drainPanelOperations,
+  removeAppliedPanelOperations,
+} from '../verification/panel-operation.js';
 import { logger, setLogLevel } from './logger.js';
 import type { AENodeConfig } from './config.js';
 import type { TransactionRow } from '../core/stores/ITransactionStore.js';
@@ -317,6 +322,10 @@ export class AENodeRunner {
         this.config.consensusMode === 'bft'
           ? (op) => this.p2pNode?.broadcastMinerOp(op as never)
           : undefined,
+      panelOpBroadcaster:
+        this.config.consensusMode === 'bft'
+          ? (op) => this.p2pNode?.broadcastPanelOp(op as never)
+          : undefined,
     });
     logger.info('api', `API server listening on ${this.config.apiHost}:${this.config.apiPort}`);
   }
@@ -482,6 +491,12 @@ export class AENodeRunner {
             }
             for (const op of payload.minerOperations ?? []) {
               applyMinerOperation(this.db, op, block.timestamp);
+            }
+            // Panel operations last, after the miner set is settled (panel
+            // completion reads it). Matches the live commit path so a syncing
+            // node reaches the same percentHuman.
+            for (const op of payload.panelOperations ?? []) {
+              applyPanelOperation(this.db, op, block.timestamp);
             }
 
             // Distribute fees per WP economics. Idempotent — matches the
@@ -736,6 +751,37 @@ export class AENodeRunner {
         const removed = removeAppliedMinerOperations(this.db, ops);
         if (removed > 0) {
           logger.info('miner', `${removed} miner operation(s) committed on-chain and drained`);
+        }
+      },
+      pendingPanelOperations: () => drainPanelOperations(this.db),
+      onPanelOperationsApplied: (ops) => {
+        const removed = removeAppliedPanelOperations(this.db, ops);
+        if (removed > 0) {
+          logger.info('panel', `${removed} panel operation(s) committed on-chain and drained`);
+        }
+        // Panel completion (median → percentHuman) happens inside the commit
+        // apply. Tell the affected applicant's wallet to refresh: useAccount
+        // listens on balance:updated filtered by accountId. Notification only —
+        // never let it disturb the chain.
+        try {
+          const notified = new Set<string>();
+          for (const op of ops) {
+            if (op.type !== 'panel_score') continue;
+            const panel = this.db
+              .prepare('SELECT account_id, status, median_score FROM verification_panels WHERE id = ?')
+              .get(op.panelId) as { account_id: string; status: string; median_score: number | null } | undefined;
+            if (!panel || panel.status !== 'complete' || notified.has(panel.account_id)) continue;
+            notified.add(panel.account_id);
+            eventBus.emit('verification:complete', {
+              accountId: panel.account_id,
+              panelId: op.panelId,
+              medianScore: panel.median_score,
+            });
+            eventBus.emit('score:changed', { accountId: panel.account_id, newScore: panel.median_score });
+            eventBus.emit('balance:updated', { accountId: panel.account_id, reason: 'verification:complete' });
+          }
+        } catch (err) {
+          void err;
         }
       },
       onBlockCommitted: (block) => {

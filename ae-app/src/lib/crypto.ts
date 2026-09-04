@@ -50,6 +50,18 @@ export function signMinerRegister(
   return { type: 'miner_register', accountId, timestamp, signature: bytesToHex(sig) };
 }
 
+// A signed panel_create operation (the applicant requests verification of their
+// own account). Canonical bytes must match ae-node canonicalBytesFor exactly.
+export function signPanelCreate(
+  accountId: string,
+  timestamp: number,
+  privateKeyHex: string,
+): { type: 'panel_create'; accountId: string; timestamp: number; signature: string } {
+  const canonical = `panel_create|${accountId}|${timestamp}`;
+  const sig = ml_dsa65.sign(new TextEncoder().encode(canonical), hexToBytes(privateKeyHex));
+  return { type: 'panel_create', accountId, timestamp, signature: bytesToHex(sig) };
+}
+
 export function signPayload(payload: object, timestamp: number, privateKeyHex: string): string {
   const message = JSON.stringify(payload) + timestamp.toString();
   const data = new TextEncoder().encode(message);

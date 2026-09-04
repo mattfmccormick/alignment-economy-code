@@ -32,6 +32,12 @@ vi.mock('../hooks/useAccount', () => ({
 
 vi.mock('../lib/crypto', () => ({
   signPayload: () => 'test-signature',
+  signPanelCreate: (accountId: string, timestamp: number) => ({
+    type: 'panel_create',
+    accountId,
+    timestamp,
+    signature: 'test-op-signature',
+  }),
   signVouchCreate: (voucherId: string, vouchedId: string, stakePercent: number, timestamp: number) => ({
     type: 'vouch_create',
     voucherId,

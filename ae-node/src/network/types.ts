@@ -51,6 +51,7 @@ export type MessageType =
   | 'new_account'
   | 'new_vouch_op'
   | 'new_miner_op'
+  | 'new_panel_op'
   | 'get_blocks'
   | 'blocks'
   | 'ping'

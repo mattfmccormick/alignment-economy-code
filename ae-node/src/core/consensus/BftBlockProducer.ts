@@ -58,6 +58,11 @@ import {
   applyMinerOperation,
   type MinerOperation,
 } from '../../mining/miner-operation.js';
+import {
+  computePanelOperationsHash,
+  applyPanelOperation,
+  type PanelOperation,
+} from '../../verification/panel-operation.js';
 
 /**
  * Sentinel thrown to unwind a successful dry run so runTransaction rolls it
@@ -299,6 +304,10 @@ export interface BftBlockProducerConfig {
   pendingMinerOperations?: () => MinerOperation[];
   /** Fired after a block's miner operations applied locally; must be idempotent. */
   onMinerOperationsApplied?: (ops: MinerOperation[]) => void;
+  /** Pull signed panel operations to include in the next block this node proposes. */
+  pendingPanelOperations?: () => PanelOperation[];
+  /** Fired after a block's panel operations applied locally; must be idempotent. */
+  onPanelOperationsApplied?: (ops: PanelOperation[]) => void;
   /**
    * Fired after a block's transactions have been applied to balances.
    *
@@ -352,6 +361,8 @@ export class BftBlockProducer {
   private readonly onVouchOperationsApplied: ((ops: VouchOperation[]) => void) | undefined;
   private readonly pendingMinerOperations: (() => MinerOperation[]) | undefined;
   private readonly onMinerOperationsApplied: ((ops: MinerOperation[]) => void) | undefined;
+  private readonly pendingPanelOperations: (() => PanelOperation[]) | undefined;
+  private readonly onPanelOperationsApplied: ((ops: PanelOperation[]) => void) | undefined;
   private readonly pendingAccountRegistrations: (() => AccountRegistration[]) | undefined;
   private readonly onAccountRegistrationsApplied:
     | ((regs: AccountRegistration[]) => void)
@@ -373,6 +384,8 @@ export class BftBlockProducer {
     this.onVouchOperationsApplied = config.onVouchOperationsApplied;
     this.pendingMinerOperations = config.pendingMinerOperations;
     this.onMinerOperationsApplied = config.onMinerOperationsApplied;
+    this.pendingPanelOperations = config.pendingPanelOperations;
+    this.onPanelOperationsApplied = config.onPanelOperationsApplied;
     this.onTransactionsApplied = config.onTransactionsApplied;
 
     const latest = getLatestBlock(this.db);
@@ -710,6 +723,12 @@ export class BftBlockProducer {
     const minerOperationsHash =
       minerOperations.length > 0 ? computeMinerOperationsHash(minerOperations) : null;
 
+    const panelOperations: PanelOperation[] = this.pendingPanelOperations
+      ? this.pendingPanelOperations()
+      : [];
+    const panelOperationsHash =
+      panelOperations.length > 0 ? computePanelOperationsHash(panelOperations) : null;
+
     const hash = computeBlockHash(
       height,
       previousHash,
@@ -721,6 +740,7 @@ export class BftBlockProducer {
       accountRegistrationsHash,
       vouchOperationsHash,
       minerOperationsHash,
+      panelOperationsHash,
     );
 
     // Session 53 fix: include parentCertificate + parentValidatorSnapshot
@@ -771,6 +791,7 @@ export class BftBlockProducer {
       ...(validatorChanges.length > 0 ? { validatorChanges } : {}),
       ...(vouchOperations.length > 0 ? { vouchOperations } : {}),
       ...(minerOperations.length > 0 ? { minerOperations } : {}),
+      ...(panelOperations.length > 0 ? { panelOperations } : {}),
       ...(parentCert ? { parentCertificate: parentCert } : {}),
       ...(parentSnapshot ? { parentValidatorSnapshot: parentSnapshot } : {}),
     };
@@ -830,6 +851,7 @@ export class BftBlockProducer {
     const validatorChanges: ValidatorChange[] = payload.validatorChanges ?? [];
     const vouchOperations: VouchOperation[] = payload.vouchOperations ?? [];
     const minerOperations: MinerOperation[] = payload.minerOperations ?? [];
+    const panelOperations: PanelOperation[] = payload.panelOperations ?? [];
 
     // Everything below is one DB transaction, so a throw anywhere rolls the
     // whole block back — the node keeps a consistent view of height N-1 rather
@@ -910,6 +932,14 @@ export class BftBlockProducer {
           applyMinerOperation(this.db, op, block.timestamp);
         }
 
+        // Panel operations LAST among the ops, so the miner set (which panel
+        // completion's target snapshot and score-signer checks read) is settled
+        // first. Idempotent, block timestamp; panel completion writes
+        // percentHuman identically on every node.
+        for (const op of panelOperations) {
+          applyPanelOperation(this.db, op, block.timestamp);
+        }
+
         // Distribute the block's fees per WP economics. Idempotent — every
         // node (proposer + followers replaying via this same path) reaches
         // the same balances.
@@ -968,6 +998,14 @@ export class BftBlockProducer {
     if (minerOperations.length > 0 && this.onMinerOperationsApplied) {
       try {
         this.onMinerOperationsApplied(minerOperations);
+      } catch (err) {
+        void err;
+      }
+    }
+
+    if (panelOperations.length > 0 && this.onPanelOperationsApplied) {
+      try {
+        this.onPanelOperationsApplied(panelOperations);
       } catch (err) {
         void err;
       }

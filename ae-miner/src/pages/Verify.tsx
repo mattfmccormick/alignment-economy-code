@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api, type PanelAssignment, type PanelDetail } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
-import { signPayload } from '../lib/crypto';
+import { signPayload, signPanelScore } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 
 /**
@@ -92,9 +92,21 @@ export default function Verify() {
 
     setSubmitting(true);
     try {
-      const timestamp = Math.floor(Date.now() / 1000);
       if (proposedScore === null) return;
-      const payload = { score: proposedScore };
+      // The score rides the chain now: sign a panel_score operation and send it.
+      // It applies deterministically at block commit on every node, and when
+      // enough scores are in, completion writes the applicant's percentHuman
+      // there — so this returns pending, not a final result. The auth envelope
+      // signs the same { op } payload.
+      const timestamp = Math.floor(Date.now() / 1000);
+      const op = signPanelScore(
+        wallet.accountId,
+        selectedPanelId,
+        proposedScore,
+        timestamp,
+        wallet.privateKey,
+      );
+      const payload = { op };
       const signature = signPayload(payload, timestamp, wallet.privateKey);
       const res = await api.submitPanelScore(selectedPanelId, {
         accountId: wallet.accountId,
@@ -103,7 +115,9 @@ export default function Verify() {
         payload,
       });
       if (res.success) {
-        // Refresh assignments + panel detail
+        // Chain-ordered: the review shows up once the block commits. Poll shortly
+        // after, and refresh now for anything already applied.
+        setTimeout(() => { void loadAssignments(); }, 1500);
         await loadAssignments();
         await openPanel(selectedPanelId);
       } else {

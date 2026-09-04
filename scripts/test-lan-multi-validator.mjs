@@ -265,6 +265,72 @@ async function waitForMinerOnAllNodes(ports, accountId, deadlineMs = 30000) {
   return false;
 }
 
+// Sign and submit a panel_create operation (the last percentHuman writer). The
+// applicant signs a PanelOperation + the auth envelope; the route queues it and
+// the panel is created deterministically at commit on every node. Returns the
+// derived panel id.
+async function submitPanelCreate(apiPort, applicantKs) {
+  const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
+  const opUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'verification', 'panel-operation.js')).href;
+  const { signPayload } = await import(cryptoUrl);
+  const { signPanelCreate } = await import(opUrl);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const op = signPanelCreate({ accountId: applicantKs.accountId, timestamp, accountPrivateKey: applicantKs.account.privateKey });
+  const payload = { op };
+  const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/verification/panels`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: applicantKs.accountId,
+      timestamp,
+      signature: signPayload(payload, timestamp, applicantKs.account.privateKey),
+      payload,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  const body = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, panelId: body?.data?.panelId ?? null, body };
+}
+
+// Sign and submit a panel_score operation as a registered miner. The score
+// applies at commit, and when the target is met, completion writes the
+// applicant's percentHuman on every node.
+async function submitPanelScore(apiPort, minerKs, panelId, score) {
+  const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
+  const opUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'verification', 'panel-operation.js')).href;
+  const { signPayload } = await import(cryptoUrl);
+  const { signPanelScore } = await import(opUrl);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const op = signPanelScore({ accountId: minerKs.accountId, panelId, score, timestamp, accountPrivateKey: minerKs.account.privateKey });
+  const payload = { op };
+  const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/verification/panels/${panelId}/score`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accountId: minerKs.accountId,
+      timestamp,
+      signature: signPayload(payload, timestamp, minerKs.account.privateKey),
+      payload,
+    }),
+    signal: AbortSignal.timeout(3000),
+  });
+  return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+}
+
+async function waitForPercentHumanOnAllNodes(ports, accountId, expected, deadlineMs = 30000) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const vals = [];
+    for (const port of ports) {
+      const a = await getAccount(port, accountId);
+      vals.push(a ? Number(a.percentHuman) : -1);
+    }
+    if (vals.every((v) => v === expected)) return vals;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return null;
+}
+
 async function waitForLockedIncrease(ports, accountId, minLocked, deadlineMs = 30000) {
   const deadline = Date.now() + deadlineMs;
   while (Date.now() < deadline) {
@@ -498,6 +564,36 @@ async function main() {
   }
   log('miner registration applied on all nodes');
   await waitForHeight(apiPorts, Math.min(...heights) + 6);
+
+  // 4e. Verification panel on-chain (the last percentHuman writer). Applicant is
+  // validator 2; the miner registered above (validator 1) scores it. Target =
+  // min(panel_size=3, active miners=1) = 1, so one score completes the panel.
+  // This proves percentHuman converges across nodes via the chain — the whole
+  // point of chain-ordering panels (closes #4's determinism dependency).
+  log('submitting verification panel: applicant validator 2');
+  const panelRes = await submitPanelCreate(apiPorts[0], keystores[2]);
+  if (!panelRes.ok || !panelRes.panelId) {
+    teardown('panel create failed');
+    err(`panel create POST failed: HTTP ${panelRes.status} ${JSON.stringify(panelRes.body)}`);
+    process.exit(9);
+  }
+  const panelId = panelRes.panelId;
+  await waitForHeight(apiPorts, Math.min(...heights) + 8);
+  log(`panel ${panelId.slice(0, 12)}… created; miner validator 1 scoring 77`);
+  const scoreRes = await submitPanelScore(apiPorts[0], keystores[1], panelId, 77);
+  if (!scoreRes.ok) {
+    teardown('panel score failed');
+    err(`panel score POST failed: HTTP ${scoreRes.status} ${JSON.stringify(scoreRes.body)}`);
+    process.exit(9);
+  }
+  const ph = await waitForPercentHumanOnAllNodes(apiPorts, keystores[2].accountId, 77);
+  if (!ph) {
+    teardown('percentHuman did not converge');
+    err('panel completion did not set percentHuman to 77 on all nodes within the deadline');
+    process.exit(9);
+  }
+  log(`panel complete; percentHuman converged to 77 on all nodes: [${ph.join(', ')}]`);
+  await waitForHeight(apiPorts, Math.min(...heights) + 10);
 
   // 5. Compare latest block hashes via /network/blocks?limit=1.
   // Heights matching is necessary but not sufficient — same chain means

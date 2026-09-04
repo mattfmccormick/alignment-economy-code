@@ -44,6 +44,9 @@ const KNOWN_ORPHANS: Record<string, string> = {
   signMinerRegister: 'client-side (both apps) + test signing of a miner operation',
   signMinerDeregister: 'client-side + test signing of a miner operation',
   pendingMinerOperationCount: 'test/observability helper for the miner-op queue',
+  signPanelCreate: 'client-side (ae-app) + test signing of a panel operation',
+  signPanelScore: 'client-side (ae-miner) + test signing of a panel operation',
+  pendingPanelOperationCount: 'test/observability helper for the panel-op queue',
   generateVRFProof: 'used through the IVrfProvider interface, not by name',
   proposalId: 'helper used by consensus tests and callers outside src',
   resetRateLimits: 'test-only reset hook for a module-level map',
@@ -63,6 +66,8 @@ const KNOWN_ORPHANS: Record<string, string> = {
   initializeMiningSchema: 'superseded by db/schema.ts in production; tests still use it',
   initializeVerificationSchema: 'superseded by db/schema.ts in production; tests still use it',
   validateBlock: 'superseded by network/block-validator.ts in production; 2 test refs',
+  createPanel: 'legacy node-local panel path, superseded by verification/panel-operation.ts on-chain; tests still cover its semantics',
+  submitPanelScore: 'legacy node-local scoring, superseded by verification/panel-operation.ts on-chain; tests still cover deadline/idempotency/fractional-score semantics',
   validateChain: 'superseded by network/block-validator.ts in production; 8 test refs',
 
   // â”€â”€ UNWIRED: real gaps, documented in CLAUDE.md â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

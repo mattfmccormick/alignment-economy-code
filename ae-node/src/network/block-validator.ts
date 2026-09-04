@@ -68,6 +68,11 @@ import {
   type MinerOperation,
 } from '../mining/miner-operation.js';
 import {
+  computePanelOperationsHash,
+  verifyPanelOperation,
+  type PanelOperation,
+} from '../verification/panel-operation.js';
+import {
   computeAccountRegistrationsHash,
   type AccountRegistration,
 } from '../core/account-registration.js';
@@ -194,6 +199,7 @@ export interface IncomingBlockPayload {
   validatorChanges?: ValidatorChange[];
   vouchOperations?: VouchOperation[];
   minerOperations?: MinerOperation[];
+  panelOperations?: PanelOperation[];
 }
 
 export interface ValidationResult {
@@ -378,6 +384,10 @@ export function validateIncomingBlock(
     payload.minerOperations && payload.minerOperations.length > 0
       ? computeMinerOperationsHash(payload.minerOperations)
       : null;
+  const panelOperationsHash =
+    payload.panelOperations && payload.panelOperations.length > 0
+      ? computePanelOperationsHash(payload.panelOperations)
+      : null;
   const expectedHash = computeBlockHash(
     payload.number,
     payload.previousHash,
@@ -389,6 +399,7 @@ export function validateIncomingBlock(
     accountRegistrationsHash,
     vouchOperationsHash,
     minerOperationsHash,
+    panelOperationsHash,
   );
   if (payload.hash !== expectedHash) {
     return {
@@ -632,6 +643,34 @@ export function validateIncomingBlock(
     }
   }
 
+  if (payload.panelOperations && payload.panelOperations.length > 0) {
+    if (!Array.isArray(payload.panelOperations)) {
+      return { valid: false, error: 'panelOperations must be an array' };
+    }
+    const aStore = accountStore(db);
+    for (let i = 0; i < payload.panelOperations.length; i++) {
+      const op = payload.panelOperations[i];
+      // Both op types are signed by op.accountId (applicant for create, the
+      // scoring miner's account for score), so the same key resolves the signer.
+      if (typeof op?.accountId !== 'string') {
+        return { valid: false, error: `panelOperations[${i}] missing accountId` };
+      }
+      const account = aStore.findById(op.accountId);
+      if (!account) {
+        return {
+          valid: false,
+          error: `panelOperations[${i}].accountId ${op.accountId} not found locally`,
+        };
+      }
+      if (!verifyPanelOperation(op, account.publicKey)) {
+        return {
+          valid: false,
+          error: `panelOperations[${i}] signature does not verify against ${op.accountId}`,
+        };
+      }
+    }
+  }
+
   return { valid: true };
 }
 
@@ -672,6 +711,10 @@ export function payloadToBlock(payload: IncomingBlockPayload): Block {
     minerOperations:
       payload.minerOperations && payload.minerOperations.length > 0
         ? payload.minerOperations
+        : null,
+    panelOperations:
+      payload.panelOperations && payload.panelOperations.length > 0
+        ? payload.panelOperations
         : null,
   };
 }

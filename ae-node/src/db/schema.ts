@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -158,7 +158,13 @@ const TABLES = `
     -- Signed miner operations carried by THIS block (schema v18). JSON-encoded
     -- MinerOperation[]. NULL when none rode the block. Folded into the block hash
     -- like the lanes above.
-    miner_operations TEXT
+    miner_operations TEXT,
+    -- Signed verification-panel operations carried by THIS block (schema v19).
+    -- JSON-encoded PanelOperation[] (panel_create + panel_score). NULL when none
+    -- rode the block. Folded into the block hash like the lanes above. Panel
+    -- completion (median → percentHuman) is the last percentHuman writer, so
+    -- this lane is what makes percentHuman a pure function of the chain.
+    panel_operations TEXT
   );
 
   CREATE TABLE IF NOT EXISTS rebase_events (
@@ -212,6 +218,13 @@ const TABLES = `
     created_at INTEGER NOT NULL,
     completed_at INTEGER,
     median_score INTEGER,
+    -- Completion threshold snapshotted at creation from chain state (schema
+    -- v19): min(panel_size, active miner count). Fixed per panel so every node
+    -- completes it at the same score. NULL on pre-v19 rows (node-local flow).
+    target_reviews INTEGER,
+    -- Block-timestamp deadline (schema v19), created_at + verification_deadline
+    -- _hours. Written now for the deadline-sweep completion path; not yet read.
+    deadline INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id)
   );
 
@@ -565,6 +578,19 @@ const TABLES = `
     op_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+
+  -- Signed verification-panel operations (panel_create / panel_score) awaiting
+  -- inclusion in a block this node proposes (schema v19). Same shape and
+  -- lifecycle as pending_miner_operations. Panel completion writes percentHuman
+  -- (the median of the scores), the last percentHuman writer that ran
+  -- node-locally, so it must ride the chain or the ledgers fork. See
+  -- verification/panel-operation.ts.
+  CREATE TABLE IF NOT EXISTS pending_panel_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL,
+    op_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `;
 
 const INDEXES = `
@@ -603,6 +629,7 @@ const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_pending_changes_created ON pending_validator_changes(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_vouch_ops_created ON pending_vouch_operations(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_miner_ops_created ON pending_miner_operations(created_at);
+  CREATE INDEX IF NOT EXISTS idx_pending_panel_ops_created ON pending_panel_operations(created_at);
   CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created ON pending_account_registrations(created_at);
 `;
 
@@ -849,6 +876,35 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       );
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
+    `);
+  }
+  if (from < 19) {
+    // Panel operations lane (the last node-local percentHuman writer): a pending
+    // queue + a per-block column, plus two columns on verification_panels
+    // (target_reviews snapshot + deadline). Additive; existing blocks and panel
+    // rows get NULL, which is correct — they predate the chain-ordered flow.
+    const blockCols = db.prepare('PRAGMA table_info(blocks)').all() as Array<{ name: string }>;
+    if (!blockCols.some((c) => c.name === 'panel_operations')) {
+      db.exec('ALTER TABLE blocks ADD COLUMN panel_operations TEXT');
+    }
+    const panelCols = db
+      .prepare('PRAGMA table_info(verification_panels)')
+      .all() as Array<{ name: string }>;
+    if (!panelCols.some((c) => c.name === 'target_reviews')) {
+      db.exec('ALTER TABLE verification_panels ADD COLUMN target_reviews INTEGER');
+    }
+    if (!panelCols.some((c) => c.name === 'deadline')) {
+      db.exec('ALTER TABLE verification_panels ADD COLUMN deadline INTEGER');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_panel_operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT NOT NULL,
+        op_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_panel_ops_created
+        ON pending_panel_operations(created_at);
     `);
   }
   if (from < 18) {

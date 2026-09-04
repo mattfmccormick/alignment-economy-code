@@ -6,6 +6,7 @@ import type { ValidatorChange } from './consensus/validator-change.js';
 import type { AccountRegistration } from './account-registration.js';
 import type { VouchOperation } from '../verification/vouch-operation.js';
 import type { MinerOperation } from '../mining/miner-operation.js';
+import type { PanelOperation } from '../verification/panel-operation.js';
 
 export type AccountType = 'individual' | 'company' | 'government' | 'ai_bot';
 export type PointType = 'active' | 'supportive' | 'ambient' | 'earned';
@@ -190,6 +191,14 @@ export interface Block {
    * v18). Same lifecycle as vouchOperations. `null` when none.
    */
   minerOperations: MinerOperation[] | null;
+
+  /**
+   * Signed verification-panel operations (panel_create / panel_score) carried by
+   * this block (schema v19). Same lifecycle as vouchOperations. Panel completion
+   * writes percentHuman (the median of the scores), so this lane makes
+   * percentHuman a pure function of the chain. `null` when none.
+   */
+  panelOperations: PanelOperation[] | null;
 }
 
 export interface RebaseEvent {

@@ -3,7 +3,7 @@ import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
 import type { PanelSummary, VouchData } from '../lib/types';
-import { signPayload, signVouchCreate } from '../lib/crypto';
+import { signPayload, signVouchCreate, signPanelCreate } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { truncateId, displayPoints } from '../lib/formatting';
 import { hashFileSHA256 } from '../lib/hash';
@@ -337,8 +337,13 @@ export function Verify() {
     setPanelLoading(true);
     setPanelError(null);
     try {
+      // The panel rides the chain now: sign a panel_create operation and send
+      // it. It is created deterministically at block commit on every node (panel
+      // completion writes percentHuman, which must be consensus state). The auth
+      // envelope signs the same { op } payload.
       const timestamp = Math.floor(Date.now() / 1000);
-      const payload = {};
+      const op = signPanelCreate(wallet.accountId, timestamp, wallet.privateKey);
+      const payload = { op };
       const signature = signPayload(payload, timestamp, wallet.privateKey);
       const res = await api.requestPanel({
         accountId: wallet.accountId,
@@ -347,9 +352,9 @@ export function Verify() {
         payload,
       });
       if (res.success) {
-        if (res.data.assignedMinerCount === 0) {
-          setPanelError('No miners are available to review your panel right now. Try again later.');
-        }
+        // Chain-ordered: the panel appears once the block commits. Poll a moment
+        // later so the new pending panel shows up.
+        setTimeout(() => { void loadPanels(); }, 1500);
         await loadPanels();
       } else {
         setPanelError(res.error?.message || 'Failed to request panel');

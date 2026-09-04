@@ -235,9 +235,11 @@ export const api = {
     request<SuccessResponse>('PUT', `/miners/vouch-requests/${id}`, envelope),
 
   // Verification panels (the real proof-of-human flow)
-  // Participant requests a panel for their own account (signed).
+  // Participant requests a panel for their own account (signed panel_create op).
+  // Chain-ordered: returns { status: 'pending', panelId } and the panel appears
+  // once the block commits.
   requestPanel: (signedBody: unknown) =>
-    request<{ panel: PanelSummary; assignedMinerCount: number }>('POST', '/verification/panels', signedBody),
+    request<{ status: string; panelId: string }>('POST', '/verification/panels', signedBody),
 
   // Submit verification evidence on the participant's own account (signed).
   submitVerificationEvidence: (signedBody: unknown) =>
