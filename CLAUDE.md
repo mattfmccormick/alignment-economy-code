@@ -81,11 +81,14 @@ algorithm. The failures were in the seams — between packages, between the live
 path and the sync path, between what a screen said and what the code did, and
 in the test harness meant to catch all of it.
 
-**Current state:** chain live across machines, 806 ae-node tests green (+ 92 app
+**Current state:** chain live across machines, 815 ae-node tests green (+ 92 app
 tests), blocks paced at 10s. Snapshot sync ships. The startup deadlock is
-effectively gone (13/13 LAN runs). Vouching is chain-ordered end to end (node +
-both apps) and gossiped for fast inclusion. Joining no longer means replaying
-from genesis.
+effectively gone (13/13 LAN runs). Vouching, miner registration, AND
+verification panels are all chain-ordered end to end (node + both apps) and
+gossiped for fast inclusion. With panels done, `percentHuman` is now a pure
+function of the chain (its three writers - vouch withdraw, panel completion, and
+unwired decay - are all chain-driven or dormant), which unblocks the #4 value
+fix. Joining no longer means replaying from genesis.
 
 **Next up:** more validators on the live network. Note the quorum math, which an
 earlier version of this file got wrong: quorum is `floor(2n/3)+1`, so 3
@@ -1470,10 +1473,37 @@ not a leap of faith.
    The 3-validator LAN test now converges after a transfer, a vouch, AND a miner
    registration. See mining/miner-operation.ts.
 
-   **Remaining in the cluster:** verification panels (the main percentHuman
-   writer - now possible to assign jurors deterministically since miners are
-   chain-state), tags, then re-derive transaction value to close #4.
-   This is one
+   **Progress: verification panels are now chain-ordered too (this session).**
+   Panel completion (median of the miner scores -> percentHuman) was the LAST
+   node-local writer of percentHuman. A panel_create op (signed by the applicant)
+   and panel_score ops (signed by each scoring miner) now ride a block as signed
+   operations - deterministic panel id / review id, block timestamp, folded into
+   the block hash, applied at commit on every node. Completion is deterministic:
+   at creation each panel snapshots a fixed `target_reviews` = min(panel_size,
+   active miner count) from chain state (the miner set is chain-state now), and
+   the panel completes at the block where the applied score count first meets that
+   target, writing the same median -> percentHuman on every node. See
+   verification/panel-operation.ts (schema v19). Proven by
+   tests/panel-operation-determinism.test.ts (two nodes reach identical
+   percentHuman) and the 3-validator LAN test, which now creates a panel, has the
+   registered miner score it, and requires percentHuman to converge to the same
+   value on all three nodes. Design notes: FIFO juror assignment and
+   conflict-of-interest are no longer a consensus step - any active miner may
+   score any open panel (except their own); the miner "assignments" endpoint now
+   returns open panels. Deterministic FIFO assignment + a deadline-driven
+   completion sweep (so a short-staffed panel finishes with whoever showed up -
+   the `deadline` column is written now for it) are the two documented follow-ups.
+   The legacy node-local `createPanel`/`submitPanelScore` in verification/panel.ts
+   are kept ONLY for their semantic tests and are marked do-not-wire.
+
+   **With panels done, percentHuman is now a pure function of the chain** (the
+   three writers - vouch withdraw, panel completion, and unwired decay - are all
+   chain-driven or dormant). That was the sole blocker for the #4 value fix: the
+   next step is to re-derive transaction value locally in replayTransaction /
+   acceptPendingTransaction and reject a wire mismatch.
+
+   **Remaining in the cluster:** tags (#16), then re-derive transaction value to
+   close #4 (now unblocked). This is one
    architectural change, not several. `replayTransaction` /
    `acceptPendingTransaction` take `fee` / `netAmount` off the wire and apply
    them verbatim; only `processTransaction` on the origin node re-derives them
