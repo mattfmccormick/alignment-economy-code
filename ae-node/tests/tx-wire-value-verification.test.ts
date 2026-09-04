@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { initializeSchema } from '../src/db/schema.js';
 import { seedParams } from '../src/config/params.js';
-import { createAccount, getAccount, updateBalance } from '../src/core/account.js';
+import { createAccount, getAccount, updateBalance, updatePercentHuman } from '../src/core/account.js';
 import { generateKeyPair, deriveAccountId, signPayload } from '../src/core/crypto.js';
 import {
   replayTransaction,
@@ -184,6 +184,52 @@ describe('audit #4: transaction value is re-derived, not trusted off the wire', 
     assert.doesNotThrow(() => replayTransaction(db, tx, 1));
     // Applied the value derived from local chain state, not the stale wire value.
     assert.equal(getAccount(db, recipient.id)!.earnedBalance, derivedNow.netAmount);
+    db.close();
+  });
+
+  it('reconciles the stored row to the applied value when percentHuman changed between filing and commit', () => {
+    // Commit-time flow: file at pH 50, a vouch/panel op raises the sender to
+    // pH 100 before the block commits, then the tx applies. The persisted
+    // transactions row must reflect the value actually credited, not the stale
+    // filing-time value — or history disagrees with the ledger and audit log
+    // (and with a fresh-syncing node, which stores the commit-time value).
+    const sender = party();
+    const recipient = party();
+    const db = node();
+    createAccount(db, 'individual', 1, 50, sender.pub);
+    createAccount(db, 'individual', 1, 100, recipient.pub);
+    updateBalance(db, sender.id, 'active_balance', 500_00000000n);
+
+    const atFiling = deriveSpendValue(AMOUNT, 'active', 'individual', 50);
+    const atCommit = deriveSpendValue(AMOUNT, 'active', 'individual', 100);
+    const tx = wireTx(sender, recipient, AMOUNT, atFiling.fee, atFiling.netAmount);
+
+    acceptPendingTransaction(db, tx); // filed at pH 50
+    let row = db.prepare('SELECT fee, net_amount FROM transactions WHERE id = ?').get(tx.id) as {
+      fee: string;
+      net_amount: string;
+    };
+    assert.equal(BigInt(row.net_amount), atFiling.netAmount); // stored at filing value
+
+    updatePercentHuman(db, sender.id, 100); // vouch/panel op lands before commit
+    replayTransaction(db, tx, 1); // applies at pH 100
+
+    // Recipient credited the commit-time value...
+    assert.equal(getAccount(db, recipient.id)!.earnedBalance, atCommit.netAmount);
+    // ...the audit log agrees...
+    const logRow = db
+      .prepare(
+        "SELECT amount FROM transaction_log WHERE account_id = ? AND change_type = 'tx_receive'",
+      )
+      .get(recipient.id) as { amount: string };
+    assert.equal(BigInt(logRow.amount), atCommit.netAmount);
+    // ...and the persisted transactions row was reconciled to match.
+    row = db.prepare('SELECT fee, net_amount FROM transactions WHERE id = ?').get(tx.id) as {
+      fee: string;
+      net_amount: string;
+    };
+    assert.equal(BigInt(row.net_amount), atCommit.netAmount);
+    assert.equal(BigInt(row.fee), atCommit.fee);
     db.close();
   });
 

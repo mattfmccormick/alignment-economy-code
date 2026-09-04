@@ -450,6 +450,17 @@ export function replayTransaction(
   });
   if (alreadyKnown) {
     txStore.markApplied(input.id);
+    // Reconcile the persisted row to the value actually applied. The row was
+    // written at receipt time (accept/defer) with fee/net derived from the
+    // sender's percentHuman THEN; we just applied the value re-derived against
+    // the sender's percentHuman as of the prior block. If a vouch/panel op
+    // changed percentHuman in between they differ, and a fresh-syncing node
+    // stores the commit-time value directly — so without this the history row
+    // would disagree with the ledger, the audit log, and other nodes (audit #4
+    // review follow-up). Balances/fee pool/log already used derived.*.
+    if (input.fee !== derived.fee || input.netAmount !== derived.netAmount) {
+      txStore.updateAppliedValues(input.id, derived.fee, derived.netAmount);
+    }
     if (blockNumber !== null) txStore.linkTransactionsToBlock(blockNumber, [input.id]);
   }
 }

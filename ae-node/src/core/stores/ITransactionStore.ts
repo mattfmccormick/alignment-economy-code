@@ -86,6 +86,20 @@ export interface ITransactionStore {
   markApplied(id: string): void;
 
   /**
+   * Overwrite a row's stored fee / net_amount with the values actually applied.
+   *
+   * Under commit-time execution the row is written at receipt (accept/defer)
+   * with fee/net derived from the sender's percentHuman AT THAT TIME, but the
+   * balance effect is applied later at commit, re-derived against the sender's
+   * percentHuman as of the prior block (audit #4). Those can legitimately
+   * differ if a vouch/panel op changed percentHuman in between, and a fresh
+   * syncing node inserts the commit-time value directly — so the persisted row
+   * must be reconciled to the applied value or history diverges from the ledger
+   * (and across nodes). Called on the already-known replay path.
+   */
+  updateAppliedValues(id: string, fee: bigint, netAmount: bigint): void;
+
+  /**
    * Sum of still-unapplied outgoing amounts for a sender in one point type,
    * so a pending spend cannot be authorised twice against the same balance.
    */

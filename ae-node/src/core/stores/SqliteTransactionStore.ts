@@ -79,6 +79,12 @@ export class SqliteTransactionStore implements ITransactionStore {
     this.db.prepare('UPDATE transactions SET applied = 1 WHERE id = ?').run(id);
   }
 
+  updateAppliedValues(id: string, fee: bigint, netAmount: bigint): void {
+    this.db
+      .prepare('UPDATE transactions SET fee = ?, net_amount = ? WHERE id = ?')
+      .run(fee.toString(), netAmount.toString(), id);
+  }
+
   /**
    * Total still-unapplied outgoing amount for a sender in one point type.
    *
