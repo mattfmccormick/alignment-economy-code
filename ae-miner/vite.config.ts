@@ -16,7 +16,7 @@ export default defineConfig({
       includeAssets: ['icon.svg', 'favicon.svg'],
       manifest: {
         name: 'Alignment Economy Miner',
-        short_name: 'AE Miner',
+        short_name: 'Alignment Miner',
         description: 'Verifier dashboard for the Alignment Economy. Review evidence, vote on cases, earn fees.',
         id: '/?source=pwa',
         start_url: '/?source=pwa',

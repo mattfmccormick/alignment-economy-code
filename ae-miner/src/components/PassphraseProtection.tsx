@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { isMinerWalletEncrypted, protectMinerWallet, removeMinerWalletPassphrase } from '../lib/keys';
 
-// Dashboard card: turn passphrase-encryption of the miner wallet at rest on/off.
+// Settings card: turn passphrase-encryption of the miner wallet at rest on/off.
 export function PassphraseProtection() {
   const [encrypted, setEncrypted] = useState(isMinerWalletEncrypted());
   const [mode, setMode] = useState<'idle' | 'add' | 'remove'>('idle');
@@ -32,7 +32,7 @@ export function PassphraseProtection() {
   return (
     <div className="bg-panel border border-border rounded-lg p-5">
       <div className="flex items-center justify-between mb-1">
-        <h3 className="text-sm font-semibold text-white">Passphrase Protection</h3>
+        <h3 className="text-sm font-semibold text-white">Lock this app with a password</h3>
         <span className={`text-[10px] px-2 py-0.5 rounded-full ${encrypted ? 'bg-teal/15 text-teal' : 'bg-bg text-muted'}`}>
           {encrypted ? 'On' : 'Off'}
         </span>
@@ -42,8 +42,8 @@ export function PassphraseProtection() {
         <>
           <p className="text-xs text-muted mb-3">
             {encrypted
-              ? 'Your node keys are encrypted on this device. You unlock with your passphrase each time you open the app.'
-              : 'Encrypt your node keys on this device with a passphrase. Keep your recovery phrase as backup — a lost passphrase can only be recovered from it.'}
+              ? 'On. Your keys are scrambled on this computer and you type the password each time you open the app.'
+              : 'Optional. Without it, anyone who can open this computer can use your miner. With it, they need the password too. It only protects this computer. Your 12 words are still the real backup.'}
           </p>
           <button
             onClick={() => { setMode(encrypted ? 'remove' : 'add'); setErr(null); }}
@@ -51,7 +51,7 @@ export function PassphraseProtection() {
               encrypted ? 'bg-bg text-muted hover:text-white' : 'bg-teal/15 text-teal hover:bg-teal/25'
             }`}
           >
-            {encrypted ? 'Remove passphrase' : 'Add a passphrase'}
+            {encrypted ? 'Remove password' : 'Add a password'}
           </button>
         </>
       )}

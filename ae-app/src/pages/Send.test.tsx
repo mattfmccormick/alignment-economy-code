@@ -49,7 +49,7 @@ vi.mock('../hooks/useAccount', () => ({
 // A spy rather than a bare arrow so tests can inspect the payload that was
 // actually signed — see the canonical-shape test below.
 const mockSignPayload = vi.hoisted(() =>
-  vi.fn((_payload: object, _timestamp: number, _privateKey: string) => 'test-signature'),
+  vi.fn<(payload: object, timestamp: number, privateKey: string) => string>(() => 'test-signature'),
 );
 vi.mock('../lib/crypto', () => ({
   signPayload: mockSignPayload,

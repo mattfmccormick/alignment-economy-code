@@ -142,7 +142,7 @@ export function Wallet() {
           <h3 className="text-sm font-medium text-gray-300">Daily Allocations</h3>
           <span className={`text-xs ${secsToExpiry < 7200 ? 'text-amber-400' : 'text-gray-500'}`}>
             {secsToExpiry < 7200
-              ? `Resets in ${countdown(secsToExpiry)} — spend or lose`
+              ? `Resets in ${countdown(secsToExpiry)}. Spend or lose.`
               : `Resets in ${countdown(secsToExpiry)}`}
           </span>
         </div>
@@ -237,7 +237,7 @@ function VerificationStatus({ percentHuman }: { percentHuman: number }) {
                 nightly. */}
             <p className="text-xs text-gray-400 mt-0.5">
               You get points every day, but they transfer as 0 until a miner
-              verifies you — and unspent points reset each night either way.
+              verifies you. Unspent points reset each night either way.
             </p>
           </div>
           <span className="text-red-300 text-xl">→</span>

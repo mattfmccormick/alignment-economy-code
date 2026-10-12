@@ -593,7 +593,7 @@ export function Verify() {
               <div key={i} className="bg-navy rounded-xl p-3 border border-navy-light flex items-center justify-between">
                 <p className="text-sm text-white font-mono">{truncateId(v.voucherId)}</p>
                 <div className="text-right">
-                  <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '—'}%</p>
+                  <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '--'}%</p>
                   <p className="text-[11px] text-gray-500 tabular-nums">{displayPoints(String(v.stakeAmount))} pts</p>
                 </div>
               </div>
@@ -612,7 +612,7 @@ export function Verify() {
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-white font-mono">{truncateId(v.vouchedId)}</p>
                   <div className="text-right">
-                    <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '—'}%</p>
+                    <p className="text-xs text-gray-400 tabular-nums">{v.stakedPercentage ?? '--'}%</p>
                     <p className="text-[11px] text-gray-500 tabular-nums">{displayPoints(String(v.stakeAmount))} pts</p>
                   </div>
                 </div>

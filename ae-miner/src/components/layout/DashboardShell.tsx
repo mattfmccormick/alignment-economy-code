@@ -62,8 +62,7 @@ export default function DashboardShell() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
               </svg>
             </button>
-            <h1 className="text-sm font-semibold text-white whitespace-nowrap">Miner Dashboard</h1>
-            <span className="text-xs text-muted hidden sm:inline">Alignment Economy Protocol v0.9</span>
+            <h1 className="text-sm font-semibold text-white whitespace-nowrap">Alignment Economy Miner</h1>
           </div>
           <div className="flex items-center gap-4">
             {/* Heartbeat indicator */}
@@ -85,7 +84,7 @@ export default function DashboardShell() {
               <span className={`text-xs font-medium ${
                 nodeHealthy === true ? 'text-teal' : nodeHealthy === false ? 'text-red' : 'text-muted'
               }`}>
-                {nodeHealthy === true ? 'Node Active' : nodeHealthy === false ? 'Node Offline' : 'Checking...'}
+                {nodeHealthy === true ? 'Node running' : nodeHealthy === false ? 'Node offline' : 'Checking...'}
               </span>
             </div>
 

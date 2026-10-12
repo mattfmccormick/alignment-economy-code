@@ -5,7 +5,7 @@ import { saveWalletFromMnemonic, saveFounderWallet, saveJoinerWallet, saveJoined
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic, deriveAccountId } from '../lib/crypto';
 import { truncateId } from '../lib/formatting';
 import { encodeInviteLink, decodeInviteLink } from '../lib/invite';
-import { platformClient, savePlatformSession, sessionFromSdk } from '../lib/platform';
+import { platformClient, savePlatformSession, sessionFromSdk, PLATFORM_ENABLED } from '../lib/platform';
 import { PlatformError } from '@alignmenteconomy/sdk';
 
 type Flow =
@@ -91,7 +91,6 @@ export function Onboarding() {
   const [wallet, setWallet] = useState<NewWalletState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [confirmInputs, setConfirmInputs] = useState<{ [k: number]: string }>({});
   const [confirmError, setConfirmError] = useState(false);
 
@@ -137,7 +136,6 @@ export function Onboarding() {
   // Token + new password drive the forgot-password flow when it's reached.
   const [platformEmail, setPlatformEmail] = useState('');
   const [platformPassword, setPlatformPassword] = useState('');
-  const [ssoNote, setSsoNote] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [twoFaPhone, setTwoFaPhone] = useState('');
   const [twoFaNote, setTwoFaNote] = useState<string | null>(null);
@@ -210,7 +208,7 @@ export function Onboarding() {
         'Cannot reach the account service. The desktop app ships it and starts it ' +
         'automatically, so this usually means the app was started from source ' +
         'without it, or the service failed to launch. ' +
-        'Use "I\'ll hold my own keys instead" above — it needs nothing but your ' +
+        'Use "I\'ll hold my own keys instead" above. It needs nothing but your ' +
         'node, and gives you a 12-word recovery phrase to write down.'
       );
     }
@@ -613,14 +611,6 @@ export function Onboarding() {
     }
   }
 
-  function copyMnemonic() {
-    if (wallet) {
-      navigator.clipboard.writeText(wallet.mnemonic);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  }
-
   function handleConfirmKey() {
     if (!wallet) return;
     const words = wallet.mnemonic.split(' ');
@@ -650,19 +640,17 @@ export function Onboarding() {
     await handleLoginWithId();
   }
 
-  // Login with an account ID and recovery phrase together.
-  const [loginAccountId, setLoginAccountId] = useState('');
   // Which track the user is signing in under. Defaults to 'platform'
   // (the new, easier path) because that's what most people will use.
   // Tabs at the top of the screen let them switch to self-custody.
-  const [loginTrack, setLoginTrack] = useState<'platform' | 'self-custody'>('platform');
+  const [loginTrack, setLoginTrack] = useState<'platform' | 'self-custody'>(PLATFORM_ENABLED ? 'platform' : 'self-custody');
   /**
    * Restore a self-custody wallet.
    *
    * The recovery phrase alone is enough. accountId is
    * sha256(publicKey).slice(0, 20), and the phrase determines the keypair, so
    * the id is a pure offline derivation — no server lookup, no by-public-key
-   * endpoint needed.
+   * endpoint needed. The sign-in screen therefore asks for the phrase only.
    *
    * This used to require the phrase AND the 40-character account id, because
    * the id was only ever computed server-side and read back off the
@@ -670,13 +658,9 @@ export function Onboarding() {
    * "recovery phrase" a half-measure: twelve words the app told you to write
    * down, plus a hex string it never told you to keep. Anyone who did what the
    * app said and saved only the phrase was locked out permanently.
-   *
-   * The Account ID field is still accepted when filled in, purely as a
-   * cross-check for people who have it.
    */
   async function handleLoginWithId() {
     const phrase = loginMnemonic.trim();
-    const typedId = loginAccountId.trim();
     if (!phrase) {
       setError('Enter your 12-word recovery phrase.');
       return;
@@ -690,14 +674,6 @@ export function Onboarding() {
     try {
       const { publicKey } = mnemonicToKeypair(phrase);
       const id = deriveAccountId(publicKey);
-
-      if (typedId && typedId.toLowerCase() !== id.toLowerCase()) {
-        setError(
-          `That recovery phrase belongs to account ${id.slice(0, 12)}…, not the ID you entered. ` +
-            'Leave the Account ID blank to use the phrase on its own.',
-        );
-        return;
-      }
 
       const res = await api.getAccount(id);
       if (res.success && res.data) {
@@ -747,11 +723,19 @@ export function Onboarding() {
         <p className="text-teal font-medium mb-10 text-base">Make Money Human!</p>
 
         <button
-          onClick={() => { setPlatformError(null); setFlow('platform-signup'); }}
+          onClick={() => {
+            if (PLATFORM_ENABLED) {
+              setPlatformError(null);
+              setFlow('platform-signup');
+            } else {
+              persistNetworkMode('solo');
+              createAccount();
+            }
+          }}
           disabled={loading}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
         >
-          Create Account
+          {loading ? 'Creating...' : 'Create Account'}
         </button>
 
         <button
@@ -877,7 +861,7 @@ export function Onboarding() {
               <span className="text-[10px] text-teal bg-teal/15 px-2 py-0.5 rounded-full">Recommended for now</span>
             </div>
             <p className="text-xs text-gray-400 leading-relaxed">
-              Run by yourself. Your wallet is its own one-person economy. Good for trying the AE without inviting anyone.
+              Run by yourself. Your wallet is its own one-person economy. Good for trying the Alignment Economy without inviting anyone.
             </p>
           </button>
 
@@ -1159,7 +1143,7 @@ export function Onboarding() {
                 setJoinSpecFilename('(from invite link)');
                 setJoinError(null);
               } else if (v.trim().length > 8) {
-                setInviteParseError("That doesn't look like a valid AE invite link.");
+                setInviteParseError("That doesn't look like a valid Alignment Economy invite link.");
               }
             }}
             placeholder="https://invite.alignmenteconomy.org/v1#..."
@@ -1451,39 +1435,6 @@ export function Onboarding() {
           {platformBusy ? 'Creating account...' : 'Create platform account'}
         </button>
 
-        {/* Social sign-in: compact placeholders at the bottom. Real OAuth
-            (Google, Apple) is a platform-server follow-up; clicking shows a
-            "coming soon" note for now. */}
-        <div className="w-full max-w-sm flex items-center gap-3 mt-1 mb-3">
-          <div className="flex-1 h-px bg-navy-light" />
-          <span className="text-[11px] text-gray-500">or continue with</span>
-          <div className="flex-1 h-px bg-navy-light" />
-        </div>
-        <div className="w-full max-w-sm flex gap-2 mb-2">
-          <button
-            onClick={() => setSsoNote('Google sign-in is coming soon. Use email and password for now.')}
-            className="flex-1 flex items-center justify-center gap-2 py-2 bg-white text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 48 48" aria-hidden="true">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-            </svg>
-            Google
-          </button>
-          <button
-            onClick={() => setSsoNote('Apple sign-in is coming soon. Use email and password for now.')}
-            className="flex-1 flex items-center justify-center gap-2 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors border border-navy-light"
-          >
-            <svg className="w-3.5 h-3.5 mb-0.5" viewBox="0 0 384 512" fill="currentColor" aria-hidden="true">
-              <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/>
-            </svg>
-            Apple
-          </button>
-        </div>
-        {ssoNote && <p className="text-[11px] text-gold/90 text-center max-w-sm mb-3">{ssoNote}</p>}
-
         <button onClick={() => setFlow('welcome')} className="text-xs text-gray-500 hover:text-gray-300">
           Back
         </button>
@@ -1628,21 +1579,21 @@ export function Onboarding() {
           <div className="bg-navy rounded-xl p-4 border border-navy-light">
             <p className="text-sm text-white font-medium mb-1">No one can reset it</p>
             <p className="text-xs text-gray-400 leading-relaxed">
-              We don't have your phrase. No support team has it. No company has it. If you lose it, the account is gone forever. Nobody can help.
+              Nobody has your phrase but you. No support team, no company, no one. If you lose it, the account is gone forever.
             </p>
           </div>
 
           <div className="bg-navy rounded-xl p-4 border border-navy-light">
-            <p className="text-sm text-white font-medium mb-1">Write it on paper</p>
+            <p className="text-sm text-white font-medium mb-1">Do not type these words</p>
             <p className="text-xs text-gray-400 leading-relaxed">
-              Pen and paper. Two copies in different places. Don't take a screenshot, don't email it to yourself, don't save it in your notes app. If a phone or laptop gets stolen or hacked, the words go with it.
+              Keep them off every digital device. Pen and paper, two copies, two different places. No screenshot, no email, no notes app, no photo. If a phone or laptop gets hacked or stolen, the words go with it.
             </p>
           </div>
 
           <div className="bg-navy rounded-xl p-4 border border-navy-light">
             <p className="text-sm text-white font-medium mb-1">You'll need it on a new device</p>
             <p className="text-xs text-gray-400 leading-relaxed">
-              If you ever switch phones or computers, these 12 words plus your Account ID are how you get your wallet back. Without them, you start over.
+              These 12 words sign you in on any phone or computer. Nothing else is needed. Without them, you start over.
             </p>
           </div>
         </div>
@@ -1659,7 +1610,7 @@ export function Onboarding() {
         </p>
 
         <button
-          onClick={() => setFlow('platform-signup')}
+          onClick={() => setFlow(PLATFORM_ENABLED ? 'platform-signup' : 'welcome')}
           className="text-sm text-gray-500 hover:text-gray-300 mt-4"
         >
           Back
@@ -1675,7 +1626,7 @@ export function Onboarding() {
       <div className="flex flex-col items-center justify-center min-h-dvh px-6 text-center bg-navy-dark py-8">
         <h2 className="text-2xl font-serif text-white mb-2">Your Recovery Phrase</h2>
         <p className="text-gray-400 text-sm mb-6 max-w-sm">
-          These 12 words are the only way to recover your account. Write them down on paper. Anyone with this phrase controls your wallet.
+          These 12 words are the only way to recover your account. Write them down on paper. Do not type them anywhere. Anyone with this phrase controls your wallet.
         </p>
 
         <div className="bg-navy rounded-xl p-4 w-full max-w-sm border border-navy-light mb-4">
@@ -1685,7 +1636,7 @@ export function Onboarding() {
 
         <div className="bg-navy rounded-xl p-4 w-full max-w-sm border border-gold/30 mb-3">
           <p className="text-xs text-gold mb-3 font-medium">Recovery Phrase (12 words)</p>
-          <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="grid grid-cols-3 gap-2">
             {words.map((w, i) => (
               <div key={i} className="bg-navy-dark rounded-md py-2 px-2 text-left">
                 <span className="text-[10px] text-gray-500 mr-1">{i + 1}.</span>
@@ -1693,12 +1644,6 @@ export function Onboarding() {
               </div>
             ))}
           </div>
-          <button
-            onClick={copyMnemonic}
-            className="w-full py-2 bg-gold/20 text-gold rounded-lg text-sm hover:bg-gold/30 transition-colors"
-          >
-            {copied ? 'Copied!' : 'Copy All 12 Words'}
-          </button>
         </div>
 
         <p className="text-xs text-red-400 mb-6 max-w-sm">
@@ -1808,7 +1753,7 @@ export function Onboarding() {
             // someone their recovery contact is on file when it is not is the
             // worst class of lie an onboarding flow can tell, because they find
             // out when they need it.
-            setTwoFaNote('Text-message codes are not available yet, so this number has not been saved. Set up app-based 2FA from the More menu instead — that one works today.');
+            setTwoFaNote('Text-message codes are not available yet, so this number has not been saved. Set up app-based 2FA from the More menu instead. That one works today.');
           }}
           className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
         >
@@ -1838,7 +1783,7 @@ export function Onboarding() {
         <p className="text-gray-400 text-sm leading-relaxed max-w-sm mb-8">
           You get points every day from the start, but they transfer as 0 until
           a miner verifies you. Vouches from verified friends are the easiest
-          way to build a case — each one stakes their own points on you. A miner
+          way to build a case. Each one stakes their own points on you. A miner
           then reviews everything and sets your score.
         </p>
         <button
@@ -1909,9 +1854,10 @@ export function Onboarding() {
       <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-8 overflow-y-auto">
         <h2 className="text-2xl font-serif text-white mb-2 text-center">Welcome back</h2>
         <p className="text-gray-400 text-sm mb-6 max-w-sm text-center">
-          Pick how you originally signed up.
+          {PLATFORM_ENABLED ? 'Pick how you originally signed up.' : 'Your 12 words sign you in on any device.'}
         </p>
 
+        {PLATFORM_ENABLED && (
         <div className="flex gap-1 mb-6 p-1 bg-navy rounded-lg border border-navy-light w-full max-w-sm">
           <button
             onClick={() => { setLoginTrack('platform'); setError(null); setPlatformError(null); }}
@@ -1926,6 +1872,7 @@ export function Onboarding() {
             Recovery phrase
           </button>
         </div>
+        )}
 
         {loginTrack === 'platform' && (
           <>
@@ -1977,16 +1924,6 @@ export function Onboarding() {
           <>
             <div className="w-full max-w-sm space-y-4 mb-4">
               <div className="text-left">
-                <label className="text-xs text-gray-400 block mb-1.5">Account ID</label>
-                <input
-                  value={loginAccountId}
-                  onChange={(e) => setLoginAccountId(e.target.value)}
-                  placeholder="Paste your account ID"
-                  className="w-full bg-navy border border-navy-light rounded-xl px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:border-teal focus:outline-none"
-                />
-              </div>
-
-              <div className="text-left">
                 <label className="text-xs text-gray-400 block mb-1.5">Recovery Phrase (12 words)</label>
                 <textarea
                   value={loginMnemonic}
@@ -2002,7 +1939,7 @@ export function Onboarding() {
 
             <button
               onClick={handleLoginWithId}
-              disabled={loading || !loginAccountId.trim() || !loginMnemonic.trim()}
+              disabled={loading || !loginMnemonic.trim()}
               className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 mb-3"
             >
               {loading ? 'Signing in...' : 'Sign In'}

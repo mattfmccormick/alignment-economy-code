@@ -86,7 +86,7 @@ export default function Verify() {
     if (!selectedPanelId) return;
     const wallet = loadMinerWallet();
     if (!wallet?.privateKey) {
-      setError('Private key missing — sign in again.');
+      setError('Private key missing. Sign in again.');
       return;
     }
 
@@ -148,8 +148,8 @@ export default function Verify() {
     return (
       <div className="max-w-2xl mx-auto p-6">
         <div className="bg-panel border border-border rounded-xl p-8 text-center">
-          <p className="text-lg font-semibold text-white mb-2">Not registered as a miner</p>
-          <p className="text-sm text-muted">Register your account as a miner first to receive verification assignments.</p>
+          <p className="text-lg font-semibold text-white mb-2">You are not an active miner yet</p>
+          <p className="text-sm text-muted">If you just registered, it takes effect with the next block, usually about ten seconds. The Dashboard shows where your registration stands.</p>
         </div>
       </div>
     );
@@ -273,8 +273,8 @@ export default function Verify() {
                     strength of what was claimed and who vouched, and they
                     should know that before their accuracy score rides on it. */}
                 <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">
-                  These are cryptographic commitments, not the evidence itself —
-                  the protocol never stores the underlying file. You are judging
+                  These are cryptographic commitments, not the evidence itself.
+                  The protocol never stores the underlying file. You are judging
                   what was submitted and by whom, not inspecting a document.
                 </p>
               </div>
@@ -318,7 +318,7 @@ export default function Verify() {
                     />
                     <div className="bg-bg border border-border rounded-md px-3 py-1.5 w-20 text-center">
                       <span className="text-lg font-mono text-white">
-                        {proposedScore ?? '—'}
+                        {proposedScore ?? '--'}
                       </span>
                       <span className="text-xs text-muted">%</span>
                     </div>

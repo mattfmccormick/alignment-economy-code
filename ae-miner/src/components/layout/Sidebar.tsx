@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import { loadMinerWallet, clearMinerWallet } from '../../lib/keys';
-import { getTheme, setTheme } from '../../lib/theme';
 import { api, type MinerStatus } from '../../lib/api';
 import { truncateId } from '../../lib/formatting';
-import { supportedLanguages, RTL_LANGUAGES } from '../../lib/i18n';
 
+// Four places a miner actually goes, plus Settings. Vouch lives in the wallet
+// (people vouch, miners verify); Audit and Network repeated Income and the
+// Dashboard.
 const navItems = [
   {
     to: '/',
@@ -36,24 +36,6 @@ const navItems = [
     ),
   },
   {
-    to: '/vouch',
-    label: 'Vouch',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-      </svg>
-    ),
-  },
-  {
-    to: '/audit',
-    label: 'Audit',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-      </svg>
-    ),
-  },
-  {
     to: '/income',
     label: 'Income',
     icon: (
@@ -63,11 +45,11 @@ const navItems = [
     ),
   },
   {
-    to: '/network',
-    label: 'Network',
+    to: '/settings',
+    label: 'Settings',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
       </svg>
     ),
   },
@@ -75,31 +57,32 @@ const navItems = [
 
 export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () => void }) {
   const navigate = useNavigate();
-  const { i18n } = useTranslation();
   const wallet = loadMinerWallet();
-  const [currentTheme, setCurrentTheme] = useState(getTheme());
+  const accountId = wallet?.accountId;
   const [minerStatus, setMinerStatus] = useState<MinerStatus | null>(null);
 
   useEffect(() => {
-    if (!wallet) return;
-    api.getMinerStatus(wallet.accountId)
-      .then((res) => {
-        if (res.success) setMinerStatus(res.data);
-      })
-      .catch(() => {});
-  }, []);
-
-  function toggleTheme() {
-    const next = currentTheme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    setCurrentTheme(next);
-  }
+    if (!accountId) return;
+    let cancelled = false;
+    const load = () =>
+      api.getMinerStatus(accountId)
+        .then((res) => {
+          if (!cancelled && res.success) setMinerStatus(res.data);
+        })
+        .catch(() => {});
+    load();
+    // Registration lands when a block commits, so a status read once at mount
+    // went stale the moment it mattered. Re-read on the same beat as the header.
+    const interval = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [accountId]);
 
   function handleLogout() {
     clearMinerWallet();
     navigate('/login');
   }
 
+  const active = minerStatus?.miner?.isActive === true;
   const tier = minerStatus?.miner?.tier;
 
   return (
@@ -111,37 +94,20 @@ export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean;
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-teal/20 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-teal/20 flex items-center justify-center flex-shrink-0">
             <svg className="w-5 h-5 text-teal" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
             </svg>
           </div>
           <div>
-            <div className="text-sm font-bold tracking-wide">AE MINER</div>
-            <div className="text-[10px] text-muted tracking-wider">PROOF OF HUMAN</div>
+            <div className="text-sm font-bold leading-tight">Alignment Economy</div>
+            <div className="text-[10px] text-muted tracking-wider">MINER</div>
           </div>
         </div>
       </div>
 
-      {/* Tier badge */}
-      <div className="px-4 py-4">
-        {tier ? (
-          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold tracking-wider ${
-            tier === 2 ? 'bg-teal/10 text-teal border border-teal/30' : 'bg-muted/10 text-muted border border-muted/30'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${tier === 2 ? 'bg-teal' : 'bg-muted'}`} />
-            {tier === 2 ? 'TIER 2 VALIDATOR' : 'TIER 1 NODE'}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold tracking-wider bg-muted/10 text-muted border border-muted/30">
-            <span className="w-2 h-2 rounded-full bg-muted" />
-            MINER
-          </span>
-        )}
-      </div>
-
       {/* Navigation */}
-      <nav className="flex-1 px-3">
+      <nav className="flex-1 px-3 pt-4">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -162,61 +128,17 @@ export default function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean;
         ))}
       </nav>
 
-      {/* Theme toggle */}
-      <div className="px-4 py-3 border-t border-border">
-        <button
-          onClick={toggleTheme}
-          className="flex items-center gap-2 text-xs text-muted hover:text-white transition-colors w-full px-2 py-1.5 rounded hover:bg-white/5"
-        >
-          {currentTheme === 'dark' ? (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-            </svg>
-          ) : (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-            </svg>
-          )}
-          <span>{currentTheme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-        </button>
-      </div>
-
-      {/* Language.
-          Both apps ship 12 locale files and depend on i18next, and there are
-          ZERO t() calls across 43 components — every visible string is
-          hardcoded English. This changes the stored setting and nothing else,
-          so say so rather than implying a translation that does not happen. */}
-      <div className="px-4 py-2">
-        <select
-          value={i18n.language}
-          onChange={(e) => {
-            i18n.changeLanguage(e.target.value);
-            document.documentElement.dir = RTL_LANGUAGES.includes(e.target.value) ? 'rtl' : 'ltr';
-          }}
-          className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs text-muted focus:border-teal focus:outline-none appearance-none cursor-pointer"
-        >
-          {supportedLanguages.map((lang) => (
-            <option key={lang.code} value={lang.code}>
-              {lang.nativeName}
-            </option>
-          ))}
-        </select>
-        <p className="text-[10px] text-muted/60 mt-1 leading-relaxed">
-          Translations in progress — most text stays in English.
-        </p>
-      </div>
-
-      {/* Bottom: miner ID + logout */}
+      {/* Bottom: account + status + logout */}
       <div className="px-4 py-4 border-t border-border">
-        <div className="text-[10px] text-muted mb-1">MINER ID</div>
+        <div className="text-[10px] text-muted mb-1">ACCOUNT</div>
         <div className="text-xs font-mono text-muted/80 truncate">
           {wallet ? truncateId(wallet.accountId) : 'Not connected'}
         </div>
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${minerStatus?.miner?.isActive ? 'bg-teal animate-pulse' : 'bg-red'}`} />
-            <span className={`text-[10px] ${minerStatus?.miner?.isActive ? 'text-teal' : 'text-red'}`}>
-              {minerStatus?.miner?.isActive ? 'Online' : 'Offline'}
+            <span className={`w-2 h-2 rounded-full ${active ? 'bg-teal' : 'bg-muted'}`} />
+            <span className={`text-[10px] ${active ? 'text-teal' : 'text-muted'}`}>
+              {active ? `Active miner, Tier ${tier === 2 ? 2 : 1}` : 'Not registered yet'}
             </span>
           </div>
           <button

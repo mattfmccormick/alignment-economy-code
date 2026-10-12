@@ -136,7 +136,7 @@ export default function CaseDetail() {
       {isJuror && myJurorRow!.vote && (
         <p className="text-xs text-teal text-center">
           You voted: <span className="font-semibold">{myJurorRow!.vote}</span>
-          {caseHeader.verdict && <span className="text-muted ml-2">— Verdict: {caseHeader.verdict}</span>}
+          {caseHeader.verdict && <span className="text-muted ml-2">Verdict: {caseHeader.verdict}</span>}
         </p>
       )}
 

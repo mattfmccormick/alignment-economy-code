@@ -74,13 +74,16 @@ export interface Account {
   created_at?: string;
 }
 
+// GET /network/status. Field names are pinned by ae-node's
+// api-shape-contract.test.ts; this once declared activeMinerCount / totalMiners
+// / feePool, none of which the node sends, so those cells always read "--".
 export interface NetworkStatus {
   participantCount: number;
   blockHeight: number;
   currentDay: number;
-  activeMinerCount?: number;
-  totalMiners?: number;
-  feePool?: string;
+  minerCount: number;
+  feePoolBalance?: string;
+  transactionsToday?: number;
 }
 
 export interface NodeStatus {
@@ -112,49 +115,6 @@ export interface ScoreBreakdown {
 export interface EvidenceScore {
   score: ScoreBreakdown;
   vouchCount: number;
-}
-
-export interface Vouch {
-  id: string;
-  voucherId: string;
-  vouchedId: string;
-  stakeAmount: string;       // bigint serialized as string
-  stakedPercentage: number;
-  isActive: boolean;
-  createdAt: number;
-  withdrawnAt: number | null;
-}
-
-export interface VouchData {
-  received: Vouch[];
-  given: Vouch[];
-}
-
-export interface VouchRequest {
-  id: string;
-  fromId: string;
-  toId: string;
-  message: string;
-  status: 'pending' | 'accepted' | 'declined';
-  createdAt: number;
-  respondedAt: number | null;
-}
-
-export interface VouchRequests {
-  incoming: VouchRequest[];
-  outgoing: VouchRequest[];
-}
-
-export interface CourtCase {
-  id: string;
-  type: string;
-  challenger_id: string;
-  defendant_id: string;
-  status: string;
-  evidence_count: number;
-  jury_size: number;
-  deadline: string;
-  created_at: string;
 }
 
 export interface HealthCheck {
@@ -286,7 +246,7 @@ export const api = {
     request<ApiResponse<Account>>('GET', `/accounts/${id}`),
 
   // The account's transaction_log (every balance change, newest first).
-  // Powers the Income and Audit pages. Paginated.
+  // Powers the Income page. Paginated.
   getLedger: (accountId: string, page = 1, limit = 50) =>
     request<ApiResponse<{ entries: LedgerEntry[]; total: number; page: number; limit: number }>>(
       'GET', `/accounts/${accountId}/ledger?page=${page}&limit=${limit}`,
@@ -358,54 +318,8 @@ export const api = {
   getEvidenceScore: (accountId: string) =>
     request<ApiResponse<EvidenceScore>>('GET', `/miners/evidence/score/${accountId}`),
 
-  // Vouches (WP v2: percentage-based).
-  // The voucher signs `{ vouchedId, stakePercent }` — the backend computes
-  // the actual locked amount from the voucher's total holdings.
-  submitVouch: (envelope: { accountId: string; timestamp: number; signature: string; payload: { op: unknown } }) =>
-    request<ApiResponse<unknown>>('POST', '/miners/vouches', envelope),
-
-  getVouches: (accountId: string) =>
-    request<ApiResponse<VouchData>>('GET', `/miners/vouches/${accountId}`),
-
-  // Withdraw a vouch you gave (WP §7.2: vouchers may withdraw at any time).
-  // Returns the locked stake AND immediately drops the vouched account's
-  // percentHuman by this vouch's weight, so the UI must state that cost before
-  // calling it. Auth-gated server-side to the voucher.
-  withdrawVouch: (
-    vouchId: string,
-    envelope: {
-      accountId: string;
-      timestamp: number;
-      signature: string;
-      payload: { op: unknown };
-    },
-  ) =>
-    request<
-      ApiResponse<{
-        withdrawn: string;
-        vouchedId: string;
-        returnedStake: string;
-        percentHumanReduction: number;
-      }>
-    >('POST', `/miners/vouches/${vouchId}/withdraw`, envelope),
-
-  // Vouch Requests
-  // Auth-required: the requestor (signed account) is the fromId.
-  sendVouchRequest: (envelope: { accountId: string; timestamp: number; signature: string; payload: { toId: string; message: string } }) =>
-    request<ApiResponse<unknown>>('POST', '/miners/vouch-requests', envelope),
-
-  getVouchRequests: (accountId: string) =>
-    request<ApiResponse<VouchRequests>>('GET', `/miners/vouch-requests/${accountId}`),
-
-  // Auth-required: only the request's recipient (toId) can respond.
-  updateVouchRequest: (id: string, envelope: { accountId: string; timestamp: number; signature: string; payload: { status: 'accepted' | 'declined' } }) =>
-    request<ApiResponse<unknown>>('PUT', `/miners/vouch-requests/${id}`, envelope),
-
   // Network
   getNetworkStatus: () =>
     request<ApiResponse<NetworkStatus>>('GET', '/network/status'),
 
-  // Court (future endpoints, graceful failure)
-  getCourtCases: (accountId: string) =>
-    request<ApiResponse<{ cases: CourtCase[] }>>('GET', `/court/cases/${accountId}`).catch(() => ({ success: false, data: { cases: [] } })),
 };

@@ -8,10 +8,8 @@ import Dashboard from './pages/Dashboard';
 import Verify from './pages/Verify';
 import Court from './pages/Court';
 import CaseDetail from './pages/CaseDetail';
-import Audit from './pages/Audit';
 import Income from './pages/Income';
-import Network from './pages/Network';
-import Vouch from './pages/Vouch';
+import Settings from './pages/Settings';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const [, force] = useState(0);
@@ -39,10 +37,12 @@ export default function App() {
         <Route path="/verify" element={<Verify />} />
         <Route path="/court" element={<Court />} />
         <Route path="/court/:id" element={<CaseDetail />} />
-        <Route path="/vouch" element={<Vouch />} />
-        <Route path="/audit" element={<Audit />} />
         <Route path="/income" element={<Income />} />
-        <Route path="/network" element={<Network />} />
+        <Route path="/settings" element={<Settings />} />
+        {/* Vouch, Audit and Network were removed: vouching belongs to people in
+            the wallet, and the other two repeated the Dashboard and Income.
+            Old bookmarks land on the Dashboard instead of a blank page. */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );

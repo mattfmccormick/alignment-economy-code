@@ -20,7 +20,7 @@ export default defineConfig({
       includeAssets: ['icon.svg', 'favicon.svg'],
       manifest: {
         name: 'Alignment Economy Wallet',
-        short_name: 'AE Wallet',
+        short_name: 'Alignment Wallet',
         description: 'Send points, vouch, and manage your participant wallet on the Alignment Economy network.',
         id: '/?source=pwa',
         start_url: '/?source=pwa',

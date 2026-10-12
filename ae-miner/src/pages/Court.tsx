@@ -174,7 +174,7 @@ export default function Court() {
                 {a.myVote ? (
                   <p className="text-xs text-teal px-4 pb-4">
                     You voted: <span className="font-semibold">{a.myVote}</span>
-                    {a.verdict && <span className="ml-2 text-muted">— Verdict: {a.verdict}</span>}
+                    {a.verdict && <span className="ml-2 text-muted">Verdict: {a.verdict}</span>}
                   </p>
                 ) : (
                   <div className="flex gap-2 px-4 pb-4">

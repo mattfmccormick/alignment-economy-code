@@ -399,7 +399,7 @@ export function Send() {
             blocker, not a nudge. */}
         {pointType === 'active' && percentHuman === 0 && amountNum > 0 && (
           <div className="w-full text-xs bg-red-900/20 border border-red-500/40 rounded-lg py-2 px-3 text-red-300">
-            You're not verified yet, so none of this reaches them — every point
+            You're not verified yet, so none of this reaches them. Every point
             burns.{' '}
             <Link to="/verify" className="underline">
               Get verified first

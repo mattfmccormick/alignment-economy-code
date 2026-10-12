@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import QRCode from 'qrcode';
 import { PlatformError } from '@alignmenteconomy/sdk';
 import { loadWallet, clearWallet, saveWalletLegacy } from '../lib/keys';
@@ -19,7 +18,6 @@ import { api } from '../lib/api';
 import type { MinerStatus } from '../lib/types';
 import { signPayload, signMinerRegister } from '../lib/crypto';
 import { SessionReauthModal } from '../components/SessionReauthModal';
-import { supportedLanguages, RTL_LANGUAGES } from '../lib/i18n';
 
 const links = [
   { to: '/contacts', label: 'Contacts', desc: 'Manage your saved contacts' },
@@ -39,7 +37,6 @@ export function More() {
   // so we gate behind a confirm step and a clear shoulder-surfing warning.
   const [showPhraseConfirm, setShowPhraseConfirm] = useState(false);
   const [phraseRevealed, setPhraseRevealed] = useState(false);
-  const [phraseCopied, setPhraseCopied] = useState(false);
 
   // Platform-track only: "Switch to self-custody" export flow.
   //   - confirm: warning step before showing the private key
@@ -302,18 +299,9 @@ export function More() {
     }
   }
 
-  function copyRecoveryPhrase() {
-    if (wallet?.mnemonic) {
-      navigator.clipboard.writeText(wallet.mnemonic);
-      setPhraseCopied(true);
-      setTimeout(() => setPhraseCopied(false), 2000);
-    }
-  }
-
   function hidePhrase() {
     setPhraseRevealed(false);
     setShowPhraseConfirm(false);
-    setPhraseCopied(false);
   }
 
   function copyPrivateKey() {
@@ -479,8 +467,6 @@ export function More() {
           phraseRevealed ? (
             <PhraseDisplay
               mnemonic={wallet.mnemonic}
-              copied={phraseCopied}
-              onCopy={copyRecoveryPhrase}
               onHide={hidePhrase}
             />
           ) : showPhraseConfirm ? (
@@ -680,9 +666,6 @@ export function More() {
         </button>
       </div>
 
-      {/* Language */}
-      <LanguagePicker />
-
       {/* Navigation links */}
       <div className="space-y-2">
         {links.map((link) => (
@@ -742,55 +725,10 @@ export function More() {
 
 interface PhraseDisplayProps {
   mnemonic: string;
-  copied: boolean;
-  onCopy: () => void;
   onHide: () => void;
 }
 
-function LanguagePicker() {
-  const { i18n } = useTranslation();
-  const current = supportedLanguages.find((l) => l.code === i18n.language) ?? supportedLanguages[0];
-
-  function changeLanguage(code: string) {
-    i18n.changeLanguage(code);
-    document.documentElement.dir = RTL_LANGUAGES.includes(code) ? 'rtl' : 'ltr';
-  }
-
-  return (
-    <div className="bg-navy rounded-xl p-4 border border-navy-light">
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <p className="text-sm text-white">Language</p>
-          <p className="text-xs text-gray-500">{current.nativeName}</p>
-        </div>
-      </div>
-      <select
-        value={i18n.language}
-        onChange={(e) => changeLanguage(e.target.value)}
-        className="w-full bg-navy-dark border border-navy-light rounded-lg px-3 py-2 text-white text-sm focus:border-teal focus:outline-none appearance-none cursor-pointer"
-      >
-        {supportedLanguages.map((lang) => (
-          <option key={lang.code} value={lang.code}>
-            {lang.nativeName} — {lang.name}
-          </option>
-        ))}
-      </select>
-      {/* Say what this currently does, which is almost nothing.
-          Both apps ship 12 locale files and depend on i18next, and there are
-          ZERO t() calls across 43 components — every visible string is
-          hardcoded English. Changing the language changes the stored setting
-          and the text direction, and nothing else. A silent picker made the app
-          promise a translation it cannot deliver; until the strings are
-          extracted, admitting it here is the honest option. */}
-      <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
-        Translations are still being wired up, so most of the app stays in
-        English for now. Right-to-left layout does apply.
-      </p>
-    </div>
-  );
-}
-
-function PhraseDisplay({ mnemonic, copied, onCopy, onHide }: PhraseDisplayProps) {
+function PhraseDisplay({ mnemonic, onHide }: PhraseDisplayProps) {
   const words = mnemonic.split(' ');
   return (
     <div className="space-y-3">
@@ -802,22 +740,14 @@ function PhraseDisplay({ mnemonic, copied, onCopy, onHide }: PhraseDisplayProps)
           </div>
         ))}
       </div>
-      <div className="flex gap-2">
-        <button
-          onClick={onHide}
-          className="flex-1 py-2 bg-navy-light text-gray-300 rounded-lg text-sm hover:bg-navy-dark transition-colors"
-        >
-          Hide
-        </button>
-        <button
-          onClick={onCopy}
-          className="flex-1 py-2 bg-gold/20 text-gold rounded-lg text-sm hover:bg-gold/30 transition-colors"
-        >
-          {copied ? 'Copied!' : 'Copy 12 Words'}
-        </button>
-      </div>
+      <button
+        onClick={onHide}
+        className="w-full py-2 bg-navy-light text-gray-300 rounded-lg text-sm hover:bg-navy-dark transition-colors"
+      >
+        Hide
+      </button>
       <p className="text-xs text-red-400">
-        These words are equivalent to your password. Never type them into a website or share them with anyone.
+        Write these on paper. Do not type them anywhere, and never share them with anyone.
       </p>
     </div>
   );

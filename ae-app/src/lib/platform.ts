@@ -16,6 +16,19 @@ import { PlatformClient, type PlatformSession } from '@alignmenteconomy/sdk';
 const DEFAULT_PLATFORM_URL =
   (import.meta.env?.VITE_PLATFORM_URL as string | undefined) ?? 'http://localhost:3500/api/v1';
 
+// Whether to OFFER the email + password track at all.
+//
+// It is only a real product when a hosted account service exists, which is a
+// deployment decision: the team that stands one up sets VITE_PLATFORM_URL at
+// build time and the option appears. Without that, the only thing answering is
+// (at best) a copy of the service on the user's own machine, where email +
+// password cannot sign in from a second device or recover a lost computer.
+// Offering it there by default made the simplest-looking button the one with
+// the worst failure mode, and in a source checkout it just errored. The
+// 12-word path needs nothing but a node and works everywhere, so it is the
+// default and, until a hosted service exists, the only path shown.
+export const PLATFORM_ENABLED = Boolean(import.meta.env?.VITE_PLATFORM_URL);
+
 let _client: PlatformClient | null = null;
 
 export function platformClient(): PlatformClient {

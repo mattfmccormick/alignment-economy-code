@@ -63,7 +63,7 @@ export function PassphraseProtection() {
           <p className="text-xs text-gray-400 mb-3">
             {encrypted
               ? 'Your keys are encrypted on this device. You unlock the wallet with your passphrase each time you open the app.'
-              : 'Encrypt your keys on this device with a passphrase. You will enter it each time you open the app. Keep your recovery phrase as backup — a lost passphrase can only be recovered from it.'}
+              : 'Optional. Without it, anyone who can open this device can use your wallet. With it, they need the password too. It only protects this device. Your 12 words are still the real backup.'}
           </p>
           <button
             onClick={() => { setMode(encrypted ? 'remove' : 'add'); setErr(null); }}

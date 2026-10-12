@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { saveMinerWalletFromMnemonic, saveMinerWallet } from '../lib/keys';
-import { newMnemonic, mnemonicToKeypair, isValidMnemonic, signPayload, signMinerRegister } from '../lib/crypto';
+import { newMnemonic, mnemonicToKeypair, isValidMnemonic } from '../lib/crypto';
+import { submitMinerRegistration } from '../lib/register';
 
 type Mode = 'signin' | 'create';
 type Step =
@@ -54,7 +55,7 @@ export default function Login() {
     try {
       const accountRes = await api.getAccount(accountId.trim());
       if (!accountRes.success) {
-        setError('Account not found. Make sure you have a valid AE account.');
+        setError('Account not found. Check the Account ID, or create an account first.');
         setStep('enter_id');
         return;
       }
@@ -176,32 +177,6 @@ export default function Login() {
     }
   }
 
-  /**
-   * Turn a register failure into something a person can act on.
-   *
-   * The raw API string was going straight to the screen, so the single most
-   * likely failure for the second person to join a network — being below the
-   * percentHuman floor — surfaced as "percentHuman 0 is below the minimum of
-   * 50...", which reads as a defect rather than a next step.
-   */
-  function explainRegisterFailure(code?: string, raw?: string): string {
-    if (code === 'PERCENT_HUMAN_TOO_LOW' || (raw ?? '').includes('percentHuman')) {
-      return (
-        'You need to be verified before you can mine. This network already has ' +
-        'enough miners that new ones have to be reviewed first. Open the wallet, ' +
-        'go to Verify, and request a review. Once a panel sets your score above ' +
-        '50%, come back here and register.'
-      );
-    }
-    if (code === 'NOT_INDIVIDUAL') {
-      return 'Only individual accounts can mine. This account is registered as an organisation.';
-    }
-    if (code === 'NOT_FOUND') {
-      return 'That account ID does not exist on this node yet. Check the ID, or create the account in the wallet first.';
-    }
-    return raw || 'Registration failed.';
-  }
-
   async function handleRegister() {
     setStep('registering');
     setError('');
@@ -225,37 +200,16 @@ export default function Login() {
       navigate('/');
     };
 
-    try {
-      // /miners/register is now auth-required: the registrant signs an
-      // empty payload with their private key to prove key possession.
-      // _privateKey is in state from the create-account or sign-in flow.
-      // Miner registration rides the chain: sign a MinerOperation and send it.
-      const ts = Math.floor(Date.now() / 1000);
-      const op = signMinerRegister(accountId.trim(), ts, _privateKey);
-      const payload = { op };
-      const signature = signPayload(payload, ts, _privateKey);
-      const res = await api.registerMiner({
-        accountId: accountId.trim(),
-        timestamp: ts,
-        signature,
-        payload,
-      });
-      if (res.success) {
-        persistAndEnter();
-      } else {
-        setError(explainRegisterFailure(res.error?.code, res.error?.message));
-        setStep('not_miner');
-      }
-    } catch (err) {
-      // The API client throws on non-2xx responses. The 409 case is benign:
-      // the account is already a registered miner (e.g. user reinstalled, or
-      // hit register twice). Treat it as success — same destination state.
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('409') && msg.toLowerCase().includes('already registered')) {
-        persistAndEnter();
-        return;
-      }
-      setError(explainRegisterFailure(undefined, msg));
+    // The node accepts the signed registration and queues it; it takes effect
+    // when the next block commits. ok here means accepted, not committed, so we
+    // head to the dashboard, which shows the waiting state and flips to active
+    // by itself. (This screen used to drop people on a dashboard that read
+    // "not registered" seconds after they had registered.)
+    const result = await submitMinerRegistration(accountId.trim(), _privateKey);
+    if (result.ok) {
+      persistAndEnter();
+    } else {
+      setError(result.message);
       setStep('not_miner');
     }
   }
@@ -274,7 +228,7 @@ export default function Login() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-white">AE Miner</h1>
+          <h1 className="text-2xl font-bold text-white">Alignment Economy Miner</h1>
           <p className="text-sm text-muted mt-1">Proof of Human Verification Network</p>
         </div>
 
@@ -389,7 +343,7 @@ export default function Login() {
             <>
               <h2 className="text-lg font-semibold mb-1">Create a Miner Account</h2>
               <p className="text-sm text-muted mb-6">
-                We&apos;ll generate a new AE account, show you its private key, and register it as a miner so you can start verifying.
+                We&apos;ll create a new Alignment Economy account, show you its 12-word recovery phrase, and register it as a miner so you can start verifying.
               </p>
 
               <div className="bg-bg rounded-lg border border-border p-4 mb-6">
@@ -460,19 +414,19 @@ export default function Login() {
                 <div className="bg-bg border border-border rounded-lg p-3">
                   <p className="text-sm font-medium text-white mb-0.5">It&apos;s the only key to your account</p>
                   <p className="text-xs text-muted leading-relaxed">
-                    The 12 words ARE your account. Anyone with these words can move your funds and impersonate your verifications. Treat them like cash, not a password.
+                    The 12 words ARE your account. Anyone with these words can move your points and sign verifications as you. Treat them like cash, not a password.
                   </p>
                 </div>
                 <div className="bg-bg border border-border rounded-lg p-3">
                   <p className="text-sm font-medium text-white mb-0.5">No one can reset it</p>
                   <p className="text-xs text-muted leading-relaxed">
-                    We don&apos;t have your phrase. No support team, no company, no Anthropic, no Anyone. If you lose it, the account is gone forever and your miner reputation goes with it.
+                    Nobody has your phrase but you. No support team, no company, no one. If you lose it, the account is gone forever and your miner reputation goes with it.
                   </p>
                 </div>
                 <div className="bg-bg border border-border rounded-lg p-3">
-                  <p className="text-sm font-medium text-white mb-0.5">Write it on paper</p>
+                  <p className="text-sm font-medium text-white mb-0.5">Do not type these words</p>
                   <p className="text-xs text-muted leading-relaxed">
-                    Pen and paper. Two copies in different places. Don&apos;t take a screenshot, don&apos;t email it to yourself, don&apos;t save it in your notes app. If a phone or laptop gets stolen, the words go with it.
+                    Keep them off every digital device. Pen and paper, two copies, two different places. No screenshot, no email, no notes app, no photo. If a phone or laptop gets hacked or stolen, the words go with it.
                   </p>
                 </div>
                 <div className="bg-bg border border-border rounded-lg p-3">
@@ -514,7 +468,7 @@ export default function Login() {
                 </div>
                 <h2 className="text-lg font-semibold">Save Your Recovery Phrase</h2>
                 <p className="text-sm text-muted mt-1">
-                  These 12 words are the only way to recover your account. Write them on paper.
+                  These 12 words are the only way to recover your account. Write them on paper. Do not type them anywhere.
                 </p>
               </div>
 
@@ -531,7 +485,6 @@ export default function Login() {
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-medium text-muted">Recovery Phrase (12 words)</label>
-                    <button onClick={() => copyToClipboard(mnemonic)} className="text-xs text-teal hover:underline">Copy</button>
                   </div>
                   <div className="bg-bg border border-red/30 rounded-lg p-2 grid grid-cols-3 gap-1.5">
                     {mnemonic.split(' ').map((w, i) => (
@@ -541,7 +494,7 @@ export default function Login() {
                       </div>
                     ))}
                   </div>
-                  <p className="text-[10px] text-red/80 mt-1">Anyone with these 12 words can move your funds. Store offline.</p>
+                  <p className="text-[10px] text-red/80 mt-1">Anyone with these 12 words can move your points. Keep them off digital devices.</p>
                 </div>
               </div>
 

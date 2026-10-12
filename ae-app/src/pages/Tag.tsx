@@ -74,7 +74,7 @@ export function Tag() {
       <div>
         <h2 className="text-xl font-serif text-white">Tag Your World</h2>
         <p className="text-xs text-gray-500 mt-1">
-          {day !== null ? `Day ${day} — allocations reset at 4am EST.` : 'Loading…'}
+          {day !== null ? `Day ${day}. Allocations reset at 4am EST.` : 'Loading…'}
         </p>
       </div>
 
@@ -692,7 +692,7 @@ function PointsBar({
       </div>
       {overCap && (
         <p className="text-xs text-red-400 mt-1">
-          Total exceeds your {fmt(dailyPoints)}-point daily cap — reduce some allocations.
+          Total exceeds your {fmt(dailyPoints)}-point daily cap. Reduce some allocations.
         </p>
       )}
     </div>

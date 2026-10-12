@@ -51,7 +51,7 @@ export default function Income() {
       <div className="flex items-center justify-center h-64">
         <div className="bg-red/10 border border-red/20 rounded-lg p-6 max-w-md text-center">
           <p className="text-sm text-red mb-2">{error}</p>
-          <p className="text-xs text-muted">Make sure the AE node is running at localhost:3000</p>
+          <p className="text-xs text-muted">Make sure your node is running.</p>
         </div>
       </div>
     );
