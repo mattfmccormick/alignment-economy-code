@@ -12,6 +12,57 @@ Optimize for, in order:
 
 Deployment-stage and operations work (NAT traversal, public bootstrap nodes, picking a host, code-signing certs, running infrastructure, external audits) is explicitly the professional team's job. We make the code ready for that work and document the seams. We do not have to operate it ourselves.
 
+## Fresh-eyes audit (October 12, 2026): read this before trusting the sections below
+
+A full re-read of the codebase by three independent reviewers, checked against
+the code. The complete write-up, with a prioritized backend cleanup list and
+the court redesign, is **`docs/STATE-OF-THE-CODE-2026-10.md`**. That document
+supersedes any status claim below that it contradicts.
+
+**Corrections to claims made further down this file:**
+- "Every writer of consensus state is a pure function of the applied chain" is
+  NOT true yet. Still node-local: account rows (which drive mint and the rebase
+  target), the whole court, miner tiers (heartbeats), and the legacy direct
+  validator routes.
+- Slashing has no caller. Proposer selection is a plain hash, not a VRF.
+  Inheritance and smart contracts are unwired. The store interfaces do not yet
+  own all state access.
+- The test count is not the health signal it reads as: no API test runs the
+  production (commit-time) execution mode, and every full-node test is a
+  non-blocking `*.e2e.ts`. `phase15` (ban test) and `phase32` fail on main.
+
+**Fixed and pushed October 12 (861 unit tests, 3-validator LAN test green):**
+- A validator now acts on a quorum its OWN vote completes. Before this a
+  single-validator chain could never commit, and the slowest validator on a
+  small network stalled the round. `tests/own-vote-quorum.test.ts`.
+- Peer-supplied transfers obey the HTTP rules: amount > 0, no self-transfer, id
+  derived from the signature. The peer paths allowed theft (negative amount),
+  minting (self-transfer) and replay. `tests/transfer-invariants.test.ts`.
+- BFT validators no longer also run the day cycle from their wall clock, and a
+  failed day cycle is logged instead of discarded.
+- Court hardening: jury packing by dust transfers, single-vote verdicts,
+  stranded juror stakes, zombie cases, a sweep that could freeze the node's
+  day, wrong defendants, appeals. `tests/court-hardening.test.ts`. **The
+  duplicate-account counterpart penalty (WP 9.3) is switched off on purpose**
+  until a counterpart is a real party to the case.
+- Miner and wallet UX pass from Matt's review (Vouch / Audit / Network pages
+  removed from the miner, honest dashboard, 12-word path is the default).
+
+**Run a local node with `npm run dev:solo`, not `npm run dev`.** The legacy
+authority producer (plain `npm run dev`, desktop "Solo", docker-compose) accepts
+payments and never settles them, and never applies miner registration, vouches,
+panels or tags. Retiring it in favour of single-validator BFT is the first item
+on the cleanup list.
+
+**The court must not carry real value until it is rebuilt on-chain.** What
+remains is design, not bugs: the filer times the jury draw, juror seats are
+free, punishment lands before an appeal, freezing an account is free, votes
+are not sealed. The five rules for the rebuild are in the document above.
+
+**Open decisions for Matt** (section 5 of the document): is a miner a person or
+a business; the duplicate-account penalty; minimum jury size; the email and
+password account option; raising the minimum validator stake.
+
 ## Launch-readiness audit (September 3, 2026)
 
 Before opening the network up, an eight-dimension adversarial audit read the
