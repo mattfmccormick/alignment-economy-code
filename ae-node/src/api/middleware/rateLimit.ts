@@ -11,8 +11,6 @@ const accountLimits = new Map<string, RateEntry>();
 const ipLimits = new Map<string, RateEntry>();
 
 const WINDOW_MS = 60_000;
-const READ_LIMIT = 100;
-const WRITE_LIMIT = 20;
 const IP_LIMIT = 200;
 
 function checkLimit(

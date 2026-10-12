@@ -1086,10 +1086,15 @@ export class BftBlockProducer {
     try {
       applyChainDayCycle(this.db, block.timestamp);
     } catch (err) {
-      // Telemetry only; consensus continues. We don't surface this
-      // through onBlockCommitted because the block itself is already
-      // committed — the cycle is a separate state machine.
-      void err;
+      // Consensus continues: the block itself is already committed and the
+      // cycle is a separate state machine. But say so, loudly. This used to
+      // be `void err`, so a node whose daily cycle was failing every block
+      // (no expiry, no rebase, no mint) gave no sign of it anywhere.
+      logger.error(
+        'cycle',
+        `Day cycle FAILED at block ${block.number}; this node did not expire/rebase/mint. ` +
+          (err instanceof Error ? (err.stack ?? err.message) : String(err)),
+      );
     }
 
     // Fingerprint the resulting state. Deliberately AFTER the day cycle: a

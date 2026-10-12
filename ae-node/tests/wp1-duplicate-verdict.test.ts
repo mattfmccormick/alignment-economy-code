@@ -16,7 +16,7 @@ import { createAccount, getAccount, updateBalance } from '../src/core/account.js
 import { createGenesisBlock } from '../src/core/block.js';
 import { registerMiner } from '../src/mining/registration.js';
 import { fileChallenge, selectJury, submitVote, resolveVerdict } from '../src/court/court.js';
-import { PRECISION, DAILY_ACTIVE_POINTS } from '../src/core/constants.js';
+import { PRECISION } from '../src/core/constants.js';
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -52,7 +52,7 @@ function seatJurors(db: DatabaseSync, count: number): string[] {
 }
 
 describe('WP §9.3: duplicate-account verdict', () => {
-  it('closes the defendant and burns a 2x overlap penalty from the counterpart', () => {
+  it('closes the defendant and does NOT debit the counterpart, who was never a party', () => {
     const db = freshDb();
     createGenesisBlock(db);
     setCurrentDay(db, 10);
@@ -89,20 +89,23 @@ describe('WP §9.3: duplicate-account verdict', () => {
     assert.equal(getAccount(db, defendant.account.id)!.isActive, false);
     assert.equal(getAccount(db, defendant.account.id)!.earnedBalance, 0n);
 
-    // Counterpart survives (still active) but pays 2 × overlap × 1,440.
-    // overlap = currentDay(10) - defendant.joinedDay(5) = 5 days.
-    const expectedPenalty = 2n * 5n * DAILY_ACTIVE_POINTS;
+    // The counterpart is whoever the challenger named. It was never served,
+    // could not respond and could not appeal, and the jury was only asked
+    // about the defendant. The white paper's 2 × overlap penalty is withheld
+    // until a counterpart is a real party: with it, a truthful conviction of
+    // a throwaway account burned any stranger's savings.
     const cp = getAccount(db, counterpart.account.id)!;
     assert.equal(cp.isActive, true);
-    assert.equal(cp.earnedBalance, pts(100_000) - expectedPenalty);
+    assert.equal(cp.earnedBalance, pts(100_000), 'not one point taken from a non-party');
   });
 
-  it('caps the overlap penalty at the counterpart Earned balance', () => {
+  it('leaves a small counterpart balance alone too', () => {
     const db = freshDb();
     createGenesisBlock(db);
     setCurrentDay(db, 10);
 
-    // Counterpart holds less than the raw penalty (2×5×1,440 = 14,400).
+    // Counterpart holds less than the old raw penalty (2×5×1,440 = 14,400),
+    // which used to drain it to zero.
     const counterpart = createAccount(db, 'individual', 1, 100);
     updateBalance(db, counterpart.account.id, 'earned_balance', pts(1000));
 
@@ -122,8 +125,7 @@ describe('WP §9.3: duplicate-account verdict', () => {
     for (const minerId of jury) submitVote(db, courtCase.id, minerId, 'not_human');
     resolveVerdict(db, courtCase.id);
 
-    // Penalty capped: counterpart drained to zero, never negative.
-    assert.equal(getAccount(db, counterpart.account.id)!.earnedBalance, 0n);
+    assert.equal(getAccount(db, counterpart.account.id)!.earnedBalance, pts(1000));
   });
 
   it('rejects a duplicate challenge with no counterpart named', () => {

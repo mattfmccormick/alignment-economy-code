@@ -17,7 +17,7 @@ import { createAccount, getAccount, updateBalance } from '../src/core/account.js
 import { registerMiner, setMinerTier } from '../src/mining/registration.js';
 import {
   fileChallenge, escalateToFull, selectJury, submitVote,
-  resolveCase, fileAppeal, getCase,
+  resolveCase, fileAppeal, getCase, courtStore,
 } from '../src/court/court.js';
 import { PRECISION } from '../src/core/constants.js';
 
@@ -61,9 +61,13 @@ describe('court: appeals settle through the appeal path', () => {
     );
 
     // Defendant appeals and wins.
-    const appeal = fileAppeal(db, c.id, defendant.account.id);
-    const appealJurors = selectJury(db, appeal.id, 'appeal-second');
+    // fileAppeal seats the appeal jury itself. (This test used to call
+    // selectJury a second time, which seated a second batch on top of the
+    // first and then voted with only that batch.)
+    const appeal = fileAppeal(db, c.id, 'appeal-second');
+    const appealJurors = courtStore(db).findJurorsByCase(appeal.id).map((j) => j.minerId);
     assert.ok(appealJurors.length >= 3, 'appeal needs its own jury');
+    assert.throws(() => selectJury(db, appeal.id, 'again'), /already has a jury/);
     for (const j of appealJurors) submitVote(db, appeal.id, j, 'human');
 
     const verdict = resolveCase(db, appeal.id);
@@ -92,8 +96,8 @@ describe('court: appeals settle through the appeal path', () => {
     for (const j of jurors) submitVote(db, c.id, j, 'not_human');
     resolveCase(db, c.id);
 
-    const appeal = fileAppeal(db, c.id, defendant.account.id);
-    const appealJurors = selectJury(db, appeal.id, 'appeal-idem-2');
+    const appeal = fileAppeal(db, c.id, 'appeal-idem-2');
+    const appealJurors = courtStore(db).findJurorsByCase(appeal.id).map((j) => j.minerId);
     for (const j of appealJurors) submitVote(db, appeal.id, j, 'human');
     resolveCase(db, appeal.id);
 

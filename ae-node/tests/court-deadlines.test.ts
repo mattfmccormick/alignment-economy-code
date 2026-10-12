@@ -54,20 +54,21 @@ describe('court: deadlines actually expire', () => {
   let db: DatabaseSync;
   beforeEach(() => { db = freshDb(); });
 
-  it('a voting deadline with some votes cast resolves on those votes', () => {
+  it('a voting deadline with a majority of the seated jury resolves, silent jurors notwithstanding', () => {
     const { c, defendantId } = stagedCase(db);
     escalateToFull(db, c.id);
     const jurors = selectJury(db, c.id, 'deadline-partial');
     assert.ok(jurors.length >= 3);
 
-    // Only one juror bothers to vote. Everyone else goes silent.
-    submitVote(db, c.id, jurors[0], 'not_human');
+    // Just over half the seats vote. The rest go silent.
+    const majority = Math.floor(jurors.length / 2) + 1;
+    for (const j of jurors.slice(0, majority)) submitVote(db, c.id, j, 'not_human');
 
     const out = expireCourtDeadlines(db, LATER);
 
     assert.deepEqual(out.resolved, [c.id]);
     const settled = getCase(db, c.id)!;
-    assert.equal(settled.verdict, 'guilty', 'decided on the one vote actually cast');
+    assert.equal(settled.verdict, 'guilty', 'a majority of the seats is a verdict');
     // A guilty verdict closes the account outright (deactivateAccount), so the
     // escrow flag is moot from there — an inactive account cannot transact
     // either way. The innocent path is the one that lifts escrow.
@@ -79,11 +80,42 @@ describe('court: deadlines actually expire', () => {
     db.close();
   });
 
+  it('one vote out of a full jury is NOT a verdict: the case is dismissed and nobody is convicted', () => {
+    const { c, defendantId, challengerId } = stagedCase(db);
+    const challengerEarnedAfterFiling = getAccount(db, challengerId)!.earnedBalance;
+    escalateToFull(db, c.id);
+    const jurors = selectJury(db, c.id, 'deadline-one-vote');
+    assert.ok(jurors.length >= 3);
+
+    // This used to convict: one juror votes, the rest stay silent, and at
+    // the deadline that single vote closed the account and burned 80% of it.
+    submitVote(db, c.id, jurors[0], 'not_human');
+
+    const out = expireCourtDeadlines(db, LATER);
+
+    assert.deepEqual(out.resolved, []);
+    assert.deepEqual(out.dismissed, [c.id]);
+    const settled = getCase(db, c.id)!;
+    assert.equal(settled.verdict, null);
+    assert.equal(settled.status, 'withdrawn');
+    const defendant = getAccount(db, defendantId)!;
+    assert.equal(defendant.isActive, true, 'not closed');
+    assert.equal(defendant.isEscrowed, false, 'and no longer frozen');
+    assert.equal(defendant.earnedBalance, pts(10_000), 'balance untouched');
+    assert.equal(
+      getAccount(db, challengerId)!.earnedBalance,
+      challengerEarnedAfterFiling + c.challengerStake,
+      'no decision, so the stake comes back',
+    );
+    db.close();
+  });
+
   it('an innocent outcome at the deadline lifts the escrow', () => {
     const { c, defendantId } = stagedCase(db);
     escalateToFull(db, c.id);
     const jurors = selectJury(db, c.id, 'deadline-innocent');
-    submitVote(db, c.id, jurors[0], 'human');
+    const majority = Math.floor(jurors.length / 2) + 1;
+    for (const j of jurors.slice(0, majority)) submitVote(db, c.id, j, 'human');
 
     expireCourtDeadlines(db, LATER);
 

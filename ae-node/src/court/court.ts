@@ -7,13 +7,13 @@ import { runTransaction } from '../db/connection.js';
 import { getParam } from '../config/params.js';
 import { NotFoundError, ValidationError, ForbiddenError, ConflictError, InsufficientBalanceError } from '../core/errors.js';
 import { cycleStateStore } from '../core/stores/SqliteCycleStateStore.js';
-import { DAILY_ACTIVE_POINTS } from '../core/constants.js';
 import { getMinerByAccount, getActiveMiners, getMiner, setMinerTier, miningStore } from '../mining/registration.js';
 import { burnAllVouchesOnAccount } from '../verification/vouching.js';
 import { getCompositeAccuracy } from '../mining/accuracy.js';
 import { SqliteCourtStore } from '../core/stores/SqliteCourtStore.js';
 import type { ICourtStore } from '../core/stores/ICourtStore.js';
-import type { CourtCase, CaseType, Vote, Verdict, CaseArgument, ArgumentRole } from './types.js';
+import type { CourtCase, CaseType, Vote, Verdict, CaseArgument, ArgumentRole, JurorRecord } from './types.js';
+import { logger } from '../node/logger.js';
 
 export function courtStore(db: DatabaseSync): ICourtStore {
   return new SqliteCourtStore(db);
@@ -74,10 +74,26 @@ export function fileChallenge(
   if (!miner) throw new ForbiddenError('Only active miners can file challenges', 'NOT_ACTIVE_MINER');
 
   const challenger = getAccount(db, challengerAccountId)!;
+  // A closed account has no standing, and an account that is itself under
+  // challenge may not file. The second rule is not about fairness: filing
+  // moves earned points into locked, and a guilty verdict burns earned only.
+  // A defendant could file a 100%-stake challenge against anyone and walk
+  // their whole balance out from under the verdict.
+  if (!challenger.isActive) throw new ForbiddenError('A closed account cannot file a challenge', 'ACCOUNT_INACTIVE');
+  if (challenger.isEscrowed) {
+    throw new ForbiddenError('An account that is under challenge cannot file one until its own case is resolved', 'ACCOUNT_ESCROWED');
+  }
   const defendant = getAccount(db, defendantAccountId);
   if (!defendant) throw new NotFoundError('Defendant account not found');
   if (!defendant.isActive) throw new ValidationError('Defendant account is inactive', 'ACCOUNT_INACTIVE');
   if (challengerAccountId === defendantAccountId) throw new ValidationError('Cannot challenge yourself', 'SELF_CHALLENGE');
+  // Both case types ask a jury whether a PERSON is real and unique. A company,
+  // government or bot account is truthfully "not human", so without this an
+  // honest jury would close any organisation's account and hand the
+  // challenger a fifth of its balance.
+  if (defendant.type !== 'individual') {
+    throw new ValidationError('Only individual accounts can be challenged in court', 'DEFENDANT_NOT_INDIVIDUAL');
+  }
 
   // WP §9.3: a duplicate_account challenge names the counterpart — the earlier
   // account the defendant is alleged to duplicate. You challenge the newer
@@ -276,6 +292,17 @@ export function escalateToFull(db: DatabaseSync, caseId: string): CourtCase {
   const courtCase = getCase(db, caseId);
   if (!courtCase) throw new NotFoundError('Case not found');
   if (courtCase.level !== 'arbitration') throw new ValidationError('Can only escalate from arbitration', 'NOT_ARBITRATION');
+  // Level alone is not enough. A case dismissed at the arbitration deadline
+  // keeps level 'arbitration' and has already had its stake refunded;
+  // escalating it seated a jury on a case nobody had anything staked on, and
+  // the eventual settlement tried to release a stake that was no longer
+  // locked.
+  if (
+    courtCase.verdict !== null ||
+    (courtCase.status !== 'arbitration_open' && courtCase.status !== 'arbitration_response')
+  ) {
+    throw new ValidationError(`Case is closed and cannot be escalated (status: ${courtCase.status})`, 'CASE_NOT_OPEN');
+  }
 
   courtStore(db).setLevelToCourt(caseId);
 
@@ -361,6 +388,16 @@ export function rebaseCourtStakes(
  */
 class JurySeatingFailed extends Error {}
 
+/** Seated-juror count for a case, read straight off the table. */
+function store0(db: DatabaseSync): { countJurors(caseId: string): number } {
+  return {
+    countJurors(caseId: string): number {
+      const row = db.prepare('SELECT COUNT(*) AS cnt FROM court_jury WHERE case_id = ?').get(caseId) as { cnt: number };
+      return Number(row.cnt);
+    },
+  };
+}
+
 /**
  * Smallest jury that can actually decide anything. Three, and odd, so a
  * majority exists and cannot tie.
@@ -374,6 +411,19 @@ const MIN_VIABLE_JURY = 3;
 export function selectJury(db: DatabaseSync, caseId: string, blockHash: string): string[] {
   const courtCase = getCase(db, caseId);
   if (!courtCase) throw new NotFoundError('Case not found');
+
+  // A case gets one jury. Nothing stopped a second call from seating a second
+  // batch on top of the first: more stakes locked, and (under the old
+  // votes-cast rule) a verdict decided by whichever batch happened to vote
+  // while the other sat locked and ignored.
+  if (
+    courtCase.verdict !== null ||
+    courtCase.status === 'withdrawn' ||
+    courtCase.status === 'closed' ||
+    store0(db).countJurors(caseId) > 0
+  ) {
+    throw new ValidationError(`Case already has a jury or a verdict (status: ${courtCase.status})`, 'CASE_NOT_SEATABLE');
+  }
 
   const jurySize = getParam<number>(db, 'court.jury_size');
   const jurorStakePercent = getParam<number>(db, 'court.juror_stake_percent');
@@ -400,13 +450,36 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
   );
   pool = pool.filter((m) => !interested.has(m.accountId));
 
-  // Exclude miners with tx history with either party
+  // Exclude miners with a real interest in either party.
+  //
+  // The test is deliberately one-directional: what the JUROR did, never what
+  // a party did to the juror. This used to exclude any miner with any
+  // transaction in either direction, and a transfer needs no consent from
+  // its recipient. So a challenger could send one base unit to every honest
+  // juror, disqualify all of them, and be left with a pool made of their own
+  // accounts; a fraudster could do the same on day one and never be triable.
+  // Nobody can make a juror pay them, vouch for them, or score their panel.
+  const paidParty = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM transactions
+      WHERE "from" = ? AND "to" IN (?, ?) AND applied = 1`,
+  );
+  const vouchedForParty = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM vouches
+      WHERE voucher_id = ? AND vouched_id IN (?, ?) AND is_active = 1`,
+  );
+  // A miner who scored the defendant's verification has their own accuracy
+  // record riding on the verdict (applyAccuracyImpact).
+  const reviewedDefendant = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM panel_reviews r
+       JOIN verification_panels p ON p.id = r.panel_id
+      WHERE r.miner_id = ? AND p.account_id = ?`,
+  );
+  const count = (row: unknown): number => Number((row as { cnt: number }).cnt);
   pool = pool.filter((m) => {
-    const txCount = db.prepare(
-      `SELECT COUNT(*) as cnt FROM transactions
-       WHERE ("from" = ? AND "to" IN (?, ?)) OR ("to" = ? AND "from" IN (?, ?))`
-    ).get(m.accountId, courtCase.challengerId, courtCase.defendantId, m.accountId, courtCase.challengerId, courtCase.defendantId) as { cnt: number };
-    return txCount.cnt === 0;
+    if (count(paidParty.get(m.accountId, courtCase.challengerId, courtCase.defendantId)) > 0) return false;
+    if (count(vouchedForParty.get(m.accountId, courtCase.challengerId, courtCase.defendantId)) > 0) return false;
+    if (count(reviewedDefendant.get(m.id, courtCase.defendantId)) > 0) return false;
+    return true;
   });
 
   // Exclude prior jurors on this case and any related cases (for appeals)
@@ -456,7 +529,9 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
     miner: m,
     sortKey: sha256(seed + i.toString()),
   }));
-  indexed.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  // Plain code-unit order. localeCompare consults the machine's locale data,
+  // and two nodes must never disagree about who sits on a jury.
+  indexed.sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
 
   let jurorIds: string[] = [];
 
@@ -534,7 +609,6 @@ export function selectJury(db: DatabaseSync, caseId: string, blockHash: string):
  * neither should be punished for it.
  */
 export function dismissStalledCase(db: DatabaseSync, caseId: string): void {
-  const store = courtStore(db);
   const courtCase = getCase(db, caseId);
   if (!courtCase) throw new NotFoundError('Case not found');
   if (courtCase.status !== 'court_waiting_jury') {
@@ -549,13 +623,62 @@ export function dismissStalledCase(db: DatabaseSync, caseId: string): void {
 
 // ========== Voting ==========
 
-export function submitVote(db: DatabaseSync, caseId: string, minerId: string, vote: Vote): void {
+export function submitVote(
+  db: DatabaseSync,
+  caseId: string,
+  minerId: string,
+  vote: Vote,
+  nowSec: number = Math.floor(Date.now() / 1000),
+): void {
   const store = courtStore(db);
   const juror = store.findJurorByMiner(caseId, minerId);
   if (!juror) throw new ForbiddenError('Miner is not a juror on this case', 'NOT_A_JUROR');
   if (juror.vote) throw new ConflictError('Already voted', 'ALREADY_VOTED');
 
-  store.recordVote(caseId, minerId, vote, Math.floor(Date.now() / 1000));
+  // A vote counts only while the case is actually in voting. Without this a
+  // juror could vote on a case that had already been dismissed, and when the
+  // last one did, the route settled a verdict on a case the defendant had
+  // been told was over.
+  const courtCase = getCase(db, caseId);
+  if (!courtCase || courtCase.verdict !== null || courtCase.status !== 'court_voting') {
+    throw new ValidationError(`Voting is not open on this case (status: ${courtCase?.status ?? 'unknown'})`, 'VOTING_CLOSED');
+  }
+  if (courtCase.votingDeadline !== null && nowSec > courtCase.votingDeadline) {
+    throw new ValidationError('The voting deadline has passed', 'VOTING_CLOSED');
+  }
+
+  store.recordVote(caseId, minerId, vote, nowSec);
+}
+
+/**
+ * Count a jury's votes. A verdict needs a majority of the jurors SEATED, not
+ * of the votes cast.
+ *
+ * The old rule was a majority of votes cast, with no quorum. At the deadline
+ * that let one juror out of eleven decide alone: bribe or be one juror, let
+ * the other ten stay silent, and a single vote closed an account and burned
+ * four fifths of its balance. Silence is not agreement.
+ *
+ * Returns null when neither side has a majority of the seats yet. With
+ * everyone voted and an odd jury that cannot happen; the tie branch is there
+ * for an even jury and goes to the defendant.
+ */
+export function tallyVotes(jurors: Array<{ vote: Vote | null }>): {
+  verdict: Verdict | null;
+  seated: number;
+  cast: number;
+} {
+  const seated = jurors.length;
+  const human = jurors.filter((j) => j.vote === 'human').length;
+  const notHuman = jurors.filter((j) => j.vote === 'not_human').length;
+  const cast = human + notHuman;
+  let verdict: Verdict | null = null;
+  if (seated > 0) {
+    if (notHuman * 2 > seated) verdict = 'guilty';
+    else if (human * 2 > seated) verdict = 'innocent';
+    else if (cast === seated) verdict = 'innocent';
+  }
+  return { verdict, seated, cast };
 }
 
 // ========== Verdict ==========
@@ -572,9 +695,9 @@ export function submitVote(db: DatabaseSync, caseId: string, minerId: string, vo
  *
  * Two outcomes, both deliberately conservative:
  *
- *   - Voting deadline passed with at least one vote → resolve on the votes
- *     actually cast. Jurors who stayed silent forfeit their say, not the case.
- *   - Voting deadline passed with no votes at all, or arbitration deadline
+ *   - Voting deadline passed and one side holds a majority of the SEATED jury
+ *     → resolve. (See tallyVotes for why it is seats, not votes cast.)
+ *   - Voting deadline passed without that majority, or arbitration deadline
  *     passed while still waiting for a jury → dismiss neutrally. Nobody proved
  *     anything, so the challenger's stake comes back and the defendant is
  *     un-escrowed rather than either side being punished for the network's
@@ -590,17 +713,19 @@ export function submitVote(db: DatabaseSync, caseId: string, minerId: string, vo
 export function expireCourtDeadlines(
   db: DatabaseSync,
   nowSec: number,
-): { resolved: string[]; dismissed: string[] } {
+): { resolved: string[]; dismissed: string[]; failed: string[] } {
   const store = courtStore(db);
   const resolved: string[] = [];
   const dismissed: string[] = [];
+  const failed: string[] = [];
 
   const rows = db
     .prepare(
       `SELECT id, status, voting_deadline, arbitration_deadline
          FROM court_cases
         WHERE verdict IS NULL
-          AND status IN ('court_voting', 'court_waiting_jury', 'arbitration_open', 'arbitration_response')`,
+          AND status IN ('court_voting', 'court_waiting_jury', 'arbitration_open', 'arbitration_response', 'appeal_open')
+        ORDER BY created_at ASC, id ASC`,
     )
     .all() as Array<{
       id: string;
@@ -610,36 +735,52 @@ export function expireCourtDeadlines(
     }>;
 
   for (const row of rows) {
-    const votingExpired = row.voting_deadline !== null && row.voting_deadline <= nowSec;
-    const arbExpired = row.arbitration_deadline !== null && row.arbitration_deadline <= nowSec;
+    // One case's settlement failing must not take the rest down with it.
+    //
+    // This sweep runs at the top of the daily cycle, before expiry, rebase and
+    // mint. It used to have no isolation, so a single case whose settlement
+    // threw aborted the whole cycle on that node, every day, for good: no
+    // mint, no rebase, the day counter frozen, and every other case's
+    // deadline unprocessed behind it. Each settlement is its own SQL
+    // transaction, so a throw leaves that one case exactly as it was.
+    try {
+      const votingExpired = row.voting_deadline !== null && row.voting_deadline <= nowSec;
+      const arbExpired = row.arbitration_deadline !== null && row.arbitration_deadline <= nowSec;
 
-    if (row.status === 'court_voting' && votingExpired) {
-      const votes = store.findJurorsByCase(row.id).filter((j) => j.vote !== null);
-      if (votes.length > 0) {
-        // resolveCase, not resolveVerdict — an expiring appeal needs the
-        // appeal settlement (reopen the account, claw back the bounty).
-        resolveCase(db, row.id);
-        resolved.push(row.id);
-      } else {
+      if (row.status === 'court_voting' && votingExpired) {
+        if (tallyVotes(store.findJurorsByCase(row.id)).verdict !== null) {
+          // resolveCase, not resolveVerdict — an expiring appeal needs the
+          // appeal settlement (reopen the account, claw back the bounty).
+          resolveCase(db, row.id);
+          resolved.push(row.id);
+        } else {
+          dismissCase(db, row.id, nowSec);
+          dismissed.push(row.id);
+        }
+        continue;
+      }
+
+      // Waiting for a jury that never arrived, or a defendant who never
+      // responded and no jury was ever seated. Either way there is nothing to
+      // decide and no reason to keep the defendant's balance frozen.
+      if (
+        ((row.status === 'court_waiting_jury' || row.status === 'appeal_open') && (arbExpired || votingExpired)) ||
+        ((row.status === 'arbitration_open' || row.status === 'arbitration_response') && arbExpired)
+      ) {
         dismissCase(db, row.id, nowSec);
         dismissed.push(row.id);
       }
-      continue;
-    }
-
-    // Waiting for a jury that never arrived, or a defendant who never
-    // responded and no jury was ever seated. Either way there is nothing to
-    // decide and no reason to keep the defendant's balance frozen.
-    if (
-      (row.status === 'court_waiting_jury' && (arbExpired || votingExpired)) ||
-      ((row.status === 'arbitration_open' || row.status === 'arbitration_response') && arbExpired)
-    ) {
-      dismissCase(db, row.id, nowSec);
-      dismissed.push(row.id);
+    } catch (err) {
+      failed.push(row.id);
+      logger.error(
+        'court',
+        `Could not settle case ${row.id} (status ${row.status}); leaving it open and continuing. ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
     }
   }
 
-  return { resolved, dismissed };
+  return { resolved, dismissed, failed };
 }
 
 /**
@@ -656,9 +797,22 @@ function dismissCase(db: DatabaseSync, caseId: string, nowSec: number): void {
   const courtCase = getCase(db, caseId);
   if (!courtCase || courtCase.verdict !== null) return;
 
-  const challenger = getAccount(db, courtCase.challengerId);
+  // An appeal locks no challenger stake and does not escrow the defendant:
+  // the stake figure on its row is a copy of the original case's, and the
+  // original verdict stands if the appeal goes nowhere. Dismissing one used
+  // to "return" that copied stake by taking it out of whatever else the
+  // challenger had locked, and lifted an escrow that was not this case's to
+  // lift.
+  const isAppeal = courtCase.level === 'appeal';
+  const challenger = isAppeal ? null : getAccount(db, courtCase.challengerId);
 
   runTransaction(db, () => {
+    // Jurors did nothing wrong by being seated on a case that went nowhere.
+    // Their stakes used to stay locked forever, because only the challenger's
+    // was released here.
+    for (const juror of store.findJurorsByCase(caseId)) {
+      releaseJurorStake(db, juror, caseId, nowSec);
+    }
     if (challenger) {
       const release =
         courtCase.challengerStake > challenger.lockedBalance
@@ -673,7 +827,7 @@ function dismissCase(db: DatabaseSync, caseId: string, nowSec: number): void {
         );
       }
     }
-    setEscrowed(db, courtCase.defendantId, false);
+    if (!isAppeal) setEscrowed(db, courtCase.defendantId, false);
     store.setVerdict(caseId, null, 'withdrawn', nowSec);
   });
 }
@@ -698,16 +852,24 @@ export function resolveVerdict(db: DatabaseSync, caseId: string): Verdict {
     );
   }
 
+  // `verdict !== null` does not cover a dismissed case, whose verdict is null
+  // by design. Only a case in voting can be decided.
+  if (courtCase.status !== 'court_voting') {
+    throw new ValidationError(`Case is not in voting (status: ${courtCase.status})`, 'NOT_VOTING');
+  }
+
   const jurors = store.findJurorsByCase(caseId);
-  const votes = jurors.filter((j) => j.vote !== null);
+  const tally = tallyVotes(jurors);
 
-  if (votes.length === 0) throw new ValidationError('No votes cast', 'NO_VOTES');
+  if (tally.cast === 0) throw new ValidationError('No votes cast', 'NO_VOTES');
+  if (tally.verdict === null) {
+    throw new ValidationError(
+      `No majority of the seated jury yet (${tally.cast} of ${tally.seated} voted)`,
+      'NO_QUORUM',
+    );
+  }
 
-  const humanVotes = votes.filter((j) => j.vote === 'human').length;
-  const notHumanVotes = votes.filter((j) => j.vote === 'not_human').length;
-
-  // Tie = dismissed (innocent)
-  const verdict: Verdict = notHumanVotes > humanVotes ? 'guilty' : 'innocent';
+  const verdict: Verdict = tally.verdict;
   const now = Math.floor(Date.now() / 1000);
   const finalStatus = courtCase.level === 'appeal' ? 'appeal_verdict' : 'court_verdict';
 
@@ -740,8 +902,13 @@ export function resolveVerdict(db: DatabaseSync, caseId: string): Verdict {
 function applyGuiltyVerdict(
   db: DatabaseSync,
   courtCase: CourtCase,
-  jurors: import('./types.js').JurorRecord[],
+  jurors: JurorRecord[],
   now: number,
+  // False when the challenger's stake is no longer locked: an appeal that
+  // reverses an innocent verdict arrives here after that verdict already
+  // burned the stake, and "returning" it again drove locked negative, which
+  // throws and left the appeal impossible to settle.
+  opts: { releaseChallengerStake: boolean } = { releaseChallengerStake: true },
 ): void {
   const defendant = getAccount(db, courtCase.defendantId)!;
   const bountyPercent = getParam<number>(db, 'court.bounty_percent');
@@ -764,64 +931,42 @@ function applyGuiltyVerdict(
   recordLog(db, courtCase.defendantId, 'court_burn', 'earned', defendant.earnedBalance, defendant.earnedBalance, 0n, courtCase.id, now);
 
   // Return challenger stake
-  const challengerAfterBounty = getAccount(db, courtCase.challengerId)!;
-  const unlockedEarned = challengerAfterBounty.earnedBalance + courtCase.challengerStake;
-  const unlockedLocked = challengerAfterBounty.lockedBalance - courtCase.challengerStake;
-  updateBalance(db, courtCase.challengerId, 'earned_balance', unlockedEarned);
-  updateBalance(db, courtCase.challengerId, 'locked_balance', unlockedLocked);
-  recordLog(db, courtCase.challengerId, 'vouch_unlock', 'earned', courtCase.challengerStake, challengerAfterBounty.earnedBalance, unlockedEarned, courtCase.id, now);
+  if (opts.releaseChallengerStake) {
+    const challengerAfterBounty = getAccount(db, courtCase.challengerId)!;
+    const unlockedEarned = challengerAfterBounty.earnedBalance + courtCase.challengerStake;
+    const unlockedLocked = challengerAfterBounty.lockedBalance - courtCase.challengerStake;
+    updateBalance(db, courtCase.challengerId, 'earned_balance', unlockedEarned);
+    updateBalance(db, courtCase.challengerId, 'locked_balance', unlockedLocked);
+    recordLog(db, courtCase.challengerId, 'vouch_unlock', 'earned', courtCase.challengerStake, challengerAfterBounty.earnedBalance, unlockedEarned, courtCase.id, now);
+  }
 
   // Burn voucher stakes on defendant
   burnAllVouchesOnAccount(db, courtCase.defendantId);
 
   // WP §9.3 duplicate-account outcome: the defendant (the duplicate) closes
-  // above like any non-human account. The earlier account it duplicated (the
-  // counterpart) survives, but must disgorge a penalty of TWICE the harvested
-  // allocations — the double-dipped daily mint over the overlap period, from
-  // the duplicate's creation day to now. Burned from the counterpart's Earned
-  // balance, capped at what it holds (we never drive a balance negative).
-  if (courtCase.type === 'duplicate_account' && courtCase.counterpartId) {
-    applyDuplicateOverlapPenalty(db, courtCase, defendant.joinedDay, now);
-  }
+  // above like any non-human account.
+  //
+  // The white paper also has the earlier account it duplicated (the
+  // counterpart) pay twice the overlap allocations. That penalty is NOT
+  // applied, on purpose, until the counterpart is a real party to the case.
+  // As built, the counterpart was whoever the challenger typed into the
+  // filing: never notified, unable to respond, unable to appeal, and the
+  // jury is asked only whether the DEFENDANT is human. So anyone could age a
+  // throwaway account, have it truthfully convicted, name a stranger as the
+  // counterpart, and burn that stranger's savings with an honest jury. No
+  // account is debited by a case it had no voice in. Restoring the penalty
+  // needs the counterpart served, heard, able to appeal, and a separate
+  // finding that the two accounts share an owner.
 
   // Juror stakes: majority returned, minority burned
   const majorityVote: Vote = 'not_human'; // guilty = not_human won
   processJurorStakes(db, jurors, majorityVote, courtCase.id, now);
 }
 
-/**
- * Burn 2 × (overlap days × daily allocation) from the surviving counterpart on
- * a guilty duplicate-account verdict (WP §9.3). Overlap days = the number of
- * days both accounts were alive, i.e. from the duplicate defendant's join day
- * to the current day. The penalty is capped at the counterpart's Earned balance.
- */
-function applyDuplicateOverlapPenalty(
-  db: DatabaseSync,
-  courtCase: CourtCase,
-  defendantJoinedDay: number,
-  now: number,
-): void {
-  const counterpart = getAccount(db, courtCase.counterpartId!);
-  // Counterpart may have been closed by an intervening case; nothing to do.
-  if (!counterpart) return;
-
-  const currentDay = cycleStateStore(db).getCurrentDay();
-  const overlapDays = Math.max(0, currentDay - defendantJoinedDay);
-  if (overlapDays === 0) return;
-
-  const rawPenalty = 2n * BigInt(overlapDays) * DAILY_ACTIVE_POINTS;
-  const penalty = rawPenalty > counterpart.earnedBalance ? counterpart.earnedBalance : rawPenalty;
-  if (penalty <= 0n) return;
-
-  const newEarned = counterpart.earnedBalance - penalty;
-  updateBalance(db, counterpart.id, 'earned_balance', newEarned);
-  recordLog(db, counterpart.id, 'court_burn', 'earned', penalty, counterpart.earnedBalance, newEarned, courtCase.id, now);
-}
-
 function applyInnocentVerdict(
   db: DatabaseSync,
   courtCase: CourtCase,
-  jurors: import('./types.js').JurorRecord[],
+  jurors: JurorRecord[],
   now: number,
 ): void {
   // WP v2 §9.3: release escrow on innocent verdict.
@@ -852,15 +997,42 @@ function applyInnocentVerdict(
   processJurorStakes(db, jurors, majorityVote, courtCase.id, now);
 }
 
+/**
+ * Give a juror their stake back. Clamped to what is actually locked, for the
+ * same reason dismissCase clamps the challenger's: the daily rebase rescales
+ * locked balances while a case sits open.
+ */
+function releaseJurorStake(
+  db: DatabaseSync,
+  juror: JurorRecord,
+  caseId: string,
+  now: number,
+): void {
+  const acct = getAccount(db, juror.jurorAccountId);
+  if (!acct) return;
+  const release = juror.stakeAmount > acct.lockedBalance ? acct.lockedBalance : juror.stakeAmount;
+  if (release <= 0n) return;
+  const newEarned = acct.earnedBalance + release;
+  updateBalance(db, juror.jurorAccountId, 'earned_balance', newEarned);
+  updateBalance(db, juror.jurorAccountId, 'locked_balance', acct.lockedBalance - release);
+  recordLog(db, juror.jurorAccountId, 'vouch_unlock', 'earned', release, acct.earnedBalance, newEarned, caseId, now);
+}
+
 function processJurorStakes(
   db: DatabaseSync,
-  jurors: import('./types.js').JurorRecord[],
+  jurors: JurorRecord[],
   majorityVote: Vote,
   caseId: string,
   now: number,
 ): void {
   for (const juror of jurors) {
-    if (!juror.vote) continue; // abstained, stake returned
+    if (!juror.vote) {
+      // Abstained: stake returned. The comment here always said so and the
+      // code did nothing, so a juror who missed a vote had 5% of their
+      // balance locked for good.
+      releaseJurorStake(db, juror, caseId, now);
+      continue;
+    }
     const stake = juror.stakeAmount;
     const acctId = juror.jurorAccountId;
     const acct = getAccount(db, acctId)!;
@@ -908,6 +1080,18 @@ export function fileAppeal(db: DatabaseSync, caseId: string, blockHash: string):
   const id = uuid();
   const now = Math.floor(Date.now() / 1000);
 
+  // An appeal has a window. `court.appeal_window_days` was defined, governed
+  // and never read, so a verdict was never final: the losing side could
+  // reopen it years later, at a moment of its choosing.
+  const windowDays = getParam<number>(db, 'court.appeal_window_days');
+  if (original.resolvedAt !== null && now > original.resolvedAt + windowDays * 86400) {
+    throw new ValidationError(`The ${windowDays}-day appeal window has closed`, 'APPEAL_WINDOW_CLOSED');
+  }
+  // And a deadline of its own. With both deadlines null an appeal that could
+  // not seat a jury was never swept: it sat open forever, used up the one
+  // appeal, and blocked every future case against the same defendant.
+  const seatBy = now + getParam<number>(db, 'court.court_voting_days') * 86400;
+
   runTransaction(db, () => {
     store.insertCase({
       id,
@@ -918,7 +1102,7 @@ export function fileAppeal(db: DatabaseSync, caseId: string, blockHash: string):
       challengerStake: original.challengerStake,
       challengerStakePercent: original.challengerStakePercent,
       status: 'appeal_open',
-      arbitrationDeadline: null,
+      arbitrationDeadline: seatBy,
       votingDeadline: null,
       appealOf: caseId,
       counterpartId: original.counterpartId,
@@ -967,16 +1151,23 @@ export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
     );
   }
 
+  if (appealCase.status !== 'court_voting') {
+    throw new ValidationError(`Appeal is not in voting (status: ${appealCase.status})`, 'NOT_VOTING');
+  }
+
   const originalCase = getCase(db, appealCase.appealOf!)!;
 
   const jurors = store.findJurorsByCase(appealCaseId);
-  const votes = jurors.filter((j) => j.vote !== null);
+  const tally = tallyVotes(jurors);
 
-  if (votes.length === 0) throw new ValidationError('No votes cast', 'NO_VOTES');
-
-  const humanVotes = votes.filter((j) => j.vote === 'human').length;
-  const notHumanVotes = votes.filter((j) => j.vote === 'not_human').length;
-  const verdict: Verdict = notHumanVotes > humanVotes ? 'guilty' : 'innocent';
+  if (tally.cast === 0) throw new ValidationError('No votes cast', 'NO_VOTES');
+  if (tally.verdict === null) {
+    throw new ValidationError(
+      `No majority of the seated jury yet (${tally.cast} of ${tally.seated} voted)`,
+      'NO_QUORUM',
+    );
+  }
+  const verdict: Verdict = tally.verdict;
   const now = Math.floor(Date.now() / 1000);
 
   runTransaction(db, () => {
@@ -1007,8 +1198,10 @@ export function resolveAppeal(db: DatabaseSync, appealCaseId: string): Verdict {
         state.current_day + protectionDays, appealCase.defendantId,
       );
     } else if (reversed && originalCase.verdict === 'innocent' && verdict === 'guilty') {
-      // Reverse innocent: apply guilty verdict now
-      applyGuiltyVerdict(db, appealCase, jurors, now);
+      // Reverse innocent: apply guilty verdict now. The original innocent
+      // verdict already consumed the challenger's stake, so there is none
+      // locked to hand back.
+      applyGuiltyVerdict(db, appealCase, jurors, now, { releaseChallengerStake: false });
       return;
     }
 

@@ -539,9 +539,14 @@ export class AENodeRunner {
           try {
             applyChainDayCycle(this.db, block.timestamp);
           } catch (err) {
-            // Telemetry only, matching the commit path: the block itself is
-            // applied and the cycle is a separate, resumable state machine.
-            void err;
+            // Matching the commit path: the block itself is applied and the
+            // cycle is a separate, resumable state machine. Logged, because a
+            // silent failure here is a node that quietly stops minting.
+            logger.error(
+              'cycle',
+              `Day cycle FAILED while syncing block ${block.number}; this node did not expire/rebase/mint. ` +
+                (err instanceof Error ? (err.stack ?? err.message) : String(err)),
+            );
           }
 
           // Same point in the sequence as the live commit path, which is the

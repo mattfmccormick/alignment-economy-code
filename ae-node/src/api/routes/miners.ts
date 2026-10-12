@@ -1,6 +1,6 @@
 ﻿import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
-import { registerMiner, getMinerByAccount } from '../../mining/registration.js';
+import { getMinerByAccount } from '../../mining/registration.js';
 import { submitEvidence } from '../../verification/evidence.js';
 import { calculateScore } from '../../verification/scoring.js';
 import { getActiveVouchesForAccount } from '../../verification/vouching.js';
