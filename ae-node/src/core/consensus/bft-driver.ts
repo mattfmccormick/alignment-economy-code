@@ -244,6 +244,8 @@ export class BftDriver {
    */
   private pacingTimer: TimerId | null = null;
   private running = false;
+  /** True while startRound() is on the stack. See startNextRound. */
+  private startingRound = false;
   /**
    * Lock that carries across rounds at the CURRENT height. Set when the
    * round controller emits a 'set-lock' action (after precommitting a
@@ -376,30 +378,79 @@ export class BftDriver {
       // Content-validation gate (Session 45) — forwarded as-is.
       validateBlockContent: this.config.validateBlockContent,
     });
-    const actions = this.controller.handle({ type: 'start' });
-    this.executeActions(actions);
+    // A round can now finish inside the call that starts it (startNextRound
+    // explains why). Mark that window so the commit/advance it triggers defers
+    // the following round instead of recursing into this function.
+    const startedHeight = this.currentHeight;
+    const startedRound = this.currentRound;
+    this.startingRound = true;
+    try {
+      const actions = this.controller.handle({ type: 'start' });
+      this.executeActions(actions);
 
-    // Session 54: drain pre-startup buffers. Messages received before
-    // startRound() fires (during the startup-delay window) are
-    // replayed here. Each message goes through the same height/round
-    // check inside the controller's onReceivedProposal/onReceivedVote
-    // — wrong-height/wrong-round messages are silently dropped, which
-    // is the correct behavior for buffered messages whose round has
-    // since advanced.
-    const bufferedProposals = this.preStartupProposals;
-    const bufferedVotes = this.preStartupVotes;
-    this.preStartupProposals = [];
-    this.preStartupVotes = [];
-    for (const p of bufferedProposals) {
-      if (this.controller && p.height === this.currentHeight && p.round === this.currentRound) {
-        this.executeActions(this.controller.handle({ type: 'received-proposal', proposal: p }));
+      // Session 54: drain pre-startup buffers. Messages received before
+      // startRound() fires (during the startup-delay window) are
+      // replayed here. Each message goes through the same height/round
+      // check inside the controller's onReceivedProposal/onReceivedVote
+      // — wrong-height/wrong-round messages are silently dropped, which
+      // is the correct behavior for buffered messages whose round has
+      // since advanced.
+      //
+      // Only replayed while this round is still the live one. If the start
+      // event already finished the round, the buffers are left untouched for
+      // the round that replaces it.
+      const stillThisRound = () =>
+        this.controller !== null &&
+        this.currentHeight === startedHeight &&
+        this.currentRound === startedRound;
+      if (!stillThisRound()) return;
+      const bufferedProposals = this.preStartupProposals;
+      const bufferedVotes = this.preStartupVotes;
+      this.preStartupProposals = [];
+      this.preStartupVotes = [];
+      for (const p of bufferedProposals) {
+        if (stillThisRound() && p.height === this.currentHeight && p.round === this.currentRound) {
+          this.executeActions(this.controller!.handle({ type: 'received-proposal', proposal: p }));
+        }
       }
-    }
-    for (const v of bufferedVotes) {
-      if (this.controller && v.height === this.currentHeight && v.round === this.currentRound) {
-        this.executeActions(this.controller.handle({ type: 'received-vote', vote: v }));
+      for (const v of bufferedVotes) {
+        if (stillThisRound() && v.height === this.currentHeight && v.round === this.currentRound) {
+          this.executeActions(this.controller!.handle({ type: 'received-vote', vote: v }));
+        }
       }
+    } finally {
+      this.startingRound = false;
     }
+  }
+
+  /**
+   * Start the next round, never re-entrantly.
+   *
+   * A round used to need at least one message from the network or one timer
+   * to make progress, so "round finished → start the next" always ran on a
+   * fresh stack. That stopped being true once a validator evaluates quorum on
+   * its own vote: a single-validator network reaches quorum alone, so the
+   * 'start' event can return commit-block (or advance-round) directly.
+   * Calling startRound() from there recurses one frame per block with no I/O
+   * in between. On a solo node with no block interval that is an unbounded
+   * stack.
+   *
+   * Going through the clock breaks the recursion and yields to the event
+   * loop. The controller is cleared meanwhile so routeProposal/routeVote
+   * BUFFER anything that arrives for the coming round rather than feeding it
+   * to a finished controller, which would silently drop it.
+   */
+  private startNextRound(delayIfReentrantMs: number): void {
+    if (!this.startingRound) {
+      this.startRound();
+      return;
+    }
+    this.controller = null;
+    if (this.pacingTimer !== null) this.config.clock.clearTimeout(this.pacingTimer);
+    this.pacingTimer = this.config.clock.setTimeout(() => {
+      this.pacingTimer = null;
+      if (this.running) this.startRound();
+    }, delayIfReentrantMs);
   }
 
   /**
@@ -573,7 +624,7 @@ export class BftDriver {
       return;
     }
 
-    this.startRound();
+    this.startNextRound(0);
   }
 
   private onAdvance(): void {
@@ -588,6 +639,10 @@ export class BftDriver {
     if (!this.running) return;
     // Same height, round+1
     this.currentRound += 1;
-    this.startRound();
+    // A round that fails inside its own start (a solo validator that cannot
+    // vote for its own proposal) would otherwise retry in a tight loop. Hold
+    // it for one prevote timeout, which is what the round waited before a
+    // validator evaluated its own vote.
+    this.startNextRound(this.computeRoundTimeouts().prevote);
   }
 }

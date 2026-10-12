@@ -194,18 +194,16 @@ describe('Phase 55: Pending validator-change queue', () => {
     assert.equal(pendingValidatorChangeCount(db), 0);
   });
 
-  // ── BftBlockProducer wiring (without requiring full BFT commit) ─────
+  // ── BftBlockProducer wiring, through a real commit ──────────────────
   //
-  // These tests verify that the queue helpers + the producer's
-  // pendingValidatorChanges/onValidatorChangesApplied callbacks
-  // compose correctly. We don't drive a full BFT commit here —
-  // 1-validator BFT doesn't auto-commit (the round controller
-  // doesn't proactively re-check quorum after castPrevote when the
-  // self-vote alone is sufficient). Multi-runner integration is
-  // already proven end-to-end by phases 49/53/54; here we just
-  // verify the wiring contract.
+  // A single validator is a quorum of one, so starting the producer
+  // proposes, votes and commits block 1 in the same call. That makes this
+  // the cheapest end-to-end check of queue → block → commit → queue empty.
+  // (It used to stop at "the callback was invoked": the round controller
+  // never evaluated a quorum completed by its own vote, so a 1-validator
+  // network could not commit. See tests/own-vote-quorum.test.ts.)
 
-  it('BftBlockProducer drains queue via callback when building a candidate block', () => {
+  it('BftBlockProducer drains the queue into a block and empties it once that block commits', () => {
     const db = freshDb();
     const local = createFundedAccount(db, 500);
     const localIdentity = generateNodeIdentity();
@@ -257,20 +255,23 @@ describe('Phase 55: Pending validator-change queue', () => {
         'pendingValidatorChanges callback returned the queued change',
       );
       assert.equal(drainedFromCallback[0].accountId, candidate.accountId);
-      // Queue still holds the change — drain doesn't delete; deletion
-      // happens in onValidatorChangesApplied after commit, which
-      // hasn't happened in this 1-validator setup.
-      assert.equal(pendingValidatorChangeCount(db), 1);
+      // Drain does not delete; deletion happens in
+      // onValidatorChangesApplied after commit. The block committed, so
+      // the queue is empty and the change took effect.
+      assert.equal(pendingValidatorChangeCount(db), 0);
+      assert.ok(
+        new SqliteValidatorSet(db).listActive().some((v) => v.accountId === candidate.accountId),
+        'the queued register change was applied by the committed block',
+      );
     } finally {
       producer.stop();
     }
   });
 
   it('removeAppliedValidatorChanges callback drains queue when invoked with applied changes', () => {
-    // Simulating the post-commit callback path manually since
-    // 1-validator BFT can't auto-commit. The runner's wiring in
-    // src/node/runner.ts hooks the same helpers; this test verifies
-    // the helpers themselves compose as expected.
+    // The post-commit callback path, exercised directly. The runner's
+    // wiring in src/node/runner.ts hooks the same helpers; this test
+    // verifies the helpers themselves compose as expected.
     const db = freshDb();
     const a = createFundedAccount(db, 500);
     const b = createFundedAccount(db, 500);

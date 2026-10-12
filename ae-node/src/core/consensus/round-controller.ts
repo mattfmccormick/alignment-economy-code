@@ -416,6 +416,7 @@ export class RoundController {
       // Drop straight into our own prevote on the proposal we just minted.
       actions.push(...this.castPrevote(blockHash));
       this.transitionToPrevote(actions);
+      this.evaluatePrevoteQuorum(actions);
     } else {
       // Wait for the real proposer's broadcast or for the timeout.
       actions.push({
@@ -459,6 +460,9 @@ export class RoundController {
     this.proposal = proposal;
     const actions = this.castPrevote(proposal.blockHash);
     this.transitionToPrevote(actions);
+    // Peers' prevotes can land before the proposal does. If ours is the one
+    // that completes the polka, nothing else will arrive to tell us so.
+    this.evaluatePrevoteQuorum(actions);
     return actions;
   }
 
@@ -477,22 +481,7 @@ export class RoundController {
     // After adding, check whether this vote pushes us over a quorum we
     // care about for the current phase.
     if (vote.kind === 'prevote' && this.phase === 'prevote') {
-      const committed = this.prevotes.committedBlockHash();
-      if (committed) {
-        // 2/3+ prevotes for a real block → polka observation + precommit
-        actions.push({
-          type: 'observed-polka',
-          round: this.round,
-          blockHash: committed,
-        });
-        actions.push(...this.castPrecommit(committed));
-        this.transitionToPrecommit(actions);
-      } else if (this.prevotes.hasQuorum(null)) {
-        // 2/3+ prevotes for NIL → precommit NIL (no polka — polka is
-        // by definition a real-block quorum, not NIL)
-        actions.push(...this.castPrecommit(null));
-        this.transitionToPrecommit(actions);
-      }
+      this.evaluatePrevoteQuorum(actions);
     } else if (vote.kind === 'prevote' && this.phase === 'propose') {
       // "Polka without proposal": we never saw the proposal but the
       // network already has 2/3+ agreement. Skip ahead to precommit.
@@ -506,22 +495,10 @@ export class RoundController {
         actions.push(...this.castPrevote(committed));
         actions.push(...this.castPrecommit(committed));
         this.transitionToPrecommit(actions);
+        this.evaluatePrecommitQuorum(actions);
       }
     } else if (vote.kind === 'precommit' && this.phase === 'precommit') {
-      const committed = this.precommits.committedBlockHash();
-      if (committed) {
-        // 2/3+ precommits → build the certificate and commit
-        const cert = buildCommitCertificate(this.precommits);
-        if (cert) {
-          this.commitCert = cert;
-          actions.push({ type: 'commit-block', blockHash: committed, certificate: cert });
-          this.phase = 'committed';
-        }
-      } else if (this.precommits.hasQuorum(null)) {
-        // 2/3+ NIL precommits → round failed, advance
-        actions.push({ type: 'advance-round' });
-        this.phase = 'failed';
-      }
+      this.evaluatePrecommitQuorum(actions);
     }
     return actions;
   }
@@ -531,6 +508,7 @@ export class RoundController {
     // No valid proposal arrived in time — vote NIL.
     const actions = this.castPrevote(null);
     this.transitionToPrevote(actions);
+    this.evaluatePrevoteQuorum(actions);
     return actions;
   }
 
@@ -539,7 +517,74 @@ export class RoundController {
     // No prevote quorum yet. Precommit NIL and move on.
     const actions = this.castPrecommit(null);
     this.transitionToPrecommit(actions);
+    this.evaluatePrecommitQuorum(actions);
     return actions;
+  }
+
+  // ── Quorum evaluation ────────────────────────────────────────────────
+  //
+  // These run after ANY vote lands in a set while we are in the matching
+  // phase: a peer's vote arriving over the wire, or our own vote the instant
+  // we cast it.
+  //
+  // The second case used to be missing. Quorum was only ever evaluated inside
+  // onReceivedVote, and a node's own vote goes straight into its VoteSet
+  // without passing through there, so a vote that COMPLETED a quorum went
+  // unnoticed whenever it was the last one in. Two consequences:
+  //
+  //   - A single-validator network could never commit. Its own prevote is a
+  //     quorum of one, nothing arrives to trigger the check, every round
+  //     times out and fails. (castPrevote's comment claimed otherwise.)
+  //
+  //   - On a multi-validator network, the slowest validator in a round is by
+  //     definition the one whose vote is cast last. When the others' votes
+  //     reached it before it cast its own, it sat on a complete quorum until
+  //     its timeout fired and then precommitted NIL (prevote case) or failed
+  //     the round outright while its peers committed (precommit case). At
+  //     n = 3, and at n = 4 with one node down, quorum needs every live
+  //     validator, so that single NIL was enough to fail the round for
+  //     everyone.
+
+  /** Act on a prevote quorum, if one exists. No-op outside the prevote phase. */
+  private evaluatePrevoteQuorum(actions: RoundAction[]): void {
+    if (this.phase !== 'prevote') return;
+    const committed = this.prevotes.committedBlockHash();
+    if (committed) {
+      // 2/3+ prevotes for a real block → polka observation + precommit
+      actions.push({
+        type: 'observed-polka',
+        round: this.round,
+        blockHash: committed,
+      });
+      actions.push(...this.castPrecommit(committed));
+      this.transitionToPrecommit(actions);
+      this.evaluatePrecommitQuorum(actions);
+    } else if (this.prevotes.hasQuorum(null)) {
+      // 2/3+ prevotes for NIL → precommit NIL (no polka — polka is
+      // by definition a real-block quorum, not NIL)
+      actions.push(...this.castPrecommit(null));
+      this.transitionToPrecommit(actions);
+      this.evaluatePrecommitQuorum(actions);
+    }
+  }
+
+  /** Act on a precommit quorum, if one exists. No-op outside the precommit phase. */
+  private evaluatePrecommitQuorum(actions: RoundAction[]): void {
+    if (this.phase !== 'precommit') return;
+    const committed = this.precommits.committedBlockHash();
+    if (committed) {
+      // 2/3+ precommits → build the certificate and commit
+      const cert = buildCommitCertificate(this.precommits);
+      if (cert) {
+        this.commitCert = cert;
+        actions.push({ type: 'commit-block', blockHash: committed, certificate: cert });
+        this.phase = 'committed';
+      }
+    } else if (this.precommits.hasQuorum(null)) {
+      // 2/3+ NIL precommits → round failed, advance
+      actions.push({ type: 'advance-round' });
+      this.phase = 'failed';
+    }
   }
 
   private onPrecommitTimeout(): RoundAction[] {
