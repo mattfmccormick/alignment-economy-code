@@ -862,6 +862,23 @@ export class AENodeRunner {
   }
 
   private startDayCycleTimer(): void {
+    // BFT: the chain drives the day cycle and nothing else does.
+    //
+    // This timer was meant to be authority-only, and the comments on the
+    // chain-driven path say it "silently no-ops in BFT mode". It did not:
+    // the gate below is isAuthority(), which on a BFT chain is true for every
+    // active validator. So each validator ran the cycle twice over, once from
+    // its own wall clock and once when a block crossed 08:59 UTC. The two
+    // disagree about ORDER (wall clock: cycle, then the boundary block; a
+    // syncing node: block, then cycle), the boot-time catch-up ran missed
+    // cycles before the blocks that preceded them had been replayed, and the
+    // timer's unconditional +24h on next_cycle_at could land on top of the
+    // chain path's, skipping a day on that node only.
+    if (this.config.consensusMode === 'bft') {
+      logger.info('cycle', 'Day cycle is chain-driven: it runs when a committed block crosses 08:59 UTC');
+      return;
+    }
+
     if (!this.p2pNode.consensus.isAuthority()) {
       logger.info('cycle', 'Not authority, day cycle managed by authority node');
       return;

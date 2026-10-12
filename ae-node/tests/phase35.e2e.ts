@@ -278,7 +278,7 @@ describe('Phase 35: Multi-runner end-to-end BFT', () => {
       signature,
       payload: {
         to: receiverId,
-        amount: 100, // display units (the API converts)
+        amount: txAmount.toString(), // base units as a string: the API stopped accepting display-unit numbers
         pointType: 'active',
         isInPerson: false,
         recipientIsHuman: false,

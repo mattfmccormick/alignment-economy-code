@@ -4,7 +4,7 @@
     {
       "name": "ae-node",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": ["run", "dev:solo"],
       "port": 3000,
       "cwd": "ae-node"
     },

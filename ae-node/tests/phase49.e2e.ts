@@ -214,7 +214,7 @@ describe('Phase 49: Spec-driven two-runner bootstrap', () => {
       signature,
       payload: {
         to: ksB.accountId,
-        amount: 100, // display
+        amount: txAmount.toString(), // base units as a string: the API stopped accepting display-unit numbers
         pointType: 'earned',
         isInPerson: false,
         recipientIsHuman: false,

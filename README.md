@@ -89,10 +89,18 @@ browser, which makes it very easy to misdiagnose.
 
 ```bash
 cd sdk && npm install && npm run build        # REQUIRED before ae-app / ae-miner
-cd ae-node && npm install && npm run dev      # protocol on :3000
+cd ae-node && npm install && npm run dev:solo # protocol on :3000 (one-validator chain)
 cd ae-app && npm install && npm run dev       # wallet on :5173
 cd ae-miner && npm install && npm run dev     # miner dashboard on :5174
 ```
+
+**Use `npm run dev:solo`, not `npm run dev`, for local work.** `dev:solo` creates
+(first run) and starts a one-validator BFT chain: the same block producer and
+apply path as a real network, with a quorum of one. Plain `npm run dev` starts
+the legacy single-authority producer, which accepts payments but never settles
+them under the default commit-time execution, and never applies miner
+registration, vouches, verification panels or tags (those queue forever). See
+the header of `ae-node/scripts/dev-solo.mjs`.
 
 Re-run `npm run build` in `sdk/` after any change to `sdk/src/` — the apps
 consume the built `dist/`, not the TypeScript source, so edits are invisible
