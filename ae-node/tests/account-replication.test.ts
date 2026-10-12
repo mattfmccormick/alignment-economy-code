@@ -31,7 +31,7 @@ import {
   getAccount,
   updateBalance,
 } from '../src/core/account.js';
-import { replayTransaction, calculateFee } from '../src/core/transaction.js';
+import { replayTransaction, calculateFee, deriveTxId } from '../src/core/transaction.js';
 import { generateKeyPair, deriveAccountId, signPayload } from '../src/core/crypto.js';
 
 function freshDb(): DatabaseSync {
@@ -170,8 +170,9 @@ describe('account replication between nodes', () => {
     // Earned points take no percentHuman discount but still pay the fee.
     const fee = calculateFee(amount);
     const net = amount - fee;
+    const signature = signPayload(payload, timestamp, senderKp.privateKey);
     const wireTx = {
-      id: 'tx-cross-node-1',
+      id: deriveTxId(signature),
       from: sender.account.id,
       to: recipient.account.id,
       amount,
@@ -181,7 +182,7 @@ describe('account replication between nodes', () => {
       isInPerson: false,
       recipientIsHuman: false,
       memo: '',
-      signature: signPayload(payload, timestamp, senderKp.privateKey),
+      signature,
       receiverSignature: null,
       timestamp,
     };

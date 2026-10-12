@@ -32,6 +32,7 @@ import {
   replayTransaction,
   acceptPendingTransaction,
   transactionStore,
+  deriveTxId,
 } from '../src/core/transaction.js';
 import { selectApplicableTransactions } from '../src/core/consensus/BftBlockProducer.js';
 import { generateKeyPair, signPayload } from '../src/core/crypto.js';
@@ -179,8 +180,9 @@ describe('commit-time execution', () => {
     // carrying both is unappliable on every node, so the proposer has to pick.
     const toBob = submit(bob, 60_00000000n, true);
 
+    const conflictingSig = sign(alice, carol, 60_00000000n, kp.privateKey);
     const conflicting: WireTransaction = {
-      id: 'zzz-arrived-via-gossip',
+      id: deriveTxId(conflictingSig),
       from: alice,
       to: carol,
       amount: '6000000000',
@@ -190,7 +192,7 @@ describe('commit-time execution', () => {
       isInPerson: false,
       recipientIsHuman: false,
       memo: '',
-      signature: sign(alice, carol, 60_00000000n, kp.privateKey),
+      signature: conflictingSig,
       receiverSignature: null,
       timestamp: TS,
     } as unknown as WireTransaction;
@@ -233,34 +235,38 @@ describe('commit-time execution', () => {
     const bobOther = createAccount(other, 'individual', 1, 100).account.id;
     updateBalance(other, alice, 'earned_balance', 100_00000000n);
 
+    const gossipedSig = sign(alice, bobOther, 5_00000000n, kp.privateKey);
+    const gossipedId = deriveTxId(gossipedSig);
     acceptPendingTransaction(other, {
-      id: 'gossiped-1', from: alice, to: bobOther, amount: 5_00000000n,
+      id: gossipedId, from: alice, to: bobOther, amount: 5_00000000n,
       fee: 0n, netAmount: 5_00000000n, pointType: 'earned',
       isInPerson: false, recipientIsHuman: false, memo: '',
-      signature: sign(alice, bobOther, 5_00000000n, kp.privateKey),
+      signature: gossipedSig,
       receiverSignature: null, timestamp: TS,
     });
 
     assert.equal(getAccount(other, alice)!.earnedBalance, 100_00000000n, 'nothing moved');
-    assert.equal(transactionStore(other).hasTransaction('gossiped-1'), true, 'but it is known');
-    assert.equal(transactionStore(other).isApplied('gossiped-1'), false);
+    assert.equal(transactionStore(other).hasTransaction(gossipedId), true, 'but it is known');
+    assert.equal(transactionStore(other).isApplied(gossipedId), false);
   });
 
   it('gossip rejects a forged signature instead of filing it', () => {
     // Garbage must never reach the pending set: a proposer would put it in a
     // block that no honest node can apply.
     const wrong = generateKeyPair();
+    const forgedSig = sign(alice, bob, 1_00000000n, wrong.privateKey);
+    const forgedId = deriveTxId(forgedSig);
     assert.throws(
       () =>
         acceptPendingTransaction(db, {
-          id: 'forged-1', from: alice, to: bob, amount: 1_00000000n,
+          id: forgedId, from: alice, to: bob, amount: 1_00000000n,
           fee: 0n, netAmount: 1_00000000n, pointType: 'earned',
           isInPerson: false, recipientIsHuman: false, memo: '',
-          signature: sign(alice, bob, 1_00000000n, wrong.privateKey),
+          signature: forgedSig,
           receiverSignature: null, timestamp: TS,
         }),
       /invalid signature/,
     );
-    assert.equal(transactionStore(db).hasTransaction('forged-1'), false);
+    assert.equal(transactionStore(db).hasTransaction(forgedId), false);
   });
 });

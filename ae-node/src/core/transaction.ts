@@ -178,6 +178,14 @@ function applyTransactionInternal(
 ): void {
   const txStore = transactionStore(db);
   const sqliteTxStore = txStore as import('./stores/SqliteTransactionStore.js').SqliteTransactionStore;
+  // Last line of defence for the two writes below. They assume two different
+  // rows and a positive amount; with one row the second write overwrites the
+  // first, and with a negative amount the "recipient" is the one debited.
+  // Every caller checks this already. This is here so a future caller cannot
+  // forget to.
+  if (opts.from === opts.to || opts.amount <= 0n || opts.netAmount < 0n || opts.fee < 0n) {
+    throw new Error(`Refusing to apply malformed transfer ${opts.txId}`);
+  }
   runTransaction(db, () => {
     updateBalance(db, opts.from, opts.senderField, opts.newSenderBalance);
     updateBalance(db, opts.to, 'earned_balance', opts.newRecipientEarned);
@@ -269,9 +277,48 @@ export interface ReplayInput {
  *
  * Idempotent — gossip is at-least-once and relayed.
  */
+/**
+ * Invariants a transfer must satisfy no matter how it reached this node.
+ *
+ * processTransaction is the HTTP entry point and has always refused a
+ * self-transfer; a zero or negative amount never got that far because the
+ * request schema rejected it. Neither check existed on the two paths a PEER
+ * controls: gossip (acceptPendingTransaction) and block contents
+ * (replayTransaction). The sender's signature covers the amount and both
+ * parties, so each of these was a transaction the attacker could sign for
+ * themselves and have every honest node apply:
+ *
+ *   - amount < 0, to a victim: "sender pays -100" credits the sender 100 and
+ *     debits the RECIPIENT, who signed nothing. Theft from any account.
+ *   - from === to, earned points: the debit and the credit land on the same
+ *     row, the credit is computed from the pre-debit balance and written
+ *     second, so the balance grows by the net amount. Minting.
+ *   - a captured signature under a fresh id: dedup is by id, the HTTP path
+ *     derives the id from the signature, the wire path took whatever id it was
+ *     handed. Replay of any past payment.
+ *
+ * Throwing here is safe on the commit path for the same reason the existing
+ * insufficient-balance throw is: every validator rehearses a proposed block's
+ * transactions before voting, so a block carrying one of these gets NIL votes
+ * and is never certified.
+ */
+function assertTransferInvariants(input: ReplayInput, where: 'Pending' | 'Replay'): void {
+  if (input.amount <= 0n) {
+    throw new Error(`${where}: non-positive amount ${input.amount} on tx ${input.id}`);
+  }
+  if (input.from === input.to) {
+    throw new Error(`${where}: self-transfer on tx ${input.id}`);
+  }
+  if (input.id !== deriveTxId(input.signature)) {
+    throw new Error(`${where}: tx id ${input.id} is not derived from its signature`);
+  }
+}
+
 export function acceptPendingTransaction(db: DatabaseSync, input: ReplayInput): void {
   const txStore = transactionStore(db);
   if (txStore.hasTransaction(input.id)) return;
+
+  assertTransferInvariants(input, 'Pending');
 
   const sender = getAccount(db, input.from);
   if (!sender) throw new Error(`Pending: sender account not found: ${input.from}`);
@@ -354,6 +401,8 @@ export function replayTransaction(
   // unapplied until its block commits, so an existence check would skip the
   // very work this call exists to do and the money would never move.
   const alreadyKnown = txStore.hasTransaction(input.id);
+
+  assertTransferInvariants(input, 'Replay');
 
   const sender = getAccount(db, input.from);
   if (!sender) throw new Error(`Replay: sender account not found: ${input.from}`);
@@ -517,6 +566,9 @@ export function processTransaction(
   if (!recipient.isActive) throw new ValidationError(`Recipient account is inactive: ${input.to}`, 'ACCOUNT_INACTIVE');
 
   if (input.from === input.to) throw new ValidationError('Cannot send to self', 'SELF_TRANSFER');
+  // The request schema already rejects this for HTTP callers. Checked here as
+  // well so the rule lives with the money, not with one of its callers.
+  if (input.amount <= 0n) throw new ValidationError('Amount must be greater than zero', 'INVALID_AMOUNT');
 
   // WP v2 §9.3: escrowed accounts cannot send earned points. Daily
   // allocations (active/supportive/ambient) remain spendable.

@@ -26,6 +26,7 @@ import { seedParams } from '../src/config/params.js';
 import { createAccount, getAccount, updateBalance } from '../src/core/account.js';
 import { dryRunBlockTransactions } from '../src/core/consensus/BftBlockProducer.js';
 import { generateKeyPair, signPayload } from '../src/core/crypto.js';
+import { deriveTxId } from '../src/core/transaction.js';
 import type { WireTransaction } from '../src/core/types.js';
 
 function freshDb(): DatabaseSync {
@@ -42,7 +43,6 @@ function makeTx(
   to: string,
   amount: bigint,
   privateKey: string,
-  id = 'tx-1',
 ): WireTransaction {
   const payload = {
     from,
@@ -53,8 +53,11 @@ function makeTx(
     recipientIsHuman: false,
     memo: '',
   };
+  // The id is derived from the signature, as on a real node. ML-DSA signing
+  // is randomised, so two otherwise identical calls still get distinct ids.
+  const signature = signPayload(payload, TS, privateKey);
   return {
-    id,
+    id: deriveTxId(signature),
     from,
     to,
     amount,
@@ -64,7 +67,7 @@ function makeTx(
     isInPerson: false,
     recipientIsHuman: false,
     memo: '',
-    signature: signPayload(payload, TS, privateKey),
+    signature,
     receiverSignature: null,
     timestamp: TS,
   } as unknown as WireTransaction;
@@ -132,8 +135,8 @@ describe('pre-vote block dry run', () => {
   it('rejects the whole block when any single transaction fails', () => {
     // Blocks apply atomically, so validity is all-or-nothing. A block that is
     // 90% fine is still a block this node cannot apply.
-    const good = makeTx(sender, recipient, 1_00000000n, senderKp.privateKey, 'tx-good');
-    const bad = makeTx('cd'.repeat(20), recipient, 1_00000000n, senderKp.privateKey, 'tx-bad');
+    const good = makeTx(sender, recipient, 1_00000000n, senderKp.privateKey);
+    const bad = makeTx('cd'.repeat(20), recipient, 1_00000000n, senderKp.privateKey);
 
     assert.equal(dryRunBlockTransactions(db, [good, bad], 1).valid, false);
     // And the good one did not sneak through.
@@ -143,8 +146,8 @@ describe('pre-vote block dry run', () => {
 
   it('leaves no trace after a rejected block either', () => {
     const before = getAccount(db, sender)!.earnedBalance;
-    const good = makeTx(sender, recipient, 1_00000000n, senderKp.privateKey, 'tx-good');
-    const bad = makeTx('cd'.repeat(20), recipient, 1_00000000n, senderKp.privateKey, 'tx-bad');
+    const good = makeTx(sender, recipient, 1_00000000n, senderKp.privateKey);
+    const bad = makeTx('cd'.repeat(20), recipient, 1_00000000n, senderKp.privateKey);
 
     dryRunBlockTransactions(db, [good, bad], 1);
 
