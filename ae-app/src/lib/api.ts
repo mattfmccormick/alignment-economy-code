@@ -277,9 +277,14 @@ export const api = {
   fileChallenge: (signedBody: unknown) =>
     request<{ case: CourtCaseData }>('POST', '/court/challenges', signedBody),
 
-  // Escalate a case from arbitration to full court (signed; only the original challenger).
-  escalateCase: (caseId: string, signedBody: unknown) =>
-    request<{ case: CourtCaseData; juryMinerIds: string[] }>('POST', `/court/cases/${caseId}/escalate`, signedBody),
+  // Cases move from arbitration to a jury on their own at day 7. The challenger
+  // may withdraw before then (the 1,440-point floor goes to the defendant); the
+  // defendant may ask for a jury early. Both signed.
+  withdrawCase: (caseId: string, signedBody: unknown) =>
+    request<{ case: CourtCaseData }>('POST', `/court/cases/${caseId}/withdraw`, signedBody),
+
+  demandTrial: (caseId: string, signedBody: unknown) =>
+    request<{ case: CourtCaseData }>('POST', `/court/cases/${caseId}/demand-trial`, signedBody),
 
   // Network
   getNetworkStatus: () =>

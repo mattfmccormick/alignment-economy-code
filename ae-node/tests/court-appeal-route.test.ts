@@ -7,6 +7,12 @@
 //
 // fileAppeal checks the case is appealable but says nothing about WHO may
 // appeal, so standing is enforced in the route: only the losing party has it.
+//
+// Filing an appeal seats no jury. The appeal waits in `appeal_open` and the
+// next day-cycle sweep draws a jury the same size as the first, from miners
+// who did not sit on it, so the appellant cannot pick the block that seats it.
+// An appeal is only possible while the verdict is still pending: once the
+// window closes and the case settles, it is final.
 
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,10 +21,11 @@ import http from 'node:http';
 import { initializeSchema } from '../src/db/schema.js';
 import { seedParams } from '../src/config/params.js';
 import { createApp } from '../src/api/server.js';
-import { createAccount, updateBalance } from '../src/core/account.js';
+import { createAccount, getAccount, updateBalance } from '../src/core/account.js';
 import { registerMiner, setMinerTier } from '../src/mining/registration.js';
 import {
   fileChallenge, escalateToFull, selectJury, submitVote, resolveCase, getCase,
+  expireCourtDeadlines, courtStore,
 } from '../src/court/court.js';
 import { signPayload, generateKeyPair } from '../src/core/crypto.js';
 import { resetRateLimits } from '../src/api/middleware/rateLimit.js';
@@ -33,6 +40,7 @@ function freshDb(): DatabaseSync {
 }
 
 const pts = (n: number) => BigInt(Math.round(n * Number(PRECISION)));
+const now = () => Math.floor(Date.now() / 1000);
 
 function request(
   app: ReturnType<typeof createApp>,
@@ -85,7 +93,7 @@ function envelope(accountId: string, privateKey: string) {
   return { accountId, timestamp, signature: signPayload(payload, timestamp, privateKey), payload };
 }
 
-/** Run a case to a guilty verdict and return the parties. */
+/** Run a case to a (still pending) guilty verdict and return the parties. */
 function guiltyCase(db: DatabaseSync) {
   const defendant = keyed(db, 80);
   const challenger = miner(db, 1);
@@ -96,15 +104,16 @@ function guiltyCase(db: DatabaseSync) {
   const jurors = selectJury(db, c.id, 'appeal-route');
   for (const j of jurors) submitVote(db, c.id, j, 'not_human');
   assert.equal(resolveCase(db, c.id), 'guilty');
-  return { caseId: c.id, defendant, challenger };
+  assert.equal(getCase(db, c.id)!.status, 'verdict_pending');
+  return { caseId: c.id, defendant, challenger, jurors };
 }
 
 describe('POST /court/cases/:id/appeal', () => {
   beforeEach(() => resetRateLimits());
 
-  it('lets the losing defendant appeal a guilty verdict', async () => {
+  it('lets the losing defendant appeal a guilty verdict; the next sweep seats a fresh jury of the same size', async () => {
     const db = freshDb();
-    const { caseId, defendant } = guiltyCase(db);
+    const { caseId, defendant, jurors } = guiltyCase(db);
 
     const res = await request(
       createApp(db),
@@ -115,9 +124,53 @@ describe('POST /court/cases/:id/appeal', () => {
 
     assert.equal(res.status, 200);
     assert.equal(res.data.data.appealOf, caseId);
-    const appeal = getCase(db, res.data.data.case.id)!;
+    const appealId = res.data.data.case.id;
+    const appeal = getCase(db, appealId)!;
     assert.equal(appeal.level, 'appeal');
     assert.equal(appeal.appealOf, caseId);
+    assert.equal(appeal.status, 'appeal_open');
+    assert.equal(
+      courtStore(db).findJurorsByCase(appealId).length,
+      0,
+      'filing the appeal must not seat a jury; the sweep does',
+    );
+    // Nothing has settled while the appeal is pending.
+    assert.equal(getCase(db, caseId)!.status, 'verdict_pending');
+    assert.equal(getAccount(db, defendant.accountId)!.isActive, true);
+    assert.equal(getAccount(db, defendant.accountId)!.isEscrowed, true);
+
+    const sweep = expireCourtDeadlines(db, now() + 60);
+    assert.deepEqual(sweep.seated, [appealId]);
+    assert.equal(getCase(db, appealId)!.status, 'court_voting');
+    const appealJurors = courtStore(db).findJurorsByCase(appealId).map((j) => j.minerId);
+    assert.equal(appealJurors.length, jurors.length, 'an appeal jury is the same size as the first');
+    assert.equal(
+      appealJurors.filter((m) => jurors.includes(m)).length,
+      0,
+      'nobody who sat on the first jury sits on the appeal',
+    );
+    db.close();
+  });
+
+  it('refuses an appeal once the verdict has settled', async () => {
+    const db = freshDb();
+    const { caseId, defendant } = guiltyCase(db);
+
+    // No appeal inside the window: the next sweep after it settles the case.
+    const out = expireCourtDeadlines(db, now() + 8 * 86400);
+    assert.deepEqual(out.settled, [caseId]);
+    assert.equal(getCase(db, caseId)!.status, 'court_verdict');
+
+    const res = await request(
+      createApp(db),
+      'POST',
+      `/api/v1/court/cases/${caseId}/appeal`,
+      envelope(defendant.accountId, defendant.privateKey),
+    );
+
+    assert.equal(res.status, 400);
+    assert.equal(res.data.error.code, 'VERDICT_FINAL');
+    assert.equal(courtStore(db).findAppealsOf(caseId).length, 0);
     db.close();
   });
 

@@ -31,6 +31,7 @@ export default function CaseDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [voting, setVoting] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -102,6 +103,25 @@ export default function CaseDetail() {
     }
   }
 
+  async function withdraw() {
+    if (!wallet?.privateKey || !id) return;
+    setWithdrawing(true); setError(null);
+    try {
+      const ts = Math.floor(Date.now() / 1000);
+      const payload = {};
+      const sig = signPayload(payload, ts, wallet.privateKey);
+      const r = await api.withdrawCase(id, {
+        accountId: wallet.accountId, timestamp: ts, signature: sig, payload,
+      });
+      if (r.success) await load();
+      else setError(r.error?.message ?? 'Withdraw failed');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setWithdrawing(false);
+    }
+  }
+
   return (
     <div className="p-4 space-y-4 max-w-3xl">
       <div className="flex items-center justify-between">
@@ -127,6 +147,22 @@ export default function CaseDetail() {
           role={isChallenger ? 'challenger' : 'defendant'}
           onPosted={load}
         />
+      )}
+
+      {isChallenger && caseHeader.verdict === null && caseHeader.status === 'arbitration_open' && (
+        <div className="bg-surface border border-border rounded-lg p-4">
+          <button
+            onClick={withdraw}
+            disabled={withdrawing}
+            className="w-full py-2 bg-orange-500/20 text-orange-300 rounded-lg text-xs hover:bg-orange-500/30 transition-colors disabled:opacity-50"
+          >
+            {withdrawing ? 'Withdrawing…' : 'Withdraw case'}
+          </button>
+          <p className="text-[11px] text-muted mt-1.5">
+            1,440 points of your stake go to the defendant, and you cannot refile against them for 30 days.
+            Otherwise the case goes to a jury on day 7.
+          </p>
+        </div>
       )}
 
       {isJuror && caseOpen && !myJurorRow!.vote && (

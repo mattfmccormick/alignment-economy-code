@@ -32,6 +32,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { sha256, sign, verify } from '../core/crypto.js';
 import { createVouch, withdrawVouch } from './vouching.js';
 import { verificationStore } from './panel.js';
+import { getPolicy } from './policy.js';
 import { getAccount } from '../core/account.js';
 
 export interface VouchOpCreate {
@@ -161,6 +162,12 @@ export function computeVouchOperationsHash(ops: VouchOperation[]): string {
  *
  * Uses the block timestamp as `now` so the vouches table and audit log are
  * identical on every node.
+ *
+ * Never throws for an operation that cannot apply. It is skipped instead, the
+ * same way on every node. A throw here rolled back the whole committed block,
+ * left the operation queued, and halted consensus on every retry: a vouch from
+ * an account frozen by a court case was enough, and every court filing freezes
+ * an account.
  */
 export function applyVouchOperation(
   db: DatabaseSync,
@@ -172,6 +179,7 @@ export function applyVouchOperation(
     const id = deriveVouchId(op);
     // Already applied? (re-delivery / re-replay)
     if (verif.findActiveVouchById(id)) return;
+    if (validateVouchOperationApplicable(db, op) !== null) return;
     createVouch(db, op.voucherId, op.vouchedId, op.stakePercent, {
       id,
       now: blockTimestampSec,
@@ -180,6 +188,7 @@ export function applyVouchOperation(
     // Withdraw only if the vouch is still active; otherwise this is a
     // re-delivery and must be a no-op.
     if (!verif.findActiveVouchById(op.vouchId)) return;
+    if (validateVouchOperationApplicable(db, op) !== null) return;
     withdrawVouch(db, op.vouchId, blockTimestampSec);
   }
 }
@@ -194,13 +203,37 @@ export function validateVouchOperationApplicable(db: DatabaseSync, op: VouchOper
   const voucher = getAccount(db, op.voucherId);
   if (!voucher) return `voucher account not found: ${op.voucherId}`;
   if (op.type === 'vouch_create') {
+    // Every precondition createVouch throws on, so apply can skip instead.
+    if (!voucher.isActive) return 'voucher account is inactive';
+    if (voucher.isEscrowed) return 'cannot create vouches while the account is frozen by a court case';
     if (op.voucherId === op.vouchedId) return 'cannot vouch for yourself';
     if (!getAccount(db, op.vouchedId)) return `vouched account not found: ${op.vouchedId}`;
     if (op.stakePercent <= 0 || op.stakePercent > 100) return 'stakePercent out of range';
+    const minStakePercent = getPolicy(db).evidenceTypes.find((t) => t.id === 'vouch')?.minStakePercent ?? 5;
+    if (op.stakePercent < minStakePercent) return `stakePercent below minimum ${minStakePercent}%`;
+    const holdings = voucher.earnedBalance + voucher.lockedBalance;
+    const stake = (holdings * BigInt(Math.round(op.stakePercent * 100))) / 10000n;
+    if (stake === 0n) return 'stake rounds to zero';
+    if (stake > voucher.earnedBalance) return 'insufficient earned balance for the stake';
+    // A withdrawn vouch keeps its row, so its derived id is taken for good.
+    if (db.prepare('SELECT 1 FROM vouches WHERE id = ?').get(deriveVouchId(op))) return 'vouch already exists';
   } else {
     const vouch = verificationStore(db).findActiveVouchById(op.vouchId);
     if (!vouch) return `active vouch not found: ${op.vouchId}`;
     if (vouch.voucherId !== op.voucherId) return 'withdrawer is not the voucher';
+    // Vouchers may pull out any time, except once a jury has found the account
+    // not human (or while an appeal is running) and before the case settles.
+    // A guilty verdict used to burn voucher stakes the moment it landed; with
+    // settlement now waiting out the appeal window, the verdict is public for
+    // a week first, and without this every voucher simply walked away.
+    const held = db.prepare(
+      `SELECT 1 FROM court_cases c
+        WHERE c.defendant_id = ? AND c.status = 'verdict_pending'
+          AND (c.verdict = 'guilty' OR EXISTS (
+                SELECT 1 FROM court_cases a
+                 WHERE a.appeal_of = c.id AND a.verdict IS NULL AND a.status NOT IN ('dismissed', 'closed')))`,
+    ).get(vouch.vouchedId);
+    if (held) return 'this vouch backs an account a jury has found not human; it is held until the case settles';
   }
   return null;
 }

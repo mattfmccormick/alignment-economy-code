@@ -7,8 +7,8 @@ import { eventBus } from '../websocket.js';
 import {
   fileChallenge,
   getCase,
-  escalateToFull,
-  selectJury,
+  withdrawChallenge,
+  demandTrial,
   submitVote,
   resolveCase,
   getActiveCases,
@@ -17,8 +17,6 @@ import {
   getArgumentsForCase,
   fileAppeal,
 } from '../../court/court.js';
-import { getLatestBlock } from '../../core/block.js';
-import { getMiner } from '../../mining/registration.js';
 import type { CaseType, Vote } from '../../court/types.js';
 
 export function courtRoutes(db: DatabaseSync): Router {
@@ -155,41 +153,38 @@ export function courtRoutes(db: DatabaseSync): Router {
     } catch (e) { next(e); }
   });
 
-  // POST /court/cases/:id/escalate - challenger escalates from arbitration to full court.
-  // Auth required; only the original challenger can escalate.
-  router.post('/cases/:id/escalate', authMiddleware(db), (req, res, next) => {
+  // There is no challenger "escalate" any more. A case moves to court on its
+  // own when the arbitration window closes (the day-cycle sweep), and the jury
+  // is drawn at that sweep from the newest block. Letting the challenger pick
+  // the moment let them pick the block, and with it the jury.
+
+  // POST /court/cases/:id/withdraw - the challenger drops the case during
+  // arbitration. The fixed floor of the stake goes to the defendant; the rest
+  // comes back; no refiling against the same defendant for the cooldown.
+  router.post('/cases/:id/withdraw', authMiddleware(db), (req, res, next) => {
     try {
       const caseId = req.params.id as string;
-      const courtCase = getCase(db, caseId);
-      if (!courtCase) {
-        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Case not found' } });
-        return;
-      }
-      if (courtCase.challengerId !== req.accountId) {
-        res.status(403).json({ success: false, error: { code: 'NOT_CHALLENGER', message: 'Only the challenger can escalate' } });
-        return;
-      }
-      const updated = escalateToFull(db, caseId);
-
-      // Auto-select the jury at the latest block hash for deterministic randomness.
-      const latest = getLatestBlock(db);
-      const jurorMinerIds = selectJury(db, caseId, latest?.hash ?? 'genesis');
-
-      // Notify each juror miner that they've been called.
-      for (const minerId of jurorMinerIds) {
-        const miner = getMiner(db, minerId);
-        if (miner) {
-          eventBus.emit('jury:called', {
-            accountId: miner.accountId,
-            minerId,
-            caseId,
-          });
-        }
-      }
-
+      const updated = withdrawChallenge(db, caseId, req.accountId!);
+      eventBus.emit('court:withdrawn', { accountId: updated.defendantId, caseId });
       res.json({
         success: true,
-        data: { case: serializeCase(updated), juryMinerIds: jurorMinerIds },
+        data: { case: serializeCase(updated) },
+        meta: { timestamp: Math.floor(Date.now() / 1000) },
+      });
+    } catch (e) { next(e); }
+  });
+
+  // POST /court/cases/:id/demand-trial - the defendant asks for a jury now
+  // instead of waiting out arbitration. The jury is still drawn at the next
+  // day-cycle sweep, so asking does not let the defendant pick it either.
+  router.post('/cases/:id/demand-trial', authMiddleware(db), (req, res, next) => {
+    try {
+      const caseId = req.params.id as string;
+      const updated = demandTrial(db, caseId, req.accountId!);
+      eventBus.emit('court:trial-demanded', { accountId: updated.challengerId, caseId });
+      res.json({
+        success: true,
+        data: { case: serializeCase(updated) },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });
     } catch (e) { next(e); }
@@ -236,23 +231,14 @@ export function courtRoutes(db: DatabaseSync): Router {
         return;
       }
 
-      const latest = getLatestBlock(db);
-      const appeal = fileAppeal(db, caseId, latest?.hash ?? 'genesis');
+      // The new jury is drawn at the next day-cycle sweep, not here, so the
+      // appellant cannot pick the block that seats it.
+      const appeal = fileAppeal(db, caseId);
 
-      // Tell the other side their win is being contested, and call the new jury.
+      // Tell the other side their win is being contested.
       const otherParty =
         losingParty === original.defendantId ? original.challengerId : original.defendantId;
       eventBus.emit('court:appeal', { accountId: otherParty, caseId, appealId: appeal.id });
-      for (const juror of courtStore(db).findJurorsByCase(appeal.id)) {
-        const miner = getMiner(db, juror.minerId);
-        if (miner) {
-          eventBus.emit('jury:called', {
-            accountId: miner.accountId,
-            minerId: juror.minerId,
-            caseId: appeal.id,
-          });
-        }
-      }
 
       res.json({
         success: true,

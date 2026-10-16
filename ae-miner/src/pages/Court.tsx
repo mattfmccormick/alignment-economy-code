@@ -270,7 +270,7 @@ export default function Court() {
                 className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-sm font-mono text-white placeholder-muted/40 focus:outline-none focus:border-teal"
               />
               <p className="text-[11px] text-muted mt-1">
-                On a guilty verdict the defendant closes; this account survives and disgorges 2× the double-harvested daily points.
+                On a guilty verdict the defendant closes. This older account survives and is not penalized.
               </p>
             </div>
           )}
@@ -281,6 +281,9 @@ export default function Court() {
               onChange={(e) => setStakePercent(parseInt(e.target.value))}
               className="w-full"
             />
+            <p className="text-[11px] text-muted mt-1">
+              Never less than 1,440 points. A higher percentage tells the jury you are more confident.
+            </p>
           </div>
           <div>
             <label className="block text-xs text-muted mb-1.5">

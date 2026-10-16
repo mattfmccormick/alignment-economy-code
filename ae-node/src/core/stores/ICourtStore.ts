@@ -41,7 +41,7 @@ export interface ICourtStore {
   /** Look up a case by id. */
   findCaseById(id: string): CourtCase | null;
 
-  /** Active = status NOT IN ('closed','withdrawn','court_verdict','appeal_verdict'). */
+  /** Active = status NOT IN ('closed','withdrawn','dismissed','court_verdict','appeal_verdict'). */
   findActiveCases(): CourtCase[];
 
   /** Cases where the account is challenger or defendant. Newest first. */
@@ -56,8 +56,12 @@ export interface ICourtStore {
   /** How many appeals have been filed against this case? */
   countAppealsOf(caseId: string): number;
 
-  /** Move case to court level (out of arbitration). */
-  setLevelToCourt(caseId: string): void;
+  /**
+   * Move case to court level (out of arbitration). Until a jury is seated,
+   * `voting_deadline` holds the seat-by deadline; seating overwrites it with
+   * the real voting deadline.
+   */
+  setLevelToCourt(caseId: string, seatByDeadline: number): void;
 
   /** Mark case as waiting for jury (insufficient eligible miners). */
   setStatusWaitingJury(caseId: string): void;

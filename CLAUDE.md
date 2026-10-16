@@ -54,14 +54,61 @@ payments and never settles them, and never applies miner registration, vouches,
 panels or tags. Retiring it in favour of single-validator BFT is the first item
 on the cleanup list.
 
-**The court must not carry real value until it is rebuilt on-chain.** What
-remains is design, not bugs: the filer times the jury draw, juror seats are
-free, punishment lands before an appeal, freezing an account is free, votes
-are not sealed. The five rules for the rebuild are in the document above.
+**Court rules, October 16, 2026 (Matt's answers to the court rebuild plan).**
+The plan and his answers live in the Claude Docs "Court Rebuild Plan". Applied to
+`src/court/court.ts`; pinned by `tests/court-oct16-rules.test.ts` and
+`tests/court-hardening.test.ts`:
+- New cases are refused on a network with more than one active validator
+  (`COURT_NOT_ON_CHAIN`). Court state is still node-local, and miner accuracy
+  (which the court writes) weights proposer selection, so a verdict on one node
+  could split the validators. This guard stays until the court is an on-chain lane.
+- A jury seat belongs to a verified human: any active miner (tier no longer
+  matters) whose individual account is active, not frozen, and at
+  `court.juror_min_percent_human` (90) or higher. Jury size steps 3, 7, 11 with
+  the eligible pool (`jurySizeFor`), never more than a third of it. An appeal
+  jury is the same size as the first, nobody reused.
+- Filing stakes the chosen percentage but never less than 1,440 points. The
+  challenger can withdraw during arbitration; the floor goes to the defendant and
+  the same challenger cannot refile for 30 days.
+- No challenger escalate. A case moves to court on its own at day 7; the
+  defendant may demand a trial early. Juries (appeals included) are drawn at the
+  day-cycle sweep from the newest block, never at a moment a party picks.
+- Nothing settles at the jury's decision. Status `verdict_pending` keeps every
+  stake locked and the defendant frozen through the appeal window, then the case
+  settles once against the final verdict. All jurors on decided rounds are judged
+  against the final verdict; mismatches and no-shows forfeit to the matching
+  jurors; no-shows sit out 30 days. Jury service is recorded at settlement.
+- Guilty takes earned plus the stakes the account posted for others (vouches it
+  gave). Validator stake and the miner record are not touched (chain-owned tables).
+  A frozen account cannot register as a validator (route-level check).
+- The daily rebase now rescales `vouches.stake_amount` (`rebaseVouchStakes`).
+  Before, rebalanceVouchLocks subtracted the shrink twice and burnVouch threw after
+  one normal day, so guilty verdicts on vouched defendants could never settle.
+- Adversarial review fixes, same day: the vouch lane skips (never throws on) a
+  create it cannot apply, so a frozen defendant's vouch can no longer halt the
+  chain; a vouch backing an account with a pending guilty verdict (or a running
+  appeal) cannot be withdrawn until the case settles, because deferred
+  settlement had opened a week for vouchers to walk away; one appeal at a time;
+  fractional juror-stake settings no longer throw; `rebase()` returns early when
+  today's rebase already committed (the old resume path rescaled zero-earned
+  accounts' locked balances twice). All in `tests/court-oct16-rules.test.ts`.
+- Parked by Matt: the duplicate-account penalty (stays off) and where arguments
+  live (on chain, fingerprint, or a side chain). Follow-up D (a juror stake
+  floor) awaits him; E (an appeal stake) is moot because the challenger's stake
+  now rides on the final verdict; C (vouches held from filing) is partly done
+  (held from a guilty verdict, per the review fix above).
+- Open, needs Matt: a dismissal for want of a jury refunds the challenger and
+  sets no cooldown, and frozen accounts cannot sit on juries, so side cases
+  against jurors can empty a small pool and force dismissals. A friendly
+  challenger can also hold the one-case slot at no net cost (the withdrawal
+  floor goes to the friend). Both are in the Court Rebuild Plan doc.
 
-**Open decisions for Matt** (section 5 of the document): is a miner a person or
-a business; the duplicate-account penalty; minimum jury size; the email and
-password account option; raising the minimum validator stake.
+**The court must not carry real value until it is rebuilt on-chain.** Still
+true after October 16: it is node-local, votes are a plaintext column, and juror
+identities are public.
+
+**Open decisions for Matt** (section 5 of the document): the email and password
+account option; raising the minimum validator stake.
 
 ## Launch-readiness audit (September 3, 2026)
 

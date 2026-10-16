@@ -94,6 +94,7 @@ export function setupWebSocket(server: Server, db: DatabaseSync): WebSocketServe
     'allocation:minted', 'allocation:expired', 'score:changed',
     'vouch:received', 'vouch:withdrawn',
     'court:filed-against', 'court:verdict', 'court:argument',
+    'court:appeal', 'court:withdrawn', 'court:trial-demanded',
   ]) {
     eventBus.on(evt, (data: { accountId: string; [key: string]: unknown }) => {
       sendToAccount(data.accountId, { type: evt, data });

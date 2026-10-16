@@ -1,12 +1,15 @@
 // An appeal must settle through the appeal path.
 //
 // The vote route called resolveVerdict for every case, so an appeal never ran
-// its own settlement — resolveAppeal had ZERO production callers, verified by
-// grep. A reversal therefore never reopened the defendant's account and never
-// clawed back the bounty; it just ran the ordinary verdict settlement a second
-// time on top of whatever the original case had already done.
+// its own settlement. resolveAppeal had ZERO production callers, verified by
+// grep. resolveCase now dispatches on level, so no call site has to remember.
 //
-// resolveCase now dispatches on level, so no call site has to remember.
+// Settlement is also deferred now. The first jury's verdict only records
+// `verdict_pending`: nothing burns, no bounty is paid, the defendant stays
+// open and frozen. An appeal verdict then settles the WHOLE case once, against
+// itself. So an overturned guilty verdict leaves the defendant exactly whole,
+// with nothing to reopen and no bounty to claw back (the old court burned and
+// paid out at the first verdict and could never fully undo it).
 
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,9 +18,10 @@ import { initializeSchema } from '../src/db/schema.js';
 import { seedParams } from '../src/config/params.js';
 import { createAccount, getAccount, updateBalance } from '../src/core/account.js';
 import { registerMiner, setMinerTier } from '../src/mining/registration.js';
+import { createVouch, getActiveVouchesForAccount } from '../src/verification/vouching.js';
 import {
   fileChallenge, escalateToFull, selectJury, submitVote,
-  resolveCase, fileAppeal, getCase, courtStore,
+  resolveCase, fileAppeal, getCase, courtStore, expireCourtDeadlines,
 } from '../src/court/court.js';
 import { PRECISION } from '../src/core/constants.js';
 
@@ -30,6 +34,7 @@ function freshDb(): DatabaseSync {
 }
 
 const pts = (n: number) => BigInt(Math.round(n * Number(PRECISION)));
+const now = () => Math.floor(Date.now() / 1000);
 
 function miner(db: DatabaseSync, tier: 1 | 2, earned: number) {
   const r = createAccount(db, 'individual', 1, 100);
@@ -39,75 +44,125 @@ function miner(db: DatabaseSync, tier: 1 | 2, earned: number) {
   return { accountId: r.account.id, minerId: m.id };
 }
 
+/** A pending guilty verdict with an appeal filed and its jury seated by the sweep. */
+function guiltyThenAppealSeated(db: DatabaseSync) {
+  const defendant = createAccount(db, 'individual', 1, 80);
+  updateBalance(db, defendant.account.id, 'earned_balance', pts(10_000));
+  const voucher = createAccount(db, 'individual', 1, 100);
+  updateBalance(db, voucher.account.id, 'earned_balance', pts(5_000));
+  const vouch = createVouch(db, voucher.account.id, defendant.account.id, 10);
+  const challenger = miner(db, 1, 10_000);
+  for (let i = 0; i < 26; i++) miner(db, 2, 5_000);
+
+  const c = fileChallenge(db, challenger.accountId, defendant.account.id, 'not_human', 10);
+  const challengerEarnedAfterFiling = getAccount(db, challenger.accountId)!.earnedBalance;
+  escalateToFull(db, c.id);
+  const jurors = selectJury(db, c.id, 'appeal-original');
+  for (const j of jurors) submitVote(db, c.id, j, 'not_human');
+  assert.equal(resolveCase(db, c.id), 'guilty');
+
+  const appeal = fileAppeal(db, c.id);
+  assert.equal(appeal.status, 'appeal_open');
+  assert.equal(courtStore(db).findJurorsByCase(appeal.id).length, 0, 'filing seats no jury');
+  assert.deepEqual(expireCourtDeadlines(db, now() + 60).seated, [appeal.id]);
+  const appealJurors = courtStore(db).findJurorsByCase(appeal.id).map((j) => j.minerId);
+
+  return {
+    caseId: c.id,
+    stake: c.challengerStake,
+    appealId: appeal.id,
+    jurors,
+    appealJurors,
+    defendantId: defendant.account.id,
+    voucherId: voucher.account.id,
+    vouch,
+    challengerId: challenger.accountId,
+    challengerEarnedAfterFiling,
+  };
+}
+
 describe('court: appeals settle through the appeal path', () => {
   let db: DatabaseSync;
   beforeEach(() => { db = freshDb(); });
 
-  it('a reversed guilty verdict reopens the defendant account', () => {
-    const defendant = createAccount(db, 'individual', 1, 80);
-    updateBalance(db, defendant.account.id, 'earned_balance', pts(10_000));
-    const challenger = miner(db, 1, 10_000);
-    for (let i = 0; i < 26; i++) miner(db, 2, 5_000);
+  it('an overturned guilty verdict leaves the defendant exactly whole', () => {
+    const s = guiltyThenAppealSeated(db);
 
-    const c = fileChallenge(db, challenger.accountId, defendant.account.id, 'not_human', 10);
-    escalateToFull(db, c.id);
-    const jurors = selectJury(db, c.id, 'appeal-original');
-    for (const j of jurors) submitVote(db, c.id, j, 'not_human');
-    assert.equal(resolveCase(db, c.id), 'guilty');
+    // While the first verdict is pending, nothing has moved.
+    const pending = getAccount(db, s.defendantId)!;
+    assert.equal(getCase(db, s.caseId)!.status, 'verdict_pending');
+    assert.equal(pending.isActive, true, 'a pending guilty verdict does not close the account');
+    assert.equal(pending.isEscrowed, true, 'but the savings stay frozen');
+    assert.equal(pending.earnedBalance, pts(10_000), 'and nothing is burned');
+
+    assert.ok(s.appealJurors.length >= 3, 'appeal needs its own jury');
+    assert.equal(s.appealJurors.length, s.jurors.length, 'same size as the first jury');
+    assert.throws(() => selectJury(db, s.appealId, 'again'), /already has a jury/);
+    for (const j of s.appealJurors) submitVote(db, s.appealId, j, 'human');
+
+    assert.equal(resolveCase(db, s.appealId), 'innocent');
+    assert.equal(getCase(db, s.appealId)!.status, 'appeal_verdict');
+    assert.equal(getCase(db, s.caseId)!.status, 'court_verdict', 'the appeal settles the original case');
+
+    const defendant = getAccount(db, s.defendantId)!;
+    assert.equal(defendant.isActive, true, 'never closed');
+    assert.equal(defendant.isEscrowed, false, 'freeze lifted');
     assert.equal(
-      getAccount(db, defendant.account.id)!.isActive,
-      false,
-      'guilty closes the account',
+      defendant.earnedBalance,
+      pts(10_000) + s.stake / 2n,
+      'savings untouched, plus half the forfeited challenger stake for the freeze',
+    );
+    assert.deepEqual(
+      getActiveVouchesForAccount(db, s.defendantId).map((v) => v.id),
+      [s.vouch.id],
+      'the vouch on the defendant is not burned',
+    );
+    assert.equal(getAccount(db, s.voucherId)!.lockedBalance, s.vouch.stakeAmount);
+
+    const challenger = getAccount(db, s.challengerId)!;
+    assert.equal(challenger.lockedBalance, 0n);
+    assert.equal(
+      challenger.earnedBalance,
+      s.challengerEarnedAfterFiling,
+      'the challenger lost the stake and never received a bounty',
     );
 
-    // Defendant appeals and wins.
-    // fileAppeal seats the appeal jury itself. (This test used to call
-    // selectJury a second time, which seated a second batch on top of the
-    // first and then voted with only that batch.)
-    const appeal = fileAppeal(db, c.id, 'appeal-second');
-    const appealJurors = courtStore(db).findJurorsByCase(appeal.id).map((j) => j.minerId);
-    assert.ok(appealJurors.length >= 3, 'appeal needs its own jury');
-    assert.throws(() => selectJury(db, appeal.id, 'again'), /already has a jury/);
-    for (const j of appealJurors) submitVote(db, appeal.id, j, 'human');
-
-    const verdict = resolveCase(db, appeal.id);
-
-    assert.equal(verdict, 'innocent');
-    assert.equal(getCase(db, appeal.id)!.status, 'appeal_verdict');
-    // The whole point of the appeal path: this is what resolveVerdict never did.
-    assert.equal(
-      getAccount(db, defendant.account.id)!.isActive,
-      true,
-      'a reversed guilty verdict must reopen the account',
-    );
-    assert.equal(getAccount(db, defendant.account.id)!.isEscrowed, false);
+    // Every juror on both rounds is judged against the FINAL verdict. The
+    // first jury got it wrong and forfeits; the appeal jury splits that pot.
+    // Both juries are the same size and every juror held 5,000, so the split
+    // is exactly one stake each.
+    const store = courtStore(db);
+    for (const j of store.findJurorsByCase(s.caseId)) {
+      const a = getAccount(db, j.jurorAccountId)!;
+      assert.equal(a.lockedBalance, 0n);
+      assert.equal(a.earnedBalance, pts(5_000) - j.stakeAmount, 'first-round juror forfeits');
+    }
+    for (const j of store.findJurorsByCase(s.appealId)) {
+      const a = getAccount(db, j.jurorAccountId)!;
+      assert.equal(a.lockedBalance, 0n);
+      assert.equal(a.earnedBalance, pts(5_000) + j.stakeAmount, 'appeal juror refunded plus a share');
+    }
     db.close();
   });
 
   it('an appeal cannot be resolved twice', () => {
-    const defendant = createAccount(db, 'individual', 1, 80);
-    updateBalance(db, defendant.account.id, 'earned_balance', pts(10_000));
-    const challenger = miner(db, 1, 10_000);
-    for (let i = 0; i < 26; i++) miner(db, 2, 5_000);
+    const s = guiltyThenAppealSeated(db);
+    for (const j of s.appealJurors) submitVote(db, s.appealId, j, 'human');
+    resolveCase(db, s.appealId);
 
-    const c = fileChallenge(db, challenger.accountId, defendant.account.id, 'not_human', 10);
-    escalateToFull(db, c.id);
-    const jurors = selectJury(db, c.id, 'appeal-idem-1');
-    for (const j of jurors) submitVote(db, c.id, j, 'not_human');
-    resolveCase(db, c.id);
+    const ids = [s.challengerId, s.defendantId, s.voucherId];
+    const snap = () => ids.map((id) => {
+      const a = getAccount(db, id)!;
+      return `${id}:${a.earnedBalance}:${a.lockedBalance}:${a.isActive}`;
+    });
+    const snapshot = snap();
 
-    const appeal = fileAppeal(db, c.id, 'appeal-idem-2');
-    const appealJurors = courtStore(db).findJurorsByCase(appeal.id).map((j) => j.minerId);
-    for (const j of appealJurors) submitVote(db, appeal.id, j, 'human');
-    resolveCase(db, appeal.id);
-
-    const snapshot = getAccount(db, challenger.accountId)!.earnedBalance;
-    assert.throws(() => resolveCase(db, appeal.id), /already resolved/i);
-    assert.equal(
-      getAccount(db, challenger.accountId)!.earnedBalance,
-      snapshot,
-      'a rejected re-resolve must not claw back the bounty a second time',
-    );
+    assert.throws(() => resolveCase(db, s.appealId), /already resolved/i);
+    assert.throws(() => resolveCase(db, s.caseId), /already resolved/i);
+    const sweep = expireCourtDeadlines(db, now() + 30 * 86400);
+    assert.deepEqual(sweep.settled, [], 'a settled case is not settled again');
+    assert.deepEqual(sweep.resolved, []);
+    assert.deepEqual(snap(), snapshot, 'a rejected re-resolve must not settle the case a second time');
     db.close();
   });
 });

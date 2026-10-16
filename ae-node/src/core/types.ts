@@ -76,6 +76,7 @@ export type ChangeType =
   | 'bounty'
   | 'court_burn'
   | 'court_compensation'
+  | 'jury_reward'
   | 'fee_distribution';
 
 export interface TransactionLogEntry {

@@ -301,6 +301,11 @@ export const api = {
   fileChallenge: (signedBody: unknown) =>
     request<ApiResponse<{ case: CaseHeader }>>('POST', '/court/challenges', signedBody),
 
+  // Drop a case during arbitration (signed; challenger only). The 1,440-point
+  // floor of the stake goes to the defendant.
+  withdrawCase: (caseId: string, signedBody: unknown) =>
+    request<ApiResponse<{ case: CaseHeader }>>('POST', `/court/cases/${caseId}/withdraw`, signedBody),
+
   // Cases assigned to this miner as a juror.
   getJuryDuty: (accountId: string) =>
     request<ApiResponse<{ assignments: JuryAssignment[] }>>('GET', `/court/jury-duty/${accountId}`),

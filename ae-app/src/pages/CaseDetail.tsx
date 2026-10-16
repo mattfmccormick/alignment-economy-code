@@ -3,8 +3,8 @@
 // Shows the full case: header, argument log, jury panel (when escalated),
 // verdict if resolved. Both the challenger and defendant can post arguments
 // while the case is open; jurors read those alongside the case header before
-// voting. The challenger sees the "Escalate to full court" action here when
-// the case is in arbitration; the defendant sees a response form.
+// voting. A case moves to a jury on its own at day 7; the Court list carries
+// the challenger's Withdraw and the defendant's "Ask for a jury now".
 //
 // Voting itself happens in the miner app (only registered miners can be
 // jurors, and the wallet doesn't carry a miner role).

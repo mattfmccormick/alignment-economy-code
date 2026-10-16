@@ -5,9 +5,11 @@
 //   - Daily allocations (active/supportive/ambient) still mint and are spendable
 //   - Incoming earned transfers land normally (frozen by escrow)
 //   - New vouch creation from the escrowed account is blocked
-//   - Escrow releases on innocent verdict
+//   - Escrow stays on through the appeal window (a verdict settles only once
+//     it is final) and releases on a final innocent verdict
 //   - On guilty verdict, bounty is calculated from escrowed earned balance
-//   - Appeal reversal (guilty→innocent) releases escrow
+//   - Appeal reversal (guilty→innocent) releases escrow; the account was
+//     never closed, so there is nothing to reopen
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +31,16 @@ import {
   resolveVerdict,
   fileAppeal,
   resolveAppeal,
+  getCase,
+  expireCourtDeadlines,
 } from '../src/court/court.js';
+
+const nowSec = (): number => Math.floor(Date.now() / 1000);
+
+/** Day-cycle sweep after the 7-day appeal window: when a verdict settles. */
+function settleAfterAppealWindow(db: DatabaseSync): void {
+  expireCourtDeadlines(db, nowSec() + 8 * 86400);
+}
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -62,7 +73,8 @@ function setupCourt(db: DatabaseSync): {
 } {
   const def = createAccount(db, 'individual', 1, 100);
   updateBalance(db, def.account.id, 'earned_balance', pts(10000));
-  const challenger = createMinerAccount(db, 1, 10000);
+  // 40,000 so a 5% stake (2,000) clears the 1,440-point filing floor
+  const challenger = createMinerAccount(db, 1, 40000);
   const juryMiners = [];
   for (let i = 0; i < 13; i++) juryMiners.push(createMinerAccount(db, 2, 5000));
   return {
@@ -239,8 +251,15 @@ describe('Phase 73: Court escrow (WP v2 §9.3)', () => {
     const verdict = resolveVerdict(db, courtCase.id);
     assert.equal(verdict, 'innocent');
 
+    // The challenger can still appeal, so escrow holds until the window closes
+    assert.equal(getCase(db, courtCase.id)!.status, 'verdict_pending');
+    assert.equal(getAccount(db, defendant.accountId)!.isEscrowed, true, 'escrow holds through the appeal window');
+
+    settleAfterAppealWindow(db);
+    assert.equal(getCase(db, courtCase.id)!.status, 'court_verdict');
+
     const defAfter = getAccount(db, defendant.accountId)!;
-    assert.equal(defAfter.isEscrowed, false, 'escrow should be released on innocent');
+    assert.equal(defAfter.isEscrowed, false, 'escrow should be released on a final innocent verdict');
     assert.equal(defAfter.isActive, true, 'defendant should remain active');
     db.close();
   });
@@ -250,6 +269,7 @@ describe('Phase 73: Court escrow (WP v2 §9.3)', () => {
     const { defendant, challenger, juryMiners } = setupCourt(db);
 
     const defEarnedBefore = getAccount(db, defendant.accountId)!.earnedBalance;
+    const challengerBefore = getAccount(db, challenger.accountId)!.earnedBalance;
     const courtCase = fileChallenge(db, challenger.accountId, defendant.accountId, 'not_human', 5);
 
     escalateToFull(db, courtCase.id);
@@ -259,41 +279,56 @@ describe('Phase 73: Court escrow (WP v2 §9.3)', () => {
     const verdict = resolveVerdict(db, courtCase.id);
     assert.equal(verdict, 'guilty');
 
+    // Still frozen and open while the defendant can appeal
+    const defPending = getAccount(db, defendant.accountId)!;
+    assert.equal(defPending.isActive, true);
+    assert.equal(defPending.isEscrowed, true);
+    assert.equal(defPending.earnedBalance, defEarnedBefore);
+
+    settleAfterAppealWindow(db);
+
     const defAfter = getAccount(db, defendant.accountId)!;
     assert.equal(defAfter.isActive, false, 'defendant deactivated on guilty');
     assert.equal(defAfter.earnedBalance, 0n, 'earned balance burned');
 
-    // Challenger got bounty (20% of defendant earned)
+    // Challenger got bounty (20% of defendant earned) and the stake back
     const challengerAfter = getAccount(db, challenger.accountId)!;
     const bountyExpected = (defEarnedBefore * 20n) / 100n;
-    assert.ok(challengerAfter.earnedBalance > 0n);
+    assert.equal(challengerAfter.earnedBalance, challengerBefore + bountyExpected);
+    assert.equal(challengerAfter.lockedBalance, 0n);
     db.close();
   });
 
-  it('appeal reversal (guilty→innocent) releases escrow and reactivates', () => {
+  it('appeal reversal (guilty→innocent) releases escrow; the account was never closed', () => {
     const db = freshDb();
     const def = createAccount(db, 'individual', 1, 100);
     updateBalance(db, def.account.id, 'earned_balance', pts(10000));
-    const challenger = createMinerAccount(db, 1, 10000);
-    // Need enough T2 miners for both original jury and appeal jury
+    const challenger = createMinerAccount(db, 1, 40000);
+    // 26 eligible miners: a first jury of 7 and an appeal jury of 7 fresh ones
     for (let i = 0; i < 26; i++) createMinerAccount(db, 2, 5000);
 
     // First trial: guilty
     const courtCase = fileChallenge(db, challenger.accountId, def.account.id, 'not_human', 5);
     escalateToFull(db, courtCase.id);
     const jurorIds = selectJury(db, courtCase.id, 'blockhash_appeal_a');
-    assert.ok(jurorIds.length >= 3);
+    assert.equal(jurorIds.length, 7);
     for (const jid of jurorIds) submitVote(db, courtCase.id, jid, 'not_human');
     resolveVerdict(db, courtCase.id);
 
-    assert.equal(getAccount(db, def.account.id)!.isActive, false);
+    // Deferred settlement: open and frozen, nothing burned
+    const defPending = getAccount(db, def.account.id)!;
+    assert.equal(defPending.isActive, true, 'not closed while the verdict can be appealed');
+    assert.equal(defPending.isEscrowed, true, 'escrow holds through the appeal window');
+    assert.equal(defPending.earnedBalance, pts(10000));
 
-    // Appeal: innocent
-    const appealCase = fileAppeal(db, courtCase.id, 'blockhash_appeal_b');
+    // Appeal: the jury is seated by the next sweep, not by filing
+    const appealCase = fileAppeal(db, courtCase.id);
+    expireCourtDeadlines(db, nowSec() + 60);
     const appealJurors = db.prepare(
       'SELECT miner_id FROM court_jury WHERE case_id = ?'
     ).all(appealCase.id) as Array<{ miner_id: string }>;
-    assert.ok(appealJurors.length >= 3, 'appeal jury must form');
+    assert.equal(appealJurors.length, jurorIds.length, 'appeal jury forms at the original size');
+    assert.equal(getAccount(db, def.account.id)!.isEscrowed, true, 'escrow holds while the appeal runs');
 
     for (const j of appealJurors) {
       submitVote(db, appealCase.id, j.miner_id, 'human');
@@ -302,9 +337,11 @@ describe('Phase 73: Court escrow (WP v2 §9.3)', () => {
     const appealVerdict = resolveAppeal(db, appealCase.id);
     assert.equal(appealVerdict, 'innocent');
 
+    // Exactly whole: still active, savings intact plus half the forfeited stake
     const defAfter = getAccount(db, def.account.id)!;
-    assert.equal(defAfter.isActive, true, 'reactivated on appeal reversal');
+    assert.equal(defAfter.isActive, true, 'still active after appeal reversal');
     assert.equal(defAfter.isEscrowed, false, 'escrow released on appeal reversal');
+    assert.equal(defAfter.earnedBalance, pts(10000) + courtCase.challengerStake / 2n);
     db.close();
   });
 
@@ -318,6 +355,7 @@ describe('Phase 73: Court escrow (WP v2 §9.3)', () => {
     const jurorIds = selectJury(db, courtCase.id, 'blockhash_release');
     for (const jid of jurorIds) submitVote(db, courtCase.id, jid, 'human');
     resolveVerdict(db, courtCase.id);
+    settleAfterAppealWindow(db);
 
     // Escrow released, should be able to send earned
     const defAfter = getAccount(db, defendant.accountId)!;

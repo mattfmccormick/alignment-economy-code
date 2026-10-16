@@ -20,6 +20,7 @@ import {
   resolveAppeal,
   applyAccuracyImpact,
   recordJuryService,
+  expireCourtDeadlines,
 } from '../src/court/court.js';
 import { createVouch } from '../src/verification/vouching.js';
 import type { Vote } from '../src/court/types.js';
@@ -50,15 +51,27 @@ function createMinerAccount(db: DatabaseSync, tier: 1 | 2 = 1, earnedPts: number
   return { accountId: result.account.id, minerId: miner.id };
 }
 
+const nowSec = (): number => Math.floor(Date.now() / 1000);
+
+/**
+ * Run the day-cycle court sweep after the 7-day appeal window has closed.
+ * A verdict only records itself; this sweep is when it settles.
+ */
+function settleAfterAppealWindow(db: DatabaseSync) {
+  return expireCourtDeadlines(db, nowSec() + 8 * 86400);
+}
+
 function setupCourtScenario(db: DatabaseSync, juryCount: number = 13) {
   // Defendant with 10000 earned
   const defResult = createAccount(db, 'individual', 1, 80);
   updateBalance(db, defResult.account.id, 'earned_balance', pts(10000));
 
-  // Challenger miner
-  const challenger = createMinerAccount(db, 1, 10000);
+  // Challenger miner. 40,000 earned so a 5% stake (2,000) clears the
+  // 1,440-point filing floor and the chosen percentage decides the stake.
+  const challenger = createMinerAccount(db, 1, 40000);
 
-  // Tier 2 miners for jury pool (need enough to exclude challenger and still have 11+)
+  // Miners for the jury pool. Any active miner at percentHuman >= 90 may sit:
+  // 13 eligible seats a jury of 3, 21..32 eligible seats 7.
   const juryMiners: Array<{ accountId: string; minerId: string }> = [];
   for (let i = 0; i < juryCount; i++) {
     juryMiners.push(createMinerAccount(db, 2, 5000));
@@ -98,14 +111,12 @@ describe('Phase 5: Court and Enforcement System', () => {
     assert.equal(escalated.level, 'court');
     assert.equal(escalated.status, 'court_open');
 
-    // Select jury
+    // Select jury: 13 eligible miners seat a jury of 3
     const jurorIds = selectJury(db, courtCase.id, 'blockhash123');
-    assert.ok(jurorIds.length >= 3, `Should have at least 3 jurors, got ${jurorIds.length}`);
-    // Verify jury size is odd
-    assert.equal(jurorIds.length % 2, 1, 'Jury size must be odd');
+    assert.equal(jurorIds.length, 3, `13 eligible miners should seat 3 jurors, got ${jurorIds.length}`);
 
-    // Vote: majority not_human (guilty)
-    const guiltyCount = Math.ceil(jurorIds.length * 0.72); // ~8 of 11
+    // Vote: bare majority not_human (guilty), one juror in the minority
+    const guiltyCount = Math.floor(jurorIds.length / 2) + 1;
     for (let i = 0; i < jurorIds.length; i++) {
       const vote: Vote = i < guiltyCount ? 'not_human' : 'human';
       submitVote(db, courtCase.id, jurorIds[i], vote);
@@ -118,35 +129,52 @@ describe('Phase 5: Court and Enforcement System', () => {
     const verdict = resolveVerdict(db, courtCase.id);
     assert.equal(verdict, 'guilty');
 
+    // Deferred settlement: the verdict is recorded, nothing moves until the
+    // appeal window closes.
+    const pending = getCase(db, courtCase.id)!;
+    assert.equal(pending.status, 'verdict_pending');
+    const defPending = getAccount(db, defendantId)!;
+    assert.equal(defPending.isActive, true, 'defendant stays open during the appeal window');
+    assert.equal(defPending.isEscrowed, true, 'escrow stays on during the appeal window');
+    assert.equal(defPending.earnedBalance, pts(10000), 'nothing burned before the verdict is final');
+    assert.equal(getAccount(db, challenger.accountId)!.lockedBalance, stakeExpected, 'challenger stake still locked');
+    assert.equal(getAccount(db, voucherResult.account.id)!.lockedBalance, vouch.stakeAmount, 'voucher stake still locked');
+
+    const sweep = settleAfterAppealWindow(db);
+    assert.deepEqual(sweep.settled, [courtCase.id]);
+
     // Verify defendant closed
     const defAfter = getAccount(db, defendantId)!;
     assert.equal(defAfter.isActive, false);
     assert.equal(defAfter.earnedBalance, 0n);
 
-    // Verify challenger got bounty + stake back
+    // Challenger got the bounty (20% of the defendant's earned) and the stake back
     const challengerFinal = getAccount(db, challenger.accountId)!;
-    assert.ok(challengerFinal.earnedBalance > challengerBefore.earnedBalance, 'Challenger should profit');
+    assert.equal(challengerFinal.earnedBalance, challengerBefore.earnedBalance + bountyExpected);
+    assert.equal(challengerFinal.lockedBalance, 0n);
 
-    // Verify majority juror stakes returned (earned went up from original)
+    // Juror stake is 5% of 5,000 = 250. The one minority stake is split
+    // between the two majority jurors (125 each).
+    const jurorStake = pts(250);
     for (let i = 0; i < guiltyCount; i++) {
       const miner = getMiner(db, jurorIds[i])!;
       const acct = getAccount(db, miner.accountId)!;
-      // Locked should be back to 0
       assert.equal(acct.lockedBalance, 0n, `Majority juror ${i} locked should be 0`);
+      assert.equal(acct.earnedBalance, pts(5000) + jurorStake / BigInt(guiltyCount), `Majority juror ${i} gets stake back plus a share`);
     }
 
-    // Verify minority juror stakes burned
+    // Minority juror forfeits the stake
     for (let i = guiltyCount; i < jurorIds.length; i++) {
       const miner = getMiner(db, jurorIds[i])!;
       const acct = getAccount(db, miner.accountId)!;
-      assert.equal(acct.lockedBalance, 0n, `Minority juror ${i} locked should be 0 (burned)`);
-      assert.ok(acct.earnedBalance < pts(5000), `Minority juror ${i} should have lost stake`);
+      assert.equal(acct.lockedBalance, 0n, `Minority juror ${i} locked should be 0`);
+      assert.equal(acct.earnedBalance, pts(5000) - jurorStake, `Minority juror ${i} should have lost stake`);
     }
 
-    // Verify voucher's stake burned
+    // Verify voucher's stake burned (10% of 5,000)
     const voucherAfter = getAccount(db, voucherResult.account.id)!;
     assert.equal(voucherAfter.lockedBalance, 0n, 'Voucher locked should be 0 (burned)');
-    assert.ok(voucherAfter.earnedBalance < pts(5000), 'Voucher should have lost stake');
+    assert.equal(voucherAfter.earnedBalance, pts(5000) - vouch.stakeAmount, 'Voucher should have lost stake');
 
     // Verify case status
     const finalCase = getCase(db, courtCase.id)!;
@@ -168,10 +196,10 @@ describe('Phase 5: Court and Enforcement System', () => {
     escalateToFull(db, courtCase.id);
 
     const jurorIds = selectJury(db, courtCase.id, 'blockhash456');
-    assert.ok(jurorIds.length >= 3);
+    assert.equal(jurorIds.length, 3);
 
-    // Vote: majority human (innocent)
-    const innocentCount = Math.ceil(jurorIds.length * 0.64); // ~7 of 11
+    // Vote: majority human (innocent), one juror in the minority
+    const innocentCount = Math.floor(jurorIds.length / 2) + 1;
     for (let i = 0; i < jurorIds.length; i++) {
       const vote: Vote = i < innocentCount ? 'human' : 'not_human';
       submitVote(db, courtCase.id, jurorIds[i], vote);
@@ -180,14 +208,28 @@ describe('Phase 5: Court and Enforcement System', () => {
     const verdict = resolveVerdict(db, courtCase.id);
     assert.equal(verdict, 'innocent');
 
-    // Defendant still active
+    // Deferred settlement: escrow and the challenger's stake stay put until
+    // the appeal window closes.
+    assert.equal(getCase(db, courtCase.id)!.status, 'verdict_pending');
+    assert.equal(getAccount(db, defendantId)!.isEscrowed, true, 'escrow stays on during the appeal window');
+    assert.equal(getAccount(db, challenger.accountId)!.lockedBalance, courtCase.challengerStake);
+    assert.equal(isInProtectionWindow(db, defendantId), false, 'no protection window until the verdict is final');
+
+    settleAfterAppealWindow(db);
+    assert.equal(getCase(db, courtCase.id)!.status, 'court_verdict');
+
+    // Defendant still active, escrow lifted, and compensated with half the
+    // forfeited stake (10% of 40,000 = 4,000 -> 2,000)
     const defAfter = getAccount(db, defendantId)!;
     assert.equal(defAfter.isActive, true);
+    assert.equal(defAfter.isEscrowed, false);
+    assert.equal(courtCase.challengerStake, pts(4000));
+    assert.equal(defAfter.earnedBalance, pts(10000) + courtCase.challengerStake / 2n);
 
-    // Challenger stake burned (locked reduced, NOT returned to earned)
+    // Challenger stake forfeited (locked cleared, NOT returned to earned)
     const challengerAfter = getAccount(db, challenger.accountId)!;
-    assert.equal(challengerAfter.lockedBalance, 0n, 'Challenger locked should be 0 (burned)');
-    assert.ok(challengerAfter.earnedBalance < challengerBefore.earnedBalance, 'Challenger lost stake permanently');
+    assert.equal(challengerAfter.lockedBalance, 0n, 'Challenger locked should be 0 (forfeited)');
+    assert.equal(challengerAfter.earnedBalance, challengerBefore.earnedBalance - courtCase.challengerStake, 'Challenger lost stake permanently');
 
     // Protection window set (180 days)
     assert.ok(isInProtectionWindow(db, defendantId), 'Defendant should be in protection window');
@@ -198,16 +240,18 @@ describe('Phase 5: Court and Enforcement System', () => {
   });
 
   // Test 3: Appeal reversal (guilty → innocent on appeal)
-  it('appeal reversal: guilty reversed, defendant reopened, bounty clawed back', () => {
+  it('appeal reversal: guilty overturned leaves the defendant exactly whole, no bounty ever paid', () => {
     const db = freshDb();
-    // Need lots of T2 miners: 11 for first jury + 11 for appeal jury (no overlap)
+    // 25 eligible miners: the first jury is 7, the appeal jury is 7 more
+    // drawn from the 18 who did not sit (no overlap)
     const { defendantId, challenger, juryMiners } = setupCourtScenario(db, 25);
+    const challengerBefore = getAccount(db, challenger.accountId)!;
 
     // File, escalate, select jury
     const courtCase = fileChallenge(db, challenger.accountId, defendantId, 'not_human', 5);
     escalateToFull(db, courtCase.id);
     const jurorIds1 = selectJury(db, courtCase.id, 'blockhash_orig');
-    assert.ok(jurorIds1.length >= 3);
+    assert.equal(jurorIds1.length, 7, '21..32 eligible miners seat 7 jurors');
 
     // Vote guilty
     for (const jid of jurorIds1) {
@@ -216,16 +260,29 @@ describe('Phase 5: Court and Enforcement System', () => {
     const verdict1 = resolveVerdict(db, courtCase.id);
     assert.equal(verdict1, 'guilty');
 
-    // Defendant should be closed
-    assert.equal(getAccount(db, defendantId)!.isActive, false);
+    // Nothing irreversible before the final verdict: the defendant is still
+    // open, still frozen, and still holds every point.
+    const defPending = getAccount(db, defendantId)!;
+    assert.equal(defPending.isActive, true, 'Defendant is not closed while the verdict can be appealed');
+    assert.equal(defPending.isEscrowed, true);
+    assert.equal(defPending.earnedBalance, pts(10000));
 
-    // File appeal
-    const appealCase = fileAppeal(db, courtCase.id, 'appeal_blockhash');
+    // File appeal: no jury yet, it is drawn at the next sweep
+    const appealCase = fileAppeal(db, courtCase.id);
     assert.equal(appealCase.level, 'appeal');
     assert.equal(appealCase.appealOf, courtCase.id);
+    assert.equal(appealCase.status, 'appeal_open');
+    const countAppealJurors = () =>
+      (db.prepare('SELECT COUNT(*) AS cnt FROM court_jury WHERE case_id = ?').get(appealCase.id) as { cnt: number }).cnt;
+    assert.equal(Number(countAppealJurors()), 0, 'filing an appeal does not seat a jury');
 
-    // Get appeal jurors
+    const sweep = expireCourtDeadlines(db, nowSec() + 60);
+    assert.deepEqual(sweep.seated, [appealCase.id]);
+    assert.deepEqual(sweep.settled, [], 'the original case waits for its appeal');
+
+    // Get appeal jurors: same size as the first jury
     const appealJurors = db.prepare('SELECT miner_id FROM court_jury WHERE case_id = ?').all(appealCase.id) as Array<{ miner_id: string }>;
+    assert.equal(appealJurors.length, jurorIds1.length, 'appeal jury is the same size as the original');
 
     // Verify no overlap with original jurors
     const originalSet = new Set(jurorIds1);
@@ -240,11 +297,33 @@ describe('Phase 5: Court and Enforcement System', () => {
 
     const verdict2 = resolveAppeal(db, appealCase.id);
     assert.equal(verdict2, 'innocent');
+    assert.equal(getCase(db, appealCase.id)!.status, 'appeal_verdict');
+    assert.equal(getCase(db, courtCase.id)!.status, 'court_verdict', 'the appeal verdict settles the case at once');
 
-    // Defendant reopened (but balance is 0, burns are irreversible)
+    // Defendant exactly whole: never closed, earned untouched, plus half the
+    // challenger's forfeited stake (5% of 40,000 = 2,000 -> 1,000)
     const defAfter = getAccount(db, defendantId)!;
-    assert.equal(defAfter.isActive, true, 'Defendant should be reopened on appeal reversal');
-    assert.equal(defAfter.earnedBalance, 0n, 'Burns are irreversible, balance stays 0');
+    assert.equal(defAfter.isActive, true);
+    assert.equal(defAfter.isEscrowed, false);
+    assert.equal(defAfter.earnedBalance, pts(10000) + courtCase.challengerStake / 2n);
+
+    // Challenger: stake forfeited, no bounty was ever paid
+    const challengerAfter = getAccount(db, challenger.accountId)!;
+    assert.equal(challengerAfter.lockedBalance, 0n);
+    assert.equal(challengerAfter.earnedBalance, challengerBefore.earnedBalance - courtCase.challengerStake);
+
+    // Every juror judged against the FINAL verdict: the first jury (all
+    // wrong) forfeits 250 each, split among the 7 appeal jurors (250 each).
+    for (const jid of jurorIds1) {
+      const acct = getAccount(db, getMiner(db, jid)!.accountId)!;
+      assert.equal(acct.lockedBalance, 0n);
+      assert.equal(acct.earnedBalance, pts(4750), 'original juror who voted against the final verdict loses the stake');
+    }
+    for (const aj of appealJurors) {
+      const acct = getAccount(db, getMiner(db, aj.miner_id)!.accountId)!;
+      assert.equal(acct.lockedBalance, 0n);
+      assert.equal(acct.earnedBalance, pts(5250), 'appeal juror gets the stake back plus a share of the forfeits');
+    }
 
     // Defendant should have protection window
     assert.ok(isInProtectionWindow(db, defendantId));
@@ -267,8 +346,18 @@ describe('Phase 5: Court and Enforcement System', () => {
     }
     resolveVerdict(db, courtCase.id);
 
-    // Try to file new challenge (should fail - protection window)
+    // During the appeal window the case is still open, so a second challenge
+    // is refused for that reason, not yet for the protection window.
     const challenger2 = createMinerAccount(db, 1, 10000);
+    assert.throws(
+      () => fileChallenge(db, challenger2.accountId, defendantId, 'not_human', 5),
+      /Active case already exists/,
+    );
+
+    // Settle: the innocent verdict is final and sets the protection window
+    settleAfterAppealWindow(db);
+
+    // Try to file new challenge (should fail - protection window)
     assert.throws(
       () => fileChallenge(db, challenger2.accountId, defendantId, 'not_human', 5),
       /protection window/i,
@@ -418,10 +507,8 @@ describe('Phase 5: Court and Enforcement System', () => {
     // Select jury
     const jurorIds = selectJury(db, courtCase.id, 'blockhash_small');
 
-    // Should have 5 or 3 jurors (largest odd <= pool size)
-    assert.ok(jurorIds.length >= 3, `Should have at least 3 jurors, got ${jurorIds.length}`);
-    assert.ok(jurorIds.length <= 5, `Should have at most 5 jurors, got ${jurorIds.length}`);
-    assert.equal(jurorIds.length % 2, 1, 'Jury size must be odd');
+    // 3..20 eligible miners seat a jury of 3
+    assert.equal(jurorIds.length, 3, `5 eligible miners should seat 3 jurors, got ${jurorIds.length}`);
 
     // Case should proceed (status = court_voting)
     const updatedCase = getCase(db, courtCase.id)!;

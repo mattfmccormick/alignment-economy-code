@@ -55,8 +55,24 @@ export const DEFAULT_PARAMS: Record<string, unknown> = {
   // Court
   'court.arbitration_response_days': 7,
   'court.court_voting_days': 7,
+  // The largest jury. The size actually seated steps up with the eligible
+  // pool (3, then 7, then 11) so a small network can still hold a trial.
   'court.jury_size': 11,
   'court.juror_stake_percent': 5,
+  // A jury seat belongs to a verified human, not a node: one per account,
+  // and only at or above this percent-human score.
+  'court.juror_min_percent_human': 90,
+  // A juror who never votes forfeits the case stake and is not drawn again
+  // for this many days.
+  'court.no_show_suspension_days': 30,
+  // Filing costs at least this many points, whatever percentage is chosen.
+  'court.min_challenge_stake_points': 1440,
+  // After a withdrawal, the same challenger cannot refile against the same
+  // defendant for this many days.
+  'court.refile_cooldown_days': 30,
+  // How long a case that has moved to court waits for a jury before it is
+  // dismissed with every stake returned.
+  'court.jury_wait_days': 7,
   'court.bounty_percent': 20,
   'court.burn_percent': 80,
   'court.protection_window_days': 180,

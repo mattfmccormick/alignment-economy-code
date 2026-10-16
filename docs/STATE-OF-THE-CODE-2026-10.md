@@ -233,6 +233,19 @@ week or more).
 
 ## 4. The court
 
+> **Update, October 16, 2026.** Matt answered the court decisions (miner vs
+> person, jury size, filing cost, withdrawal, escalation, no-shows, the freeze
+> after a verdict, what a guilty verdict takes, appeals) and the rules are now
+> in `src/court/court.ts`. Of the design problems listed below, these are
+> addressed in the node-local court: the filer no longer picks the jury (no
+> challenger escalate; juries drawn at the day-cycle sweep), punishment no
+> longer lands before the appeal (`verdict_pending`, then one settlement), and
+> freezing someone now costs a 1,440-point floor that goes to them on
+> withdrawal. Juror seats are one per verified human (90%+) instead of Tier 2,
+> and no-shows forfeit. Still open: the court is node-local (new cases are now
+> refused on multi-validator networks), votes are a plaintext column, and
+> juror identities are public. The repo CLAUDE.md has the full list.
+
 ### What was wrong, and is now fixed
 
 1. **Jury packing.** Any miner with any transaction to or from a party was

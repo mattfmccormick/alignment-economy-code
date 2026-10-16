@@ -40,8 +40,10 @@ function rowToJuror(row: Record<string, unknown>): JurorRecord {
   };
 }
 
+// 'verdict_pending' is deliberately active: nothing has settled yet and the
+// defendant is still frozen, so no second case may be filed on top of it.
 const ACTIVE_CASE_STATUS_FILTER =
-  "status NOT IN ('closed', 'withdrawn', 'court_verdict', 'appeal_verdict')";
+  "status NOT IN ('closed', 'withdrawn', 'dismissed', 'court_verdict', 'appeal_verdict')";
 
 export class SqliteCourtStore implements ICourtStore {
   constructor(private readonly db: DatabaseSync) {}
@@ -119,10 +121,10 @@ export class SqliteCourtStore implements ICourtStore {
     return row.cnt;
   }
 
-  setLevelToCourt(caseId: string): void {
+  setLevelToCourt(caseId: string, seatByDeadline: number): void {
     this.db
-      .prepare("UPDATE court_cases SET level = 'court', status = 'court_open' WHERE id = ?")
-      .run(caseId);
+      .prepare("UPDATE court_cases SET level = 'court', status = 'court_open', voting_deadline = ? WHERE id = ?")
+      .run(seatByDeadline, caseId);
   }
 
   setStatusWaitingJury(caseId: string): void {

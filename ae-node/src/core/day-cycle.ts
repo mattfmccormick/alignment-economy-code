@@ -15,7 +15,7 @@ import {
 import { recordLog, transactionStore } from './transaction.js';
 import { cycleStateStore } from './stores/SqliteCycleStateStore.js';
 import { runTransaction } from '../db/connection.js';
-import { rebalanceVouchLocks } from '../verification/vouching.js';
+import { rebalanceVouchLocks, rebaseVouchStakes } from '../verification/vouching.js';
 import { rebaseCourtStakes, expireCourtDeadlines } from '../court/court.js';
 import { expireOverdueAssignments } from '../mining/fifo-queue.js';
 import { runMinerTierEvaluation } from '../mining/tiers.js';
@@ -262,11 +262,27 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
   let targetTotal: bigint;
 
   if (existing) {
-    // Resume path. Trust the stored snapshot â€” current pool has been partly
-    // mutated and would give a wrong multiplier if recomputed.
-    participantCount = existing.participant_count;
-    preRebaseTotal = BigInt(existing.pre_rebase_total);
-    targetTotal = BigInt(existing.target_total);
+    // Today's rebase already finished. The balance updates and the
+    // rebase_events row commit in one transaction, so a stored snapshot means
+    // every balance was rebased. Re-running the account loop here (the old
+    // "resume" path, reachable when anything after the commit threw and the
+    // trigger fired again) rescaled a second time every locked balance whose
+    // account had no earned points, because only accounts with earned points
+    // leave the 'rebase' log row the loop skips on. The court and vouch stakes
+    // inside those balances were not rescaled again, so the two drifted apart
+    // and the next burn or withdrawal threw.
+    const postRebaseTotal = getTotalEarnedPool(db);
+    db.prepare(`UPDATE rebase_events SET post_rebase_total = ? WHERE day = ?`)
+      .run(postRebaseTotal.toString(), state.currentDay);
+    setPhase(db, 'idle');
+    return {
+      day: state.currentDay,
+      participantCount: existing.participant_count,
+      preRebaseTotal: BigInt(existing.pre_rebase_total),
+      targetTotal: BigInt(existing.target_total),
+      rebaseMultiplier: existing.rebase_multiplier,
+      postRebaseTotal,
+    };
   } else {
     // First run. Compute fresh.
     preRebaseTotal = getTotalEarnedPool(db);
@@ -333,15 +349,12 @@ export function rebase(db: DatabaseSync): RebaseEvent | null {
     // balances negative when the multiplier is below 1, and stranding locked
     // value when it is above.
     //
-    // Gated on `!existing` because, unlike the per-account loop, this has no
-    // per-row "already done" marker to consult. The rebase_events row is
-    // written at the end of this same transaction, so `existing` being set
-    // means a previous run committed BOTH the balance changes and this
-    // rescale. Without the gate a resumed rebase scales stakes a second time
-    // against balances it correctly skips, which is a fresh way to produce the
-    // exact mismatch this call exists to prevent.
+    // A finished rebase returns early above, so this runs exactly once per
+    // day, in the same transaction as the balance rescale it has to match.
     if (!existing) {
       rebaseCourtStakes(db, targetTotal, preRebaseTotal);
+      // Vouch stakes sit in locked_balance too; same reason, same gate.
+      rebaseVouchStakes(db, targetTotal, preRebaseTotal);
     }
 
     // Dust pass. Conservation requires sum == targetTotal. Distribute any

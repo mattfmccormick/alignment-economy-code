@@ -1,11 +1,11 @@
 // WP §9.3: duplicate-account guilty verdict.
 //
 // A duplicate_account challenge names a COUNTERPART — the earlier account the
-// defendant duplicates. On a guilty verdict the defendant (the later duplicate)
-// closes like any non-human account, AND the surviving counterpart disgorges a
-// penalty of twice the harvested allocations (overlap days × 1,440), burned
-// from its Earned balance. This suite pins that behaviour and the filing
-// validation that makes it well-formed.
+// defendant duplicates. On a final guilty verdict the defendant (the later
+// duplicate) closes like any non-human account. The white paper's counterpart
+// penalty (twice the overlap allocations) is withheld while the counterpart is
+// not a real party to the case, so the counterpart is left untouched. This
+// suite pins that behaviour and the filing validation that makes it well-formed.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,8 +15,24 @@ import { seedParams } from '../src/config/params.js';
 import { createAccount, getAccount, updateBalance } from '../src/core/account.js';
 import { createGenesisBlock } from '../src/core/block.js';
 import { registerMiner } from '../src/mining/registration.js';
-import { fileChallenge, selectJury, submitVote, resolveVerdict } from '../src/court/court.js';
+import {
+  fileChallenge,
+  escalateToFull,
+  selectJury,
+  submitVote,
+  resolveVerdict,
+  expireCourtDeadlines,
+} from '../src/court/court.js';
 import { PRECISION } from '../src/core/constants.js';
+
+/** Day-cycle sweep after the 7-day appeal window: when a verdict settles. */
+function settleAfterAppealWindow(db: DatabaseSync, caseId: string): void {
+  const sweep = expireCourtDeadlines(db, Math.floor(Date.now() / 1000) + 8 * 86400);
+  assert.deepEqual(sweep.settled, [caseId]);
+}
+
+// 40,000 earned so a 5% filing stake clears the 1,440-point floor
+const CHALLENGER_EARNED = 40_000;
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -38,7 +54,7 @@ function setCurrentDay(db: DatabaseSync, day: number): void {
   ).run(day);
 }
 
-// Seat `count` Tier-2 juror miners with spendable Earned. Returns their ids.
+// Seat `count` juror miners (percentHuman 100) with spendable Earned. Returns their account ids.
 function seatJurors(db: DatabaseSync, count: number): string[] {
   const ids: string[] = [];
   for (let i = 0; i < count; i++) {
@@ -68,7 +84,7 @@ describe('WP §9.3: duplicate-account verdict', () => {
 
     // Challenger is a miner.
     const challenger = createAccount(db, 'individual', 1, 100);
-    updateBalance(db, challenger.account.id, 'earned_balance', pts(1000));
+    updateBalance(db, challenger.account.id, 'earned_balance', pts(CHALLENGER_EARNED));
     registerMiner(db, challenger.account.id);
 
     seatJurors(db, 5);
@@ -79,11 +95,17 @@ describe('WP §9.3: duplicate-account verdict', () => {
     );
     assert.equal(courtCase.counterpartId, counterpart.account.id);
 
+    escalateToFull(db, courtCase.id);
     const jury = selectJury(db, courtCase.id, 'block-hash-dup');
+    assert.equal(jury.length, 3);
     for (const minerId of jury) submitVote(db, courtCase.id, minerId, 'not_human');
 
     const verdict = resolveVerdict(db, courtCase.id);
     assert.equal(verdict, 'guilty');
+
+    // Nothing settles until the appeal window closes
+    assert.equal(getAccount(db, defendant.account.id)!.isActive, true);
+    settleAfterAppealWindow(db, courtCase.id);
 
     // Defendant closes and its Earned is zeroed (bounty + burn).
     assert.equal(getAccount(db, defendant.account.id)!.isActive, false);
@@ -113,7 +135,7 @@ describe('WP §9.3: duplicate-account verdict', () => {
     updateBalance(db, defendant.account.id, 'earned_balance', pts(500));
 
     const challenger = createAccount(db, 'individual', 1, 100);
-    updateBalance(db, challenger.account.id, 'earned_balance', pts(1000));
+    updateBalance(db, challenger.account.id, 'earned_balance', pts(CHALLENGER_EARNED));
     registerMiner(db, challenger.account.id);
     seatJurors(db, 5);
 
@@ -121,10 +143,14 @@ describe('WP §9.3: duplicate-account verdict', () => {
       db, challenger.account.id, defendant.account.id, 'duplicate_account', 5,
       undefined, counterpart.account.id,
     );
+    escalateToFull(db, courtCase.id);
     const jury = selectJury(db, courtCase.id, 'block-hash-cap');
+    assert.equal(jury.length, 3);
     for (const minerId of jury) submitVote(db, courtCase.id, minerId, 'not_human');
-    resolveVerdict(db, courtCase.id);
+    assert.equal(resolveVerdict(db, courtCase.id), 'guilty');
+    settleAfterAppealWindow(db, courtCase.id);
 
+    assert.equal(getAccount(db, defendant.account.id)!.isActive, false, 'the verdict did settle');
     assert.equal(getAccount(db, counterpart.account.id)!.earnedBalance, pts(1000));
   });
 
@@ -133,7 +159,7 @@ describe('WP §9.3: duplicate-account verdict', () => {
     createGenesisBlock(db);
     const defendant = createAccount(db, 'individual', 5, 60);
     const challenger = createAccount(db, 'individual', 1, 100);
-    updateBalance(db, challenger.account.id, 'earned_balance', pts(1000));
+    updateBalance(db, challenger.account.id, 'earned_balance', pts(CHALLENGER_EARNED));
     registerMiner(db, challenger.account.id);
 
     assert.throws(
@@ -149,7 +175,7 @@ describe('WP §9.3: duplicate-account verdict', () => {
     const counterpart = createAccount(db, 'individual', 5, 100);
     const defendant = createAccount(db, 'individual', 5, 60);
     const challenger = createAccount(db, 'individual', 1, 100);
-    updateBalance(db, challenger.account.id, 'earned_balance', pts(1000));
+    updateBalance(db, challenger.account.id, 'earned_balance', pts(CHALLENGER_EARNED));
     registerMiner(db, challenger.account.id);
 
     assert.throws(

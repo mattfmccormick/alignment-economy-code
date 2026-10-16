@@ -204,6 +204,37 @@ export function burnAllVouchesOnAccount(db: DatabaseSync, accountId: string): vo
   }
 }
 
+/**
+ * Rescale every active vouch's recorded stake by the daily rebase multiplier.
+ *
+ * The rebase multiplies each voucher's `locked_balance` by
+ * `targetTotal / preRebaseTotal`, but `vouches.stake_amount` used to stay at
+ * its pre-rebase figure. rebalanceVouchLocks then computed its delta against
+ * that stale figure and took the shrink out of locked a SECOND time. After one
+ * cycle with a multiplier m < 1 (the steady state once anyone spends), a
+ * vouch-only voucher held locked = s(2m - 1) against a recorded stake of s*m,
+ * so burnVouch and withdrawVouch both tried to write a negative locked
+ * balance and threw. That made any guilty verdict on a vouched defendant roll
+ * back forever, and once the drift passed the whole lock it stopped the
+ * daily cycle.
+ *
+ * Same treatment rebaseCourtStakes gives court stakes, and called from the
+ * same place, inside the rebase transaction, so the stake and the balance it
+ * sits in move together. Every vouch scales independently, so this stays
+ * parallelizable per account.
+ */
+export function rebaseVouchStakes(
+  db: DatabaseSync,
+  targetTotal: bigint,
+  preRebaseTotal: bigint,
+): void {
+  if (preRebaseTotal <= 0n || targetTotal < 0n) return;
+  const verif = verificationStore(db);
+  for (const v of verif.findAllActiveVouches()) {
+    verif.updateVouchStakeAmount(v.id, (v.stakeAmount * targetTotal) / preRebaseTotal);
+  }
+}
+
 // WP v2: percentage-based locks scale with balance. After rebase or at the
 // start of each daily cycle, recalculate every active vouch's locked amount
 // to match its stored stakedPercentage against the voucher's current total

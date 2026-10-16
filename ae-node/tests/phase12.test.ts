@@ -11,7 +11,7 @@ import { runDayCycle, getCycleState } from '../src/core/day-cycle.js';
 import { registerMiner } from '../src/mining/registration.js';
 import { calculateScore } from '../src/verification/scoring.js';
 import { createVouch } from '../src/verification/vouching.js';
-import { fileChallenge, selectJury, submitVote, resolveVerdict } from '../src/court/court.js';
+import { fileChallenge, escalateToFull, selectJury, submitVote, resolveVerdict, expireCourtDeadlines } from '../src/court/court.js';
 import { registerProduct, linkManufacturer } from '../src/tagging/products.js';
 import { submitSupportiveTags, finalizeSupportiveTags } from '../src/tagging/supportive.js';
 import { PRECISION, DAILY_ACTIVE_POINTS, DAILY_SUPPORTIVE_POINTS, DAILY_AMBIENT_POINTS } from '../src/core/constants.js';
@@ -99,12 +99,13 @@ describe('Phase 12: Integration Tests', () => {
     const defendant = createAccount(db, 'individual', 1, 60);
     updateBalance(db, defendant.account.id, 'earned_balance', pts(500));
 
-    // Challenger must be a miner
+    // Challenger must be a miner, with enough earned to cover the 1,440-point
+    // filing floor
     const challenger = createAccount(db, 'individual', 1, 100);
-    updateBalance(db, challenger.account.id, 'earned_balance', pts(1000));
+    updateBalance(db, challenger.account.id, 'earned_balance', pts(40000));
     registerMiner(db, challenger.account.id);
 
-    // 5 Tier 2 juror miners
+    // 5 juror miners (tier no longer matters; percentHuman >= 90 does)
     for (let i = 0; i < 5; i++) {
       const acct = createAccount(db, 'individual', 1, 100);
       updateBalance(db, acct.account.id, 'earned_balance', pts(500));
@@ -116,8 +117,10 @@ describe('Phase 12: Integration Tests', () => {
     // fileChallenge sets status to arbitration_open
     assert.equal(courtCase.status, 'arbitration_open');
 
+    // A jury is seated only once the case has left arbitration
+    escalateToFull(db, courtCase.id);
     const juryMinerIds = selectJury(db, courtCase.id, 'block-hash-123');
-    assert.ok(juryMinerIds.length > 0);
+    assert.equal(juryMinerIds.length, 3);
 
     for (const minerId of juryMinerIds) {
       submitVote(db, courtCase.id, minerId, 'not_human');
@@ -126,7 +129,13 @@ describe('Phase 12: Integration Tests', () => {
     const verdict = resolveVerdict(db, courtCase.id);
     assert.equal(verdict, 'guilty');
 
+    // The verdict settles once the appeal window has closed with no appeal
+    assert.equal(getAccount(db, defendant.account.id)!.isActive, true, 'still open during the appeal window');
+    const sweep = expireCourtDeadlines(db, Math.floor(Date.now() / 1000) + 8 * 86400);
+    assert.deepEqual(sweep.settled, [courtCase.id]);
+
     assert.equal(getAccount(db, defendant.account.id)!.isActive, false);
+    assert.equal(getAccount(db, defendant.account.id)!.earnedBalance, 0n);
   });
 
   // Test 3: Tagging + Day Cycle integration

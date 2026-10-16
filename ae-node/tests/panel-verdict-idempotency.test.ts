@@ -4,6 +4,9 @@
 //   1. resolveVerdict had no guard, so a second call replayed the whole
 //      settlement — burning the defendant twice, paying the bounty twice,
 //      unlocking juror stakes already unlocked. Reachable from an HTTP retry.
+//      Settlement is deferred now (the jury's decision records
+//      verdict_pending; the sweep settles once the appeal window closes), so
+//      both halves must run exactly once: the decision and the settlement.
 //   2. A completed panel kept accepting scores, so a late miner recomputed the
 //      median over a larger set and silently rewrote a published verification.
 //   3. A fractional score was written straight into percent_human. SQLite
@@ -21,7 +24,7 @@ import { seedParams } from '../src/config/params.js';
 import { createAccount, getAccount, updateBalance } from '../src/core/account.js';
 import { registerMiner, setMinerTier } from '../src/mining/registration.js';
 import {
-  fileChallenge, escalateToFull, selectJury, submitVote, resolveVerdict,
+  fileChallenge, escalateToFull, selectJury, submitVote, resolveVerdict, expireCourtDeadlines, getCase,
 } from '../src/court/court.js';
 import { submitPanelScore, verificationStore } from '../src/verification/panel.js';
 import { PRECISION } from '../src/core/constants.js';
@@ -47,7 +50,7 @@ function miner(db: DatabaseSync, tier: 1 | 2, earned: number) {
 function pendingPanel(db: DatabaseSync, accountId: string) {
   const id = randomUUID();
   verificationStore(db).insertPanel({
-    id, accountId, status: 'pending', createdAt: Math.floor(Date.now() / 1000),
+    id, accountId, createdAt: Math.floor(Date.now() / 1000),
   });
   return id;
 }
@@ -56,7 +59,7 @@ describe('court: a verdict resolves exactly once', () => {
   let db: DatabaseSync;
   beforeEach(() => { db = freshDb(); });
 
-  it('a second resolveVerdict is rejected and moves no money', () => {
+  it('a second resolveVerdict is rejected, and the settlement runs exactly once', () => {
     const defendant = createAccount(db, 'individual', 1, 80);
     updateBalance(db, defendant.account.id, 'earned_balance', pts(10_000));
     const challenger = miner(db, 1, 10_000);
@@ -67,20 +70,30 @@ describe('court: a verdict resolves exactly once', () => {
     const jurors = selectJury(db, c.id, 'idem');
     for (const j of jurors) submitVote(db, c.id, j, 'not_human');
 
-    assert.equal(resolveVerdict(db, c.id), 'guilty');
-
-    const snapshot = [challenger.accountId, defendant.account.id].map((id) => {
+    const ids = [challenger.accountId, defendant.account.id];
+    const snap = () => ids.map((id) => {
       const a = getAccount(db, id)!;
-      return `${id}:${a.earnedBalance}:${a.lockedBalance}`;
+      return `${id}:${a.earnedBalance}:${a.lockedBalance}:${a.isActive}`;
     });
+
+    assert.equal(resolveVerdict(db, c.id), 'guilty');
+    assert.equal(getCase(db, c.id)!.status, 'verdict_pending');
+    const pending = snap();
 
     assert.throws(() => resolveVerdict(db, c.id), /already resolved/i);
+    assert.deepEqual(snap(), pending, 'a rejected re-resolve must not move a single point');
 
-    const after = [challenger.accountId, defendant.account.id].map((id) => {
-      const a = getAccount(db, id)!;
-      return `${id}:${a.earnedBalance}:${a.lockedBalance}`;
-    });
-    assert.deepEqual(after, snapshot, 'a rejected re-resolve must not move a single point');
+    // The appeal window closes; the sweep settles the case once.
+    const settleAt = Math.floor(Date.now() / 1000) + 8 * 86400;
+    assert.deepEqual(expireCourtDeadlines(db, settleAt).settled, [c.id]);
+    assert.equal(getCase(db, c.id)!.status, 'court_verdict');
+    const settled = snap();
+    assert.notDeepEqual(settled, pending, 'the settlement itself moved the money');
+
+    // Neither a retried resolve nor another sweep settles it again.
+    assert.throws(() => resolveVerdict(db, c.id), /already resolved/i);
+    assert.deepEqual(expireCourtDeadlines(db, settleAt + 86400).settled, []);
+    assert.deepEqual(snap(), settled, 'no second burn, no second bounty');
     db.close();
   });
 });

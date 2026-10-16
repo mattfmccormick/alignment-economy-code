@@ -3,10 +3,20 @@ export type CaseLevel = 'arbitration' | 'court' | 'appeal';
 export type CaseStatus =
   | 'arbitration_open'
   | 'arbitration_response'
+  /** The challenger withdrew during arbitration. */
   | 'withdrawn'
+  /** Closed with no verdict and no fault: no jury, or no majority. */
+  | 'dismissed'
   | 'court_open'
   | 'court_waiting_jury'
   | 'court_voting'
+  /**
+   * The jury has decided but nothing has settled. Every stake stays locked and
+   * the defendant stays frozen until the appeal window closes or the appeal
+   * is decided, then the case settles once against the final verdict.
+   */
+  | 'verdict_pending'
+  /** Final and settled. */
   | 'court_verdict'
   | 'appeal_open'
   | 'appeal_voting'

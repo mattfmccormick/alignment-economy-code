@@ -36,6 +36,17 @@ import {
 import { getAccount } from '../../core/account.js';
 import { PRECISION } from '../../core/constants.js';
 
+// An account under court challenge has its savings frozen. Registering as a
+// validator moves earned points into stake, which a guilty verdict cannot
+// reach, so a defendant could empty the account the verdict was about to take.
+// Checked here at the entry points, like the payment freeze, because the
+// court is still node-local and the apply path must stay a pure function of
+// the chain.
+const FROZEN_ACCOUNT_ERROR = {
+  code: 'ACCOUNT_ESCROWED',
+  message: 'An account under court challenge cannot stake as a validator until its case is resolved',
+};
+
 function serialize(v: ValidatorInfo): Record<string, unknown> {
   return {
     accountId: v.accountId,
@@ -64,6 +75,11 @@ export function validatorRoutes(db: DatabaseSync): Router {
     try {
       const accountId = req.accountId!;
       const { stake, nodePublicKey, vrfPublicKey } = req.body.payload ?? {};
+
+      if (getAccount(db, accountId)?.isEscrowed) {
+        res.status(403).json({ success: false, error: FROZEN_ACCOUNT_ERROR });
+        return;
+      }
 
       if (typeof stake !== 'number' || !Number.isFinite(stake) || stake <= 0) {
         res.status(400).json({
@@ -202,6 +218,10 @@ export function validatorRoutes(db: DatabaseSync): Router {
           success: false,
           error: { code: 'INVALID_SIGNATURE', message: 'change.signature does not verify against account.publicKey' },
         });
+        return;
+      }
+      if (account.isEscrowed) {
+        res.status(403).json({ success: false, error: FROZEN_ACCOUNT_ERROR });
         return;
       }
       // Display-units stake floor for friendlier error messages. The
