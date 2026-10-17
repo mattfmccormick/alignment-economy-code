@@ -33,7 +33,7 @@ The founder runs the ceremony, distributes keystores privately to invitees, and 
 
 ## Founder flow
 
-1. **Open the wallet, click "Create Account."**
+1. **Open the wallet's network setup screen.** It is not on the welcome screen (that one is only Create Account and Sign In). Go to `#/onboarding?setup=network` on the wallet's address, for example `http://localhost:5173/#/onboarding?setup=network` in a browser build. The desktop app has no address bar, so from the desktop app use the CLI path above.
 2. On the network choice screen, pick **"Start a new network."**
 3. Fill in the form:
    - **Network ID** as above.

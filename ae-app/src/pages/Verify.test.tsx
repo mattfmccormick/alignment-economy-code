@@ -73,7 +73,7 @@ const emptyScore: ScoreBreakdownData = {
 };
 
 function openRequestModalAndFill(toId: string, message: string) {
-  fireEvent.click(screen.getByRole('button', { name: 'Request Vouch from Friends' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Request a vouch' }));
   fireEvent.change(screen.getByPlaceholderText('Paste their account ID'), {
     target: { value: toId },
   });

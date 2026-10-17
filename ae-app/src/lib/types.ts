@@ -62,8 +62,9 @@ export interface TransactionData {
   isInPerson: boolean;
   recipientIsHuman: boolean;
   memo: string;
-  signature: string;
-  receiverSignature: string | null;
+  // Never returned: the API strips both signatures (see ae-node public-tx.ts).
+  signature?: string;
+  receiverSignature?: string | null;
   timestamp: number;
   blockNumber: number | null;
 }
@@ -287,6 +288,34 @@ export interface NetworkStatus {
   targetTotal: string;
   transactionsToday: number;
   feePoolBalance: string;
+}
+
+/** A row from GET /network/blocks (snake_case, straight from the table). */
+export interface BlockSummary {
+  number: number;
+  day: number;
+  timestamp: number;
+  hash: string;
+  transaction_count: number;
+}
+
+/** A non-transfer operation a block carried (GET /network/blocks/:n/contents). */
+export interface BlockOperation {
+  kind: 'account' | 'vouch' | 'miner' | 'verification' | 'tag' | 'validator';
+  type: string;
+  accountId: string | null;
+}
+
+export interface BlockContents {
+  number: number;
+  day: number;
+  timestamp: number;
+  hash: string;
+  previousHash: string;
+  stateRoot: string | null;
+  transactionCount: number;
+  transactions: TransactionData[];
+  operations: BlockOperation[];
 }
 
 // One point on the "share of the economy" line chart: the account's percent of

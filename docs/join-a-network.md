@@ -23,7 +23,7 @@ If you also got a **spec hash** (a 64-char fingerprint), keep it handy. You'll c
 
 ## Joining
 
-1. **Open the Alignment Economy Wallet, click "Create Account."**
+1. **Open the wallet's network setup screen.** It is not on the welcome screen (that one is only Create Account and Sign In). Go to `#/onboarding?setup=network` on the wallet's address, for example `http://localhost:5173/#/onboarding?setup=network` in a browser build.
 2. On the network choice screen, pick **"Join an existing network."**
 3. Paste the **invite link** into the textarea at the top, or upload the `genesis.json` file in the section below it. Either works.
 4. Upload **your keystore** (the `.json` file the founder sent you privately) in the section below.

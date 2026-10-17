@@ -471,6 +471,51 @@ export function validateTaggingOperationApplicable(
   }
 }
 
+/**
+ * Admission rules for NEW submissions: a product must name the account that
+ * made it, a space must name the account that runs it, and only products and
+ * spaces with that account can be tagged.
+ *
+ * Why: a tag with no recipient is a dead end. Finalization burns the whole
+ * allocation (supportive.ts, "No manufacturer linked: points expire"), so a
+ * person who tags their desk without a maker spends their daily supportive
+ * points on nothing and never finds out.
+ *
+ * Checked when an op enters a node's queue (HTTP route and peer gossip), and
+ * deliberately NOT inside validateTaggingOperationApplicable. That function
+ * also runs in block validation, and blocks committed before this rule carry
+ * registrations with no maker. Putting the rule there would make every node
+ * reject those historical blocks on replay and strand a fresh node at the
+ * first one. A proposer that skips this check can only commit an op whose
+ * points burn, which is the old behaviour, so consensus does not need it.
+ */
+export function checkTaggingAdmissionPolicy(db: DatabaseSync, op: TaggingOperation): string | null {
+  switch (op.type) {
+    case 'product_register':
+      if (!op.manufacturerId) return "manufacturer account ID is required: tagged points go to the maker's account";
+      return null;
+    case 'space_register':
+      if (!op.entityId) return 'entity account ID is required: tagged points go to the account that runs the space';
+      return null;
+    case 'supportive_tag_submit':
+      for (const t of op.tags ?? []) {
+        const product = getProduct(db, t.productId);
+        if (product && !product.manufacturerId) {
+          return `product ${t.productId} has no manufacturer account, so tagging it would burn the points`;
+        }
+      }
+      return null;
+    case 'ambient_tag_submit':
+      for (const t of op.tags ?? []) {
+        const space = getSpace(db, t.spaceId);
+        if (space && !space.entityId) {
+          return `space ${t.spaceId} has no entity account, so tagging it would burn the points`;
+        }
+      }
+      return null;
+  }
+}
+
 // ─── Persisted queue (mirror of pending_miner_operations) ──────────────────
 
 export function enqueueTaggingOperation(db: DatabaseSync, op: TaggingOperation): number {

@@ -5,6 +5,8 @@ import { getFeePool } from '../../core/fee-pool.js';
 import { cycleStateStore } from '../../core/stores/SqliteCycleStateStore.js';
 import { TARGET_EARNED_PER_PERSON } from '../../core/constants.js';
 import { computeStateRoot } from '../../core/state-root.js';
+import { transactionStore } from '../../core/transaction.js';
+import { publicTx } from '../public-tx.js';
 
 export function networkRoutes(db: DatabaseSync): Router {
   const router = Router();
@@ -81,6 +83,58 @@ export function networkRoutes(db: DatabaseSync): Router {
       res.json({
         success: true,
         data: row,
+        meta: { timestamp: Math.floor(Date.now() / 1000) },
+      });
+    } catch (e) { next(e); }
+  });
+
+  // GET /network/blocks/:number/contents — everything a block carried, in a
+  // form a person can read: the transfers (signatures stripped, see
+  // public-tx.ts) and every other operation (new accounts, vouches, miner
+  // actions, verification reviews, tags, validator changes) reduced to what
+  // it was and which account signed it. Backs the wallet's block view, where a
+  // participant taps from the network stats into a block and down to a single
+  // transaction. Public like the rest of /network: the chain is public.
+  router.get('/blocks/:number/contents', (req, res, next) => {
+    try {
+      const number = parseInt(req.params.number as string, 10);
+      if (!Number.isInteger(number) || number < 0) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'BAD_REQUEST', message: 'block number must be a non-negative integer' },
+        });
+      }
+      const row = db.prepare('SELECT * FROM blocks WHERE number = ?').get(number) as
+        | Record<string, unknown>
+        | undefined;
+      if (!row) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: `No block #${number}` },
+        });
+      }
+      const transactions = transactionStore(db).findTransactionsByBlock(number).map(publicTx);
+      const operations = [
+        ...blockOps(row.account_registrations, 'account'),
+        ...blockOps(row.vouch_operations, 'vouch'),
+        ...blockOps(row.miner_operations, 'miner'),
+        ...blockOps(row.panel_operations, 'verification'),
+        ...blockOps(row.tagging_operations, 'tag'),
+        ...blockOps(row.validator_changes, 'validator'),
+      ];
+      res.json({
+        success: true,
+        data: {
+          number: row.number,
+          day: row.day,
+          timestamp: row.timestamp,
+          hash: row.hash,
+          previousHash: row.previous_hash,
+          stateRoot: row.state_root ?? null,
+          transactionCount: row.transaction_count,
+          transactions,
+          operations,
+        },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });
     } catch (e) { next(e); }
@@ -180,4 +234,37 @@ export function networkRoutes(db: DatabaseSync): Router {
   });
 
   return router;
+}
+
+/** One non-transfer operation a block carried, as the block view shows it. */
+interface BlockOperationSummary {
+  kind: 'account' | 'vouch' | 'miner' | 'verification' | 'tag' | 'validator';
+  /** The op's own type (vouch_create, register, product_register...). */
+  type: string;
+  /** The account that signed it, when the op names one. */
+  accountId: string | null;
+}
+
+// Each op lane is stored on the block row as a JSON array (or NULL when the
+// block carried none). Read defensively: a malformed column shows as nothing
+// rather than failing the whole block view.
+function blockOps(json: unknown, kind: BlockOperationSummary['kind']): BlockOperationSummary[] {
+  if (typeof json !== 'string' || json === '') return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((raw) => {
+    const op = (raw ?? {}) as Record<string, unknown>;
+    // Vouch ops are signed by the voucher; every other lane uses accountId.
+    const signer = op.accountId ?? op.voucherId;
+    return {
+      kind,
+      type: typeof op.type === 'string' ? op.type : kind === 'account' ? 'account_register' : kind,
+      accountId: typeof signer === 'string' ? signer : null,
+    };
+  });
 }

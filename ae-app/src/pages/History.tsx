@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
-import { displayPoints, timeAgo } from '../lib/formatting';
+import { displayPoints, timeAgo, pointTypeLabel } from '../lib/formatting';
 import type { TransactionData } from '../lib/types';
 
 export function History() {
@@ -76,7 +76,7 @@ export function History() {
                   <div>
                     <p className="text-sm text-white">
                       {tx.from === wallet?.accountId ? 'Sent' : 'Received'}
-                      <span className="text-gray-500 ml-1 text-xs">{tx.pointType}</span>
+                      <span className="text-gray-500 ml-1 text-xs">{pointTypeLabel(tx.pointType)}</span>
                       {/* blockNumber stays null until a block carries this
                           transaction, which under commit-time execution is also
                           when the money actually moves. Drawing an unconfirmed

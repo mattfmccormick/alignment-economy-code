@@ -9,6 +9,8 @@ import type {
   MinerData,
   MinerStatus,
   NetworkStatus,
+  BlockSummary,
+  BlockContents,
   ContactData,
   VouchData,
   VouchRequestData,
@@ -289,6 +291,18 @@ export const api = {
   // Network
   getNetworkStatus: () =>
     request<NetworkStatus>('GET', '/network/status'),
+
+  // Newest first. The raw rows carry the commit certificate and validator
+  // snapshot too; the block list only reads the summary fields.
+  getBlocks: (limit = 20) =>
+    request<{ blocks: BlockSummary[]; total: number }>('GET', `/network/blocks?limit=${limit}`),
+
+  getBlockContents: (number: number) =>
+    request<BlockContents>('GET', `/network/blocks/${number}/contents`),
+
+  // Any transaction on the chain, not only the caller's own.
+  getTransaction: (id: string) =>
+    request<TransactionData>('GET', `/transactions/${encodeURIComponent(id)}`),
 
   getFeePool: () =>
     request<Record<string, unknown>>('GET', '/network/fee-pool'),

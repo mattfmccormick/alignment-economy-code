@@ -74,6 +74,19 @@ export function displayPercent(share: number): string {
   return share.toFixed(6) + '%';
 }
 
+/**
+ * What a person reads for a point type.
+ *
+ * The protocol still calls the 1,440-a-day allocation `active` (column names,
+ * signed payloads, the white paper's math). People see it as "Daily", which is
+ * what it is: the points that arrive every day and reset every night. Only the
+ * label changes; every value sent to the node stays `active`.
+ */
+export function pointTypeLabel(pointType: string): string {
+  if (pointType === 'active') return 'Daily';
+  return pointType.charAt(0).toUpperCase() + pointType.slice(1);
+}
+
 export function truncateId(id: string, chars: number = 8): string {
   if (id.length <= chars * 2 + 3) return id;
   return id.slice(0, chars) + '...' + id.slice(-chars);

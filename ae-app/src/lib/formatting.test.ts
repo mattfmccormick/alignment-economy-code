@@ -5,6 +5,7 @@ import {
   baseUnitsToExactDisplay,
   displayPercent,
   truncateId,
+  pointTypeLabel,
   countdown,
   secondsUntilDailyExpiry,
 } from './formatting';
@@ -140,5 +141,16 @@ describe('secondsUntilDailyExpiry', () => {
       const now = new Date(`2026-08-19T${String(h).padStart(2, '0')}:30:00Z`);
       expect(secondsUntilDailyExpiry(now)).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('pointTypeLabel', () => {
+  it('shows the protocol "active" type as Daily', () => {
+    expect(pointTypeLabel('active')).toBe('Daily');
+  });
+
+  it('capitalizes the other point types unchanged', () => {
+    expect(pointTypeLabel('earned')).toBe('Earned');
+    expect(pointTypeLabel('supportive')).toBe('Supportive');
   });
 });

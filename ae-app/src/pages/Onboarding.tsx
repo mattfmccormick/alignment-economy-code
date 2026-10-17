@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { saveWalletFromMnemonic, saveFounderWallet, saveJoinerWallet, saveJoinedNetwork } from '../lib/keys';
 import { newMnemonic, mnemonicToKeypair, isValidMnemonic, deriveAccountId } from '../lib/crypto';
@@ -10,7 +10,6 @@ import { PlatformError } from '@alignmenteconomy/sdk';
 
 type Flow =
   | 'welcome'
-  | 'what-is-ae'
   | 'platform-signup'        // Platform track: email + password form
   | 'platform-busy'          // Platform track: in-flight network call
   | 'platform-totp'          // Platform track: 2FA prompt after email + password OK
@@ -87,7 +86,15 @@ interface NewWalletState {
 }
 
 export function Onboarding() {
-  const [flow, setFlow] = useState<Flow>('welcome');
+  const location = useLocation();
+  // The welcome screen is for people opening an account: Create Account and
+  // Sign In, nothing else. Operators reach network setup (start a new
+  // network, or join one with a validator keystore) through
+  // #/onboarding?setup=network, documented in docs/start-a-network.md and
+  // docs/join-a-network.md.
+  const [flow, setFlow] = useState<Flow>(() =>
+    new URLSearchParams(location.search).get('setup') === 'network' ? 'network-mode' : 'welcome',
+  );
   const [wallet, setWallet] = useState<NewWalletState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -745,94 +752,7 @@ export function Onboarding() {
           Sign In
         </button>
 
-        {/* Entry points into two screen groups that were previously
-            unreachable. Both existed with working handlers, but the only
-            setFlow() calls that led to them were the "Back" buttons on the
-            screens themselves, so no user could ever arrive.
-
-            'what-is-ae' is the plain-language explainer. 'network-mode' is
-            the door to the genesis ceremony (start a new network) and to
-            validator keystore import (join an existing one) â€” the whole
-            operator path documented in docs/start-a-network.md and
-            docs/join-a-network.md, which was unreachable from the shipped
-            app. Kept as low-key text links so the two primary buttons above
-            stay the obvious choice for a normal participant. */}
-        <div className="flex flex-col items-center gap-3 mt-8">
-          <button
-            onClick={() => setFlow('what-is-ae')}
-            className="text-sm text-gray-500 hover:text-gray-300 transition-colors underline underline-offset-4"
-          >
-            New here? What is the Alignment Economy?
-          </button>
-          <button
-            onClick={() => setFlow('network-mode')}
-            className="text-sm text-gray-500 hover:text-gray-300 transition-colors underline underline-offset-4"
-          >
-            Start or join a network (advanced)
-          </button>
-        </div>
-
         {error && <p className="text-sm text-red-400 mt-4">{error}</p>}
-      </div>
-    );
-  }
-
-  // "What is this?" explainer. Optional, opt-in from the welcome screen.
-  // Plain language for someone who has never used a wallet, never heard
-  // of crypto, has no idea what a "point" is in this context. The whole
-  // point is to give a non-technical user enough context that the rest
-  // of the flow makes sense.
-  if (flow === 'what-is-ae') {
-    return (
-      <div className="flex flex-col items-center justify-start min-h-dvh px-6 bg-navy-dark py-10 overflow-y-auto">
-        <h2 className="text-2xl font-serif text-white mb-2 text-center">What is the Alignment Economy?</h2>
-        <p className="text-gray-400 text-sm mb-6 max-w-sm text-center leading-relaxed">
-          The 60-second version.
-        </p>
-
-        <div className="w-full max-w-sm space-y-3 mb-8">
-          <div className="bg-navy rounded-xl p-4 border border-navy-light">
-            <p className="text-sm text-teal font-medium mb-1">Everyone gets points daily</p>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              Every person on the network gets the same daily allocation. No one buys their way in. No one mines them with electricity. They just arrive, every day, for being a person.
-            </p>
-          </div>
-
-          <div className="bg-navy rounded-xl p-4 border border-navy-light">
-            <p className="text-sm text-teal font-medium mb-1">Most points expire daily</p>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              You get 1,440 active points each day, one for every minute. Spend them or they disappear at 4 AM. This kills hoarding and keeps points moving.
-            </p>
-          </div>
-
-          <div className="bg-navy rounded-xl p-4 border border-navy-light">
-            <p className="text-sm text-teal font-medium mb-1">Earned points last forever</p>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              When someone pays you for work, care, or anything else, those points become yours to keep. This is how teaching, caregiving, and community work finally show up in the economy.
-            </p>
-          </div>
-
-          <div className="bg-navy rounded-xl p-4 border border-navy-light">
-            <p className="text-sm text-teal font-medium mb-1">Real humans only</p>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              Each account has a percent-human score. You start at 0%. You gain percentage by getting verified or having other verified humans vouch for you. Until you're verified, you can receive points but not spend them at full value.
-            </p>
-          </div>
-
-          <div className="bg-navy rounded-xl p-4 border border-gold/30">
-            <p className="text-sm text-gold font-medium mb-1">No bank, no company runs this</p>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              You hold your own keys. Nobody can freeze, take, or block your account. The trade-off: if you lose your recovery phrase, no one can recover it for you. Save it carefully.
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => setFlow('welcome')}
-          className="w-full max-w-xs py-3.5 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark transition-colors mb-3"
-        >
-          Got it, take me back
-        </button>
       </div>
     );
   }
@@ -1631,7 +1551,7 @@ export function Onboarding() {
 
         <div className="bg-navy rounded-xl p-4 w-full max-w-sm border border-navy-light mb-4">
           <p className="text-xs text-gray-400 mb-1">Account ID</p>
-          <p className="text-sm text-white font-mono break-all">{wallet ? truncateId(wallet.accountId, 16) : ''}</p>
+          <p className="text-sm text-white font-mono break-all">{wallet?.accountId ?? ''}</p>
         </div>
 
         <div className="bg-navy rounded-xl p-4 w-full max-w-sm border border-gold/30 mb-3">

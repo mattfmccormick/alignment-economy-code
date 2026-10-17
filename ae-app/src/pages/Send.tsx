@@ -4,7 +4,7 @@ import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
-import { displayPoints, truncateId, toBaseUnits } from '../lib/formatting';
+import { displayPoints, truncateId, toBaseUnits, pointTypeLabel } from '../lib/formatting';
 import type { AccountSearchResult } from '../lib/types';
 
 type Tab = 'contacts' | 'search' | 'recent';
@@ -200,7 +200,7 @@ export function Send() {
         // carrying it commits, a few seconds later. Saying "Sent" over an
         // unchanged balance reads as a bug, and the correction arrives on its
         // own when the balance:updated event fires at commit.
-        const amountText = `${amountNum.toFixed(2)} ${pointType} points to ${truncateId(to)}`;
+        const amountText = `${amountNum.toFixed(2)} ${pointTypeLabel(pointType).toLowerCase()} points to ${truncateId(to)}`;
         setResult({
           success: true,
           message: res.data.pending
@@ -298,7 +298,7 @@ export function Send() {
                 pointType === t ? 'bg-teal text-white' : 'text-gray-400 hover:text-gray-200'
               }`}
             >
-              {t}
+              {pointTypeLabel(t)}
             </button>
           ))}
         </div>

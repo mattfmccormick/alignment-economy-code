@@ -18,6 +18,7 @@ import { Verify } from './pages/Verify';
 import { More } from './pages/More';
 import { History } from './pages/History';
 import { Network } from './pages/Network';
+import { BlockDetail } from './pages/BlockDetail';
 import { Court } from './pages/Court';
 import { CaseDetail } from './pages/CaseDetail';
 import { TransactionDetail } from './pages/TransactionDetail';
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/more" element={<More />} />
           <Route path="/history" element={<History />} />
           <Route path="/network" element={<Network />} />
+          <Route path="/block/:number" element={<BlockDetail />} />
           <Route path="/court" element={<Court />} />
           <Route path="/court/:id" element={<CaseDetail />} />
           <Route path="/tx/:id" element={<TransactionDetail />} />

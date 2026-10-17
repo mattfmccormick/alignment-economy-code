@@ -38,10 +38,14 @@ export interface Transaction {
   netAmount: string;
   pointType: PointType;
   isInPerson: boolean;
-  /** Receiver's countersignature on isInPerson txs (Phase 67); null otherwise. */
-  receiverSignature: string | null;
+  /**
+   * Never returned by the API: a published signature doubled as a replayable
+   * login token (audit #2/#3), so every route strips both. Kept optional for
+   * code that builds a Transaction locally.
+   */
+  receiverSignature?: string | null;
   memo: string;
-  signature: string;
+  signature?: string;
   timestamp: number;
   blockNumber: number | null;
 }

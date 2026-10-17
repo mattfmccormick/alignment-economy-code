@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
-import { truncateId, toBaseUnits, displayPoints, baseUnitsToExactDisplay } from '../lib/formatting';
+import { truncateId, toBaseUnits, displayPoints, baseUnitsToExactDisplay, pointTypeLabel } from '../lib/formatting';
 
 // Centralize the ts/sig/payload envelope shape so all four recurring
 // mutations look the same. Auth-required routes (auth-fix round 4)
@@ -228,7 +228,7 @@ export function Recurring() {
                 onChange={(e) => setNewPointType(e.target.value as 'active' | 'earned')}
                 className="w-full bg-navy-dark border border-navy-light rounded-lg px-3 py-2.5 text-white text-sm focus:border-teal focus:outline-none"
               >
-                <option value="active">Active</option>
+                <option value="active">Daily</option>
                 <option value="earned">Earned</option>
               </select>
             </div>
@@ -311,7 +311,7 @@ export function Recurring() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm text-white tabular-nums">{displayPoints(String(t.amount))} pts</p>
-                      <p className="text-xs text-gray-500 capitalize">{t.pointType} / {t.schedule}</p>
+                      <p className="text-xs text-gray-500 capitalize">{pointTypeLabel(t.pointType)} / {t.schedule}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 pt-2 border-t border-navy-light">

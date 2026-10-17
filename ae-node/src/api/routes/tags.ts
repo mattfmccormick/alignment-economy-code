@@ -37,6 +37,7 @@ import {
   enqueueTaggingOperation,
   verifyTaggingOperation,
   validateTaggingOperationApplicable,
+  checkTaggingAdmissionPolicy,
   deriveProductId,
   deriveSpaceId,
   type TaggingOperation,
@@ -99,6 +100,10 @@ export function tagRoutes(
     const problem = validateTaggingOperationApplicable(db, op);
     if (problem) {
       return res.status(400).json({ success: false, error: { code: 'OP_NOT_APPLICABLE', message: problem } });
+    }
+    const policyProblem = checkTaggingAdmissionPolicy(db, op);
+    if (policyProblem) {
+      return res.status(400).json({ success: false, error: { code: 'TAG_RECIPIENT_REQUIRED', message: policyProblem } });
     }
     enqueueTaggingOperation(db, op);
     taggingOpBroadcaster?.(op);

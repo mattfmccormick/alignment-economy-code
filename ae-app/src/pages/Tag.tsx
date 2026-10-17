@@ -31,6 +31,18 @@ const SPACE_TYPES = [
   'room', 'building', 'park', 'road', 'transit', 'city', 'state', 'nation', 'custom',
 ];
 
+// An account ID is sha256(publicKey) cut to 20 bytes: 40 hex characters.
+function isAccountId(value: string): boolean {
+  return /^[0-9a-f]{40}$/i.test(value.trim());
+}
+
+// Every tag needs someone to receive it. A product with no maker or a space
+// with no owner can't be tagged: the node refuses it, because finalization
+// would burn those points (see checkTaggingAdmissionPolicy in ae-node).
+// Older catalog entries registered before that rule can still show up here.
+const canTagProduct = (p: Product | undefined) => !!p?.manufacturerId;
+const canTagSpace = (s: Space | undefined) => !!s?.entityId;
+
 interface Product {
   id: string;
   name: string;
@@ -153,7 +165,11 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
   const save = async () => {
     if (day === null) return;
     setSaving(true); setError(null);
-    const submit = tagRows.filter((r) => r.minutesUsed > 0);
+    // Rows for a product with no maker are left out: the node would refuse the
+    // whole set, and those points would only burn anyway.
+    const submit = tagRows.filter(
+      (r) => r.minutesUsed > 0 && canTagProduct(products.find((p) => p.id === r.productId)),
+    );
     // Sign with the wallet's private key. The backend reads accountId
     // from the signature, not the body, so a third party can't redirect
     // the signer's daily supportive flow.
@@ -228,9 +244,13 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
               <div key={row.productId} className="p-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white truncate">{product?.name ?? 'Unknown product'}</p>
-                  <p className="text-xs text-gray-500">
-                    {product?.category} · {displayPoints(allocated)} pts
-                  </p>
+                  {product && !canTagProduct(product) ? (
+                    <p className="text-xs text-gold">No maker linked. This tag won&apos;t be saved.</p>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      {product?.category} · {displayPoints(allocated)} pts
+                    </p>
+                  )}
                 </div>
                 <input
                   type="number"
@@ -300,6 +320,8 @@ function ProductsTab({ accountId, day }: { accountId: string; day: number | null
                   </div>
                   {tagged ? (
                     <span className="text-xs text-teal">tagged · {tagged.minutesUsed}m</span>
+                  ) : !canTagProduct(p) ? (
+                    <span className="text-xs text-gray-500">Needs a maker</span>
                   ) : (
                     <button
                       onClick={() => setMinutes(p.id, 60)}
@@ -326,7 +348,7 @@ function AddProductForm({ accountId, onCreated }: { accountId: string; onCreated
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || !isAccountId(manufacturerId)) return;
     setSubmitting(true); setErr(null);
     const w = loadWallet();
     if (!w) { setSubmitting(false); setErr('No wallet loaded'); return; }
@@ -337,7 +359,7 @@ function AddProductForm({ accountId, onCreated }: { accountId: string; onCreated
       accountId,
       name.trim(),
       category,
-      manufacturerId.trim() || null,
+      manufacturerId.trim().toLowerCase(),
       ts,
       w.privateKey,
     );
@@ -375,13 +397,19 @@ function AddProductForm({ accountId, onCreated }: { accountId: string; onCreated
       <input
         value={manufacturerId}
         onChange={(e) => setManufacturerId(e.target.value)}
-        placeholder="Manufacturer account ID (optional)"
+        placeholder="Manufacturer account ID"
         className="w-full bg-navy-dark border border-navy-light rounded px-3 py-2 text-xs text-white placeholder-gray-600 font-mono"
       />
+      <p className="text-[11px] text-gray-500">
+        Required. The points you tag go to whoever made it.
+      </p>
+      {manufacturerId.trim() !== '' && !isAccountId(manufacturerId) && (
+        <p className="text-xs text-gold">An account ID is 40 characters, letters a to f and numbers.</p>
+      )}
       {err && <p className="text-xs text-red-400">{err}</p>}
       <button
         onClick={submit}
-        disabled={!name.trim() || submitting}
+        disabled={!name.trim() || !isAccountId(manufacturerId) || submitting}
         className="w-full bg-teal hover:bg-teal-dark text-white text-sm py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {submitting ? 'Registering…' : 'Register product'}
@@ -442,7 +470,10 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
   const save = async () => {
     if (day === null) return;
     setSaving(true); setError(null);
-    const submit = tagRows.filter((r) => r.minutesOccupied > 0);
+    // Same rule as products: a space with no owner is left out of the save.
+    const submit = tagRows.filter(
+      (r) => r.minutesOccupied > 0 && canTagSpace(spaces.find((s) => s.id === r.spaceId)),
+    );
     // Sign with the wallet's private key. Same reason as supportive:
     // backend reads accountId from the signature.
     const w = loadWallet();
@@ -509,9 +540,13 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
               <div key={row.spaceId} className="p-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white truncate">{space?.name ?? 'Unknown space'}</p>
-                  <p className="text-xs text-gray-500">
-                    {space?.type} · {displayPoints(allocated)} pts
-                  </p>
+                  {space && !canTagSpace(space) ? (
+                    <p className="text-xs text-gold">No owner linked. This tag won&apos;t be saved.</p>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      {space?.type} · {displayPoints(allocated)} pts
+                    </p>
+                  )}
                 </div>
                 <input
                   type="number"
@@ -575,6 +610,8 @@ function SpacesTab({ accountId, day }: { accountId: string; day: number | null }
                   </div>
                   {t ? (
                     <span className="text-xs text-teal">tagged · {t.minutesOccupied}m</span>
+                  ) : !canTagSpace(s) ? (
+                    <span className="text-xs text-gray-500">Needs an owner</span>
                   ) : (
                     <button
                       onClick={() => setMinutes(s.id, 60)}
@@ -601,7 +638,7 @@ function AddSpaceForm({ onCreated }: { onCreated: () => void }) {
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || !isAccountId(entityId)) return;
     setSubmitting(true); setErr(null);
     const w = loadWallet();
     if (!w) { setSubmitting(false); setErr('No wallet loaded'); return; }
@@ -614,7 +651,7 @@ function AddSpaceForm({ onCreated }: { onCreated: () => void }) {
       name.trim(),
       type,
       null,
-      entityId.trim() || null,
+      entityId.trim().toLowerCase(),
       0,
       ts,
       w.privateKey,
@@ -651,13 +688,19 @@ function AddSpaceForm({ onCreated }: { onCreated: () => void }) {
       <input
         value={entityId}
         onChange={(e) => setEntityId(e.target.value)}
-        placeholder="Entity account ID (optional)"
+        placeholder="Entity account ID"
         className="w-full bg-navy-dark border border-navy-light rounded px-3 py-2 text-xs text-white placeholder-gray-600 font-mono"
       />
+      <p className="text-[11px] text-gray-500">
+        Required. The points you tag go to whoever runs this space.
+      </p>
+      {entityId.trim() !== '' && !isAccountId(entityId) && (
+        <p className="text-xs text-gold">An account ID is 40 characters, letters a to f and numbers.</p>
+      )}
       {err && <p className="text-xs text-red-400">{err}</p>}
       <button
         onClick={submit}
-        disabled={!name.trim() || submitting}
+        disabled={!name.trim() || !isAccountId(entityId) || submitting}
         className="w-full bg-teal hover:bg-teal-dark text-white text-sm py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {submitting ? 'Registering…' : 'Register space'}

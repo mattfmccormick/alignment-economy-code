@@ -21,6 +21,7 @@ import {
 import {
   verifyTaggingOperation,
   enqueueTaggingOperation,
+  checkTaggingAdmissionPolicy,
   type TaggingOperation,
 } from '../tagging/tagging-operation.js';
 import { getAccount } from '../core/account.js';
@@ -292,6 +293,13 @@ export class AENode {
         if (!acct) return;
         if (!verifyTaggingOperation(op, acct.publicKey)) {
           logger.warn('p2p', 'Rejected gossiped tagging op: signature does not verify');
+          return;
+        }
+        // Same queue-entry rule the HTTP route applies (no maker, no tag), so a
+        // peer can't skip it by gossiping instead of posting.
+        const policyProblem = checkTaggingAdmissionPolicy(this.db, op);
+        if (policyProblem) {
+          logger.warn('p2p', `Rejected gossiped tagging op: ${policyProblem}`);
           return;
         }
         enqueueTaggingOperation(this.db, op);

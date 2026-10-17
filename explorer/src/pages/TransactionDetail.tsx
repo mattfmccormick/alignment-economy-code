@@ -49,8 +49,8 @@ export function TransactionDetail() {
       <Field label="Net amount (delivered to recipient)" value={pointsDisplay(tx.netAmount)} />
       <Field label="In-person" value={tx.isInPerson ? 'yes (dual-signed)' : 'no'} />
       {tx.memo && <Field label="Memo" value={tx.memo} />}
-      <Field label="Signature" value={truncateId(tx.signature, 16, 16)} mono />
-      {tx.receiverSignature && <Field label="Receiver countersignature" value={truncateId(tx.receiverSignature, 16, 16)} mono />}
+      {/* No signature fields: the API never publishes them (a published
+          signature doubled as a replayable login token, audit #2/#3). */}
       <Field label="Timestamp" value={formatTimestamp(tx.timestamp)} />
       {tx.blockNumber !== null && <Field label="Block" value={`#${tx.blockNumber}`} link={`/block/${tx.blockNumber}`} />}
     </div>

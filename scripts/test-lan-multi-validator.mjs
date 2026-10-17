@@ -334,13 +334,13 @@ async function waitForPercentHumanOnAllNodes(ports, accountId, expected, deadlin
 // Sign and submit a product_register operation (audit #16). Products are
 // consensus state now (tag finalization credits their manufacturer), so this
 // proves the product set converges via the chain, not node-local writes.
-async function submitProductRegister(apiPort, ks, name, category) {
+async function submitProductRegister(apiPort, ks, name, category, manufacturerId) {
   const cryptoUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'core', 'crypto.js')).href;
   const opUrl = pathToFileURL(join(aeNodeRoot, 'dist', 'tagging', 'tagging-operation.js')).href;
   const { signPayload } = await import(cryptoUrl);
   const { signProductRegister } = await import(opUrl);
   const timestamp = Math.floor(Date.now() / 1000);
-  const op = signProductRegister({ accountId: ks.accountId, name, category, timestamp, accountPrivateKey: ks.account.privateKey });
+  const op = signProductRegister({ accountId: ks.accountId, name, category, manufacturerId, timestamp, accountPrivateKey: ks.account.privateKey });
   const payload = { op };
   const res = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tags/products`, {
     method: 'POST',
@@ -695,7 +695,9 @@ async function main() {
   // nodes via the chain (state root excludes these tables, so we compare the
   // rows directly through the API).
   log('submitting product registration: validator 1');
-  const prodRes = await submitProductRegister(apiPorts[0], keystores[0], 'Oak Chair', 'furniture');
+  // A product must name its maker now (no maker, no tag), so validator 2 plays
+  // the manufacturer.
+  const prodRes = await submitProductRegister(apiPorts[0], keystores[0], 'Oak Chair', 'furniture', keystores[1].accountId);
   if (!prodRes.ok || !prodRes.productId) {
     teardown('product register failed');
     err(`product register POST failed: HTTP ${prodRes.status} ${JSON.stringify(prodRes.body)}`);

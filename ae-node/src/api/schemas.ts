@@ -65,7 +65,8 @@ export const submitTags = z.object({
 export const registerProduct = z.object({
   name: z.string().min(1),
   category: z.string().min(1),
-  manufacturerId: z.string().optional(),
+  // Required at queue entry (checkTaggingAdmissionPolicy): no maker, no tag.
+  manufacturerId: z.string().min(1),
 });
 
 export const registerSpace = z.object({
@@ -73,7 +74,8 @@ export const registerSpace = z.object({
   // The route checks `type` against VALID_SPACE_TYPES with its own message.
   type: z.string().min(1),
   parentId: z.string().optional(),
-  entityId: z.string().optional(),
+  // Required at queue entry (checkTaggingAdmissionPolicy): no owner, no tag.
+  entityId: z.string().min(1),
   collectionRate: z.number().optional(),
 });
 

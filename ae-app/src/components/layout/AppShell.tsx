@@ -1,12 +1,35 @@
 import { useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { BottomNav } from './BottomNav';
 import { getNodeStatus, subscribeNodeStatus } from '../../lib/api';
 import { loadWallet } from '../../lib/keys';
 import { wsClient } from '../../lib/websocket';
 
+// The bottom-nav tabs. Every other screen (Contacts, History, Network, a
+// transaction, a court case...) is one level down and gets a Back button.
+const TAB_ROOTS = new Set(['/', '/send', '/receive', '/tag', '/verify', '/more']);
+
+// Where Back goes when there is no in-app history to return to, e.g. the
+// page was opened from a link or after a reload.
+function parentOf(pathname: string): string {
+  if (pathname.startsWith('/court/')) return '/court';
+  if (pathname.startsWith('/block/')) return '/network';
+  if (pathname.startsWith('/tx/') || pathname === '/share') return '/';
+  return '/more';
+}
+
 export function AppShell() {
   const [nodeStatus, setNodeStatusState] = useState(getNodeStatus());
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isTabRoot = TAB_ROOTS.has(location.pathname);
+
+  function goBack() {
+    // React Router gives the first page of a session the key 'default', so
+    // anything else means there is a page behind this one to return to.
+    if (location.key !== 'default') navigate(-1);
+    else navigate(parentOf(location.pathname));
+  }
 
   // Open the realtime connection for this logged-in wallet so balances,
   // transactions, and day-change events push live instead of requiring a refresh.
@@ -38,7 +61,16 @@ export function AppShell() {
           Can&apos;t reach the local node. Try restarting the app. If this just started, give it a few seconds.
         </div>
       )}
-      <header className="px-4 py-3 flex items-center border-b border-navy-light">
+      <header className="px-4 py-3 flex items-center gap-3 border-b border-navy-light">
+        {!isTabRoot && (
+          <button
+            onClick={goBack}
+            className="text-sm text-teal hover:text-teal-dark shrink-0"
+            aria-label="Go back"
+          >
+            ← Back
+          </button>
+        )}
         <h1 className="text-base font-serif text-white tracking-wide">Alignment Economy</h1>
       </header>
 

@@ -5,6 +5,7 @@ import { getAccount } from '../../core/account.js';
 import { validateBody } from '../middleware/validate.js';
 import { createTransaction } from '../schemas.js';
 import { eventBus } from '../websocket.js';
+import { publicTx } from '../public-tx.js';
 import type { PointType } from '../../core/types.js';
 import type { WireTransaction } from '../../network/block-validator.js';
 
@@ -171,7 +172,9 @@ export function transactionRoutes(
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Transaction not found' } });
         return;
       }
-      res.json({ success: true, data: tx, meta: { timestamp: Math.floor(Date.now() / 1000) } });
+      // publicTx: never echo the signatures (see public-tx.ts). The wallet now
+      // opens any transaction from the block view, not just the caller's own.
+      res.json({ success: true, data: publicTx(tx), meta: { timestamp: Math.floor(Date.now() / 1000) } });
     } catch (e) { next(e); }
   });
 

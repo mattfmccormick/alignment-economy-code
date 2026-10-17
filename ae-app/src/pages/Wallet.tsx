@@ -139,7 +139,7 @@ export function Wallet() {
 
       <div className="bg-navy rounded-xl p-4 mx-4 border border-navy-light space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-gray-300">Daily Allocations</h3>
+          <h3 className="text-sm font-medium text-gray-300">Allocations</h3>
           <span className={`text-xs ${secsToExpiry < 7200 ? 'text-amber-400' : 'text-gray-500'}`}>
             {secsToExpiry < 7200
               ? `Resets in ${countdown(secsToExpiry)}. Spend or lose.`
@@ -147,10 +147,10 @@ export function Wallet() {
           </span>
         </div>
         <p className="text-[11px] text-gray-500 -mt-1">
-          Unspent Active, Supportive and Ambient points reset every night.
+          Unspent Daily, Supportive and Ambient points reset every night.
           Earned points never expire.
         </p>
-        <AllocationBar label="Active" total={String(144_000_000_000)} remaining={account.activeBalance} />
+        <AllocationBar label="Daily" total={String(144_000_000_000)} remaining={account.activeBalance} />
         <AllocationBar label="Supportive" total={String(14_400_000_000)} remaining={account.supportiveBalance} />
         <AllocationBar label="Ambient" total={String(1_440_000_000)} remaining={account.ambientBalance} />
       </div>

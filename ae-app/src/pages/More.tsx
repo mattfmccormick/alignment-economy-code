@@ -12,7 +12,6 @@ import {
   sessionFromSdk,
   isSessionExpired,
 } from '../lib/platform';
-import { truncateId } from '../lib/formatting';
 import { getTheme, setTheme } from '../lib/theme';
 import { api } from '../lib/api';
 import type { MinerStatus } from '../lib/types';
@@ -354,7 +353,7 @@ export function More() {
       <div className="bg-navy rounded-xl p-4 border border-navy-light">
         <p className="text-xs text-gray-400 mb-1">Account ID</p>
         <div className="flex items-center gap-2">
-          <p className="text-sm text-white font-mono flex-1 truncate">{wallet ? truncateId(wallet.accountId, 16) : 'Not connected'}</p>
+          <p className="text-sm text-white font-mono flex-1 break-all">{wallet ? wallet.accountId : 'Not connected'}</p>
           <button onClick={copyAccountId} className="text-xs text-teal hover:text-teal-dark shrink-0">
             {copied ? 'Copied!' : 'Copy'}
           </button>

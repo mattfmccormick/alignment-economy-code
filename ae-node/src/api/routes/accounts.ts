@@ -9,7 +9,7 @@ import {
 import { deriveAccountId } from '../../core/crypto.js';
 import { queueAccountRegistration } from '../../core/account-registration.js';
 import { transactionStore } from '../../core/transaction.js';
-import type { TransactionRow } from '../../core/stores/ITransactionStore.js';
+import { publicTx } from '../public-tx.js';
 import { getCycleState } from '../../core/day-cycle.js';
 import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
@@ -368,16 +368,6 @@ export function accountRoutes(db: DatabaseSync, accountBroadcaster?: AccountBroa
   });
 
   return router;
-}
-
-// Transaction as exposed over the API: everything the client legitimately
-// needs, minus the two signature fields. See the call site for why publishing
-// them is a live exploit rather than merely untidy.
-function publicTx(tx: TransactionRow): Record<string, unknown> {
-  const { signature: _s, receiverSignature: _r, ...rest } = tx;
-  void _s;
-  void _r;
-  return rest;
 }
 
 function serializeAccount(acct: NonNullable<ReturnType<typeof getAccount>>) {

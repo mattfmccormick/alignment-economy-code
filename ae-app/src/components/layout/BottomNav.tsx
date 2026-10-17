@@ -5,7 +5,7 @@ const tabs = [
   { to: '/send', label: 'Send', icon: '↗' },
   { to: '/receive', label: 'Receive', icon: '↙' },
   { to: '/tag', label: 'Tag', icon: '⬡' },
-  { to: '/verify', label: 'Verify', icon: '✓' },
+  { to: '/verify', label: 'Prove Human', icon: '✓' },
   { to: '/more', label: 'More', icon: '⋯' },
 ];
 
@@ -18,7 +18,7 @@ export function BottomNav() {
             key={tab.to}
             to={tab.to}
             className={({ isActive }) =>
-              `flex flex-col items-center py-2 px-3 text-xs transition-colors ${
+              `flex flex-col items-center py-2 px-2 text-xs whitespace-nowrap transition-colors ${
                 isActive ? 'text-teal' : 'text-gray-400 hover:text-gray-200'
               }`
             }

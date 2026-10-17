@@ -10,7 +10,7 @@
 // jurors, and the wallet doesn't carry a miner role).
 
 import { useEffect, useState, useCallback } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { loadWallet } from '../lib/keys';
 import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
@@ -110,7 +110,6 @@ export function CaseDetail() {
   if (!caseHeader) {
     return (
       <div className="p-4 space-y-3">
-        <Link to="/court" className="text-xs text-teal hover:text-teal-dark">← Back to cases</Link>
         <p className="text-sm text-red-400">{error ?? 'Case not found'}</p>
       </div>
     );
@@ -124,8 +123,7 @@ export function CaseDetail() {
 
   return (
     <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <Link to="/court" className="text-xs text-teal hover:text-teal-dark">← Back to cases</Link>
+      <div className="flex items-center justify-end">
         <span className="text-[11px] text-gray-500 font-mono">{truncateId(caseHeader.id)}</span>
       </div>
 

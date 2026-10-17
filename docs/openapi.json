@@ -919,12 +919,14 @@
                         "minLength": 1
                       },
                       "manufacturerId": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
                     "required": [
                       "name",
-                      "category"
+                      "category",
+                      "manufacturerId"
                     ],
                     "additionalProperties": false
                   }
@@ -1083,7 +1085,8 @@
                         "type": "string"
                       },
                       "entityId": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       },
                       "collectionRate": {
                         "type": "number"
@@ -1091,7 +1094,8 @@
                     },
                     "required": [
                       "name",
-                      "type"
+                      "type",
+                      "entityId"
                     ],
                     "additionalProperties": false
                   }

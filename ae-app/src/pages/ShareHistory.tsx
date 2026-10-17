@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
@@ -12,7 +11,6 @@ import type { SharePoint } from '../lib/types';
 // across every day the account has existed. Reached by tapping that figure.
 export function ShareHistory() {
   const wallet = loadWallet();
-  const navigate = useNavigate();
   const [points, setPoints] = useState<SharePoint[] | null>(null);
   const [error, setError] = useState('');
 
@@ -38,16 +36,7 @@ export function ShareHistory() {
 
   return (
     <div className="p-4 space-y-5">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => navigate(-1)}
-          className="text-gray-400 hover:text-white text-sm"
-          aria-label="Back"
-        >
-          ← Back
-        </button>
-        <h2 className="text-xl font-serif text-white">Your Share of the Economy</h2>
-      </div>
+      <h2 className="text-xl font-serif text-white">Your Share of the Economy</h2>
 
       <p className="text-sm text-gray-400">
         Your slice of everyone's saveable points, tracked from the day you joined.

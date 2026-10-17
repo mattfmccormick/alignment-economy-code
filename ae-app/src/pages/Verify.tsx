@@ -374,7 +374,7 @@ export function Verify() {
 
   return (
     <div className="p-4 space-y-6">
-      <h2 className="text-xl font-serif text-white">Verification Score</h2>
+      <h2 className="text-xl font-serif text-white">Prove Human</h2>
 
       {/* Circular gauge */}
       <div className="flex justify-center">
@@ -428,62 +428,39 @@ export function Verify() {
         </div>
       )}
 
-      {/* What counts as proof — strength list. A miner weighs whatever you add;
-          the 4-dot meter shows how much each kind of evidence typically counts.
-          strength = filled dots out of 4 (teal = strong, gold = weaker). */}
+      {/* Three steps: request a vouch, upload evidence, connect with miners to
+          verify. Each row carries its own button, so the card is the whole
+          flow. Uploading evidence still starts a miner review on its own (see
+          handleSubmitEvidence); step 3 is for people who only have vouches,
+          which was the one path with no button at all. */}
       <div className="bg-navy rounded-xl p-4 border border-navy-light space-y-3">
-        <div>
-          <h3 className="text-sm font-medium text-white">Prove you&apos;re human</h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Add any of these. A miner weighs them and sets your score.
-          </p>
-        </div>
-        <ul className="space-y-2.5">
-          {[
-            { label: 'Friend vouches', strength: 4, strong: true },
-            { label: 'Live video call', strength: 3, strong: true },
-            { label: 'Government ID', strength: 2, strong: false },
-            { label: 'Selfie or voice', strength: 1, strong: false },
-          ].map((it) => (
-            <li key={it.label} className="flex items-center gap-3">
-              <span className="flex-1 text-sm text-white">{it.label}</span>
-              <span className="flex gap-1" aria-label={`Strength ${it.strength} of 4`}>
-                {[0, 1, 2, 3].map((i) => (
-                  <span
-                    key={i}
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      i < it.strength
-                        ? it.strong ? 'bg-teal' : 'bg-gold'
-                        : 'bg-navy-light'
-                    }`}
-                  />
-                ))}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="text-[11px] text-gray-500">
-          Vouches alone can get you fully verified, no documents required.
-        </p>
-      </div>
-
-      {/* Actions */}
-      <div className="space-y-2">
-        <button
-          onClick={() => { setModal('request-vouch'); setVouchSuccess(false); setVouchError(null); }}
-          className="w-full py-3 bg-teal text-white rounded-xl text-sm font-medium hover:bg-teal-dark transition-colors"
-        >
-          Request Vouch from Friends
-        </button>
-        <button
-          onClick={() => { setModal('submit-evidence'); setEvidenceSuccess(false); setEvidenceError(null); }}
-          className="w-full py-3 bg-navy text-gray-300 rounded-xl text-sm border border-navy-light hover:border-gray-500 transition-colors"
-        >
-          Submit Evidence
-        </button>
-        {panelLoading && <p className="text-xs text-gray-400 text-center pt-1">Requesting a miner review…</p>}
-        {panelError && !panelLoading && <p className="text-xs text-gold text-center pt-1">{panelError}</p>}
-        {openPanel && !panelError && !panelLoading && <p className="text-xs text-teal text-center pt-1">A miner is reviewing your proof.</p>}
+        <h3 className="text-sm font-medium text-white">Prove you&apos;re human</h3>
+        <ol className="space-y-2">
+          <ProveStep
+            n={1}
+            title="Request a vouch"
+            detail="Verified friends stake their own points on you."
+            action="Request a vouch"
+            onClick={() => { setModal('request-vouch'); setVouchSuccess(false); setVouchError(null); }}
+          />
+          <ProveStep
+            n={2}
+            title="Upload evidence"
+            detail="A photo ID, a selfie or a voice clip. The file itself never leaves this device."
+            action="Upload evidence"
+            onClick={() => { setModal('submit-evidence'); setEvidenceSuccess(false); setEvidenceError(null); }}
+          />
+          <ProveStep
+            n={3}
+            title="Connect with miners to verify"
+            detail="Miners review your vouches and evidence, then set your score."
+            action={panelLoading ? 'Connecting…' : openPanel ? 'Under review' : 'Connect with miners'}
+            onClick={handleRequestPanel}
+            disabled={panelLoading || !!openPanel}
+          />
+        </ol>
+        {panelError && !panelLoading && <p className="text-xs text-gold">{panelError}</p>}
+        {openPanel && !panelError && !panelLoading && <p className="text-xs text-teal">A miner is reviewing your proof.</p>}
       </div>
 
 
@@ -782,3 +759,38 @@ export function Verify() {
   );
 }
 
+
+function ProveStep({
+  n,
+  title,
+  detail,
+  action,
+  onClick,
+  disabled = false,
+}: {
+  n: number;
+  title: string;
+  detail: string;
+  action: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <li className="flex items-start gap-3 bg-navy-dark/60 rounded-lg p-3">
+      <span className="w-6 h-6 rounded-full bg-teal/20 text-teal text-xs font-medium flex items-center justify-center shrink-0">
+        {n}
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-white">{title}</p>
+        <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">{detail}</p>
+        <button
+          onClick={onClick}
+          disabled={disabled}
+          className="mt-2 px-3 py-1.5 bg-teal text-white rounded-lg text-xs font-medium hover:bg-teal-dark transition-colors disabled:opacity-50 disabled:cursor-default"
+        >
+          {action}
+        </button>
+      </div>
+    </li>
+  );
+}
