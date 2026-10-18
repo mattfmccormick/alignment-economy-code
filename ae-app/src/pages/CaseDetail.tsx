@@ -20,6 +20,7 @@ import {
   COURT_STEPS,
   caseProgress,
   claimText,
+  stakeNote,
   stepIndex,
   type CaseProgress,
   type CourtStepId,
@@ -246,7 +247,7 @@ function CaseSummary({ c, me, progress }: { c: CourtCaseData; me: string; progre
         <div>
           <div className="text-gray-500 mb-0.5">Challenger staked</div>
           <div className="text-gray-300">
-            {displayPoints(c.challengerStake)} pts ({c.challengerStakePercent}%)
+            {displayPoints(c.challengerStake)} pts {stakeNote(c.challengerStake, c.challengerStakePercent)}
           </div>
         </div>
         <div>

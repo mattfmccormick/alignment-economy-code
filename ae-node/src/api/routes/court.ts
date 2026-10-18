@@ -29,7 +29,8 @@ export function courtRoutes(db: DatabaseSync): Router {
   router.post('/challenges', authMiddleware(db), minerAuthMiddleware(db), validateBody(schemas.fileChallenge), (req, res, next) => {
     try {
       const challengerAccountId = req.accountId!;
-      const { defendantAccountId, caseType, stakePercent, openingArgument, counterpartAccountId } = req.body.payload || req.body;
+      const { defendantAccountId, caseType, stakePercent, openingArgument, counterpartAccountId, attachments } =
+        req.body.payload || req.body;
 
       if (!defendantAccountId || !caseType || typeof stakePercent !== 'number') {
         res.status(400).json({
@@ -50,6 +51,7 @@ export function courtRoutes(db: DatabaseSync): Router {
         db, challengerAccountId, defendantAccountId, caseType as CaseType, stakePercent,
         typeof openingArgument === 'string' ? openingArgument : undefined,
         typeof counterpartAccountId === 'string' ? counterpartAccountId : undefined,
+        Array.isArray(attachments) ? attachments : [],
       );
 
       // Notify the defendant in real time so their wallet shows the summons.

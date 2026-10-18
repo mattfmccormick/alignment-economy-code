@@ -46,6 +46,11 @@ export const fileChallenge = z.object({
   // Required by fileChallenge() when caseType is 'duplicate_account': the
   // earlier account the defendant duplicates (validated server-side).
   counterpartAccountId: z.string().optional(),
+  // Evidence files on the opening argument: name + SHA-256 (file stays local).
+  attachments: z
+    .array(z.object({ name: z.string().min(1).max(200), hash: z.string().regex(/^[0-9a-fA-F]{64}$/) }))
+    .max(10)
+    .optional(),
 });
 
 // Text may be empty when the post is only a file or an offer; court.ts

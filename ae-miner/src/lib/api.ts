@@ -231,6 +231,23 @@ export interface JuryAssignment {
   votedAt: number | null;
 }
 
+// A row in "my cases": the case header plus the viewer's role.
+export interface MyCase {
+  id: string;
+  type: string;
+  level: string;
+  status: string;
+  challengerId: string;
+  defendantId: string;
+  challengerStake: string;
+  challengerStakePercent: number;
+  verdict: string | null;
+  createdAt: number;
+  resolvedAt: number | null;
+  isDefendant: boolean;
+  isChallenger: boolean;
+}
+
 // A row in the active-cases list (a subset of the case header).
 export interface ActiveCaseSummary {
   id: string;
@@ -329,6 +346,15 @@ export const api = {
   // floor of the stake goes to the defendant.
   withdrawCase: (caseId: string, signedBody: unknown) =>
     request<ApiResponse<{ case: CaseHeader }>>('POST', `/court/cases/${caseId}/withdraw`, signedBody),
+
+  // The side that lost may appeal within 7 days of the verdict (signed). A
+  // fresh jury of the same size is drawn at the next daily reset.
+  appealCase: (caseId: string, signedBody: unknown) =>
+    request<ApiResponse<{ case: CaseHeader; appealOf: string }>>('POST', `/court/cases/${caseId}/appeal`, signedBody),
+
+  // Cases this account filed or is defending, with role flags.
+  getMyCases: (accountId: string) =>
+    request<ApiResponse<{ cases: MyCase[] }>>('GET', `/court/my-cases/${accountId}`),
 
   // Cases assigned to this miner as a juror.
   getJuryDuty: (accountId: string) =>

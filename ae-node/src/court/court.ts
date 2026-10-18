@@ -191,8 +191,10 @@ export function fileChallenge(
   stakePercent: number,
   openingArgument?: string,
   counterpartAccountId?: string,
+  openingAttachments: ArgumentAttachment[] = [],
 ): CourtCase {
   assertCourtRunsOnThisNetwork(db);
+  const attachments = cleanAttachments(openingAttachments);
 
   // Verify challenger is an active miner
   const miner = getMinerByAccount(db, challengerAccountId);
@@ -328,8 +330,8 @@ export function fileChallenge(
       createdAt: now,
     });
 
-    if (openingArgument && openingArgument.trim()) {
-      const text = openingArgument.trim();
+    const text = (openingArgument ?? '').trim();
+    if (text || attachments.length > 0) {
       if (text.length > MAX_ARGUMENT_LENGTH) {
         throw new ValidationError('Argument text exceeds 5,000 character limit', 'ARGUMENT_TOO_LONG');
       }
@@ -340,7 +342,7 @@ export function fileChallenge(
         role: 'challenger',
         text,
         attachmentHash: null,
-        attachments: [],
+        attachments,
         offers: [],
         createdAt: now,
       });
@@ -446,6 +448,19 @@ function insertArgument(db: DatabaseSync, arg: CaseArgument): void {
   );
 }
 
+/** Trim names, lowercase fingerprints, and reject anything malformed. */
+function cleanAttachments(list: ArgumentAttachment[]): ArgumentAttachment[] {
+  const attachments = list.map((a) => ({ name: a.name.trim(), hash: a.hash.toLowerCase() }));
+  if (attachments.length > MAX_ATTACHMENTS) {
+    throw new ValidationError(`At most ${MAX_ATTACHMENTS} files per post`, 'TOO_MANY_ATTACHMENTS');
+  }
+  for (const a of attachments) {
+    if (!a.name || a.name.length > 200) throw new ValidationError('Each file needs a name of 1 to 200 characters', 'INVALID_ATTACHMENT');
+    if (!/^[0-9a-f]{64}$/.test(a.hash)) throw new ValidationError('Each file needs its SHA-256 fingerprint', 'INVALID_ATTACHMENT');
+  }
+  return attachments;
+}
+
 function parseJsonList<T>(raw: unknown): T[] {
   if (typeof raw !== 'string' || !raw) return [];
   try {
@@ -489,14 +504,7 @@ export function submitArgument(
     throw new ValidationError(`Case is no longer open for arguments (status: ${courtCase.status})`, 'CASE_NOT_OPEN');
   }
 
-  const attachments = (extras.attachments ?? []).map((a) => ({ name: a.name.trim(), hash: a.hash.toLowerCase() }));
-  if (attachments.length > MAX_ATTACHMENTS) {
-    throw new ValidationError(`At most ${MAX_ATTACHMENTS} files per post`, 'TOO_MANY_ATTACHMENTS');
-  }
-  for (const a of attachments) {
-    if (!a.name || a.name.length > 200) throw new ValidationError('Each file needs a name of 1 to 200 characters', 'INVALID_ATTACHMENT');
-    if (!/^[0-9a-f]{64}$/.test(a.hash)) throw new ValidationError('Each file needs its SHA-256 fingerprint', 'INVALID_ATTACHMENT');
-  }
+  const attachments = cleanAttachments(extras.attachments ?? []);
   const offers = [...new Set(extras.offers ?? [])];
   if (offers.some((o) => !ARGUMENT_OFFERS.has(o))) {
     throw new ValidationError("Offers must be 'call' or 'in_person'", 'INVALID_OFFER');

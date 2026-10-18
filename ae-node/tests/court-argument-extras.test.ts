@@ -47,6 +47,16 @@ describe('court arguments: files and offers', () => {
     db.close();
   });
 
+  it('files a challenge with evidence files on the opening argument', () => {
+    const { db, challenger } = setup();
+    const other = createAccount(db, 'individual', 1, 0).account.id;
+    const c = fileChallenge(db, challenger, other, 'not_human', 5, '', undefined, [{ name: 'log.csv', hash: HASH }]);
+    const [opening] = getArgumentsForCase(db, c.id);
+    assert.equal(opening.text, '');
+    assert.deepEqual(opening.attachments, [{ name: 'log.csv', hash: HASH }]);
+    db.close();
+  });
+
   it('rejects an empty post, a bad fingerprint and an unknown offer', () => {
     const { db, defendant, caseId } = setup();
     const isValidation = (code: string) => (e: unknown) => e instanceof ValidationError && e.code === code;

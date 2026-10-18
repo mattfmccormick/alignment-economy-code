@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { signPayload } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { displayPoints } from '../lib/formatting';
-import { COURT_STEPS, caseProgress, claimText, stepIndex } from '../lib/courtSteps';
+import { COURT_STEPS, caseProgress, claimText, stakeNote, stepIndex } from '../lib/courtSteps';
 import { CaseTracker } from '../components/court/CaseTracker';
 
 /** "Step 2 of 6: Respond", or how the case closed early. */
@@ -147,7 +147,7 @@ export function Court() {
                 <CaseTracker progress={caseProgress(c.status)} compact />
                 <p className="text-xs text-gray-500">
                   Challenger staked {displayPoints(c.challengerStake)} pts
-                  {c.challengerStakePercent != null ? ` (${c.challengerStakePercent}%)` : ''}
+                  {' '}{stakeNote(c.challengerStake, c.challengerStakePercent)}
                 </p>
                 {c.isDefendant && FROZEN_STATUSES.has(c.status) && (
                   <p className="text-xs text-red-400">Your earned points are frozen until the case ends</p>

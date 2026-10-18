@@ -135,3 +135,16 @@ export function claimText(caseType: string): string {
     ? 'says this is a second account of a person who already has one.'
     : "says no real, unique person is behind this account.";
 }
+
+// The filing floor, 1,440 points, in base units (8 decimals).
+const STAKE_FLOOR_BASE_UNITS = 144_000_000_000n;
+
+/** "(5%)", or "(the 1,440 minimum)" when the chosen percentage came in under the floor. */
+export function stakeNote(stake: string, percent: number | null | undefined): string {
+  try {
+    if (BigInt(stake) === STAKE_FLOOR_BASE_UNITS) return '(the 1,440 minimum)';
+  } catch {
+    // not an integer string; fall through to the percentage
+  }
+  return percent != null ? `(${percent}%)` : '';
+}

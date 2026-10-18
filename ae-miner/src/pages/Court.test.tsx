@@ -20,7 +20,7 @@ vi.mock('../lib/websocket', () => ({ wsClient: { on: vi.fn(() => () => {}) } }))
 vi.mock('../lib/api', () => ({
   api: {
     getJuryDuty: vi.fn(),
-    getActiveCases: vi.fn(),
+    getMyCases: vi.fn(),
     fileChallenge: vi.fn(),
     submitVote: vi.fn(),
   },
@@ -38,7 +38,7 @@ const fakeCase: CaseHeader = {
 async function openFileTabAndFill(defendant: string, argument: string) {
   // Data loads on mount; wait for the tab bar, then switch to File Challenge.
   fireEvent.click(await screen.findByRole('button', { name: 'File Challenge' }));
-  fireEvent.change(screen.getByPlaceholderText('acc_...'), { target: { value: defendant } });
+  fireEvent.change(screen.getByPlaceholderText('Their full account ID'), { target: { value: defendant } });
   fireEvent.change(screen.getByPlaceholderText(/Lay out your evidence/), {
     target: { value: argument },
   });
@@ -48,7 +48,7 @@ describe('Court file-challenge flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.getJuryDuty.mockResolvedValue({ success: true, data: { assignments: [] } });
-    mockApi.getActiveCases.mockResolvedValue({ success: true, data: { cases: [] } });
+    mockApi.getMyCases.mockResolvedValue({ success: true, data: { cases: [] } });
   });
 
   afterEach(() => cleanup());
@@ -58,7 +58,7 @@ describe('Court file-challenge flow', () => {
 
     render(<Court />);
     await openFileTabAndFill('acc_bad', 'clearly a bot: posts every 3 seconds, 24/7');
-    fireEvent.click(screen.getByRole('button', { name: /File Challenge with 5% Stake/ }));
+    fireEvent.click(screen.getByRole('button', { name: /File challenge with a 5% stake/ }));
 
     await waitFor(() => expect(mockApi.fileChallenge).toHaveBeenCalledTimes(1));
 
@@ -83,7 +83,7 @@ describe('Court file-challenge flow', () => {
 
     render(<Court />);
     await openFileTabAndFill('acc_bad', 'suspicious');
-    fireEvent.click(screen.getByRole('button', { name: /File Challenge with 5% Stake/ }));
+    fireEvent.click(screen.getByRole('button', { name: /File challenge with a 5% stake/ }));
 
     expect(await screen.findByText('You cannot challenge your own account')).toBeTruthy();
   });
