@@ -218,6 +218,16 @@ export interface PanelSummary {
   medianScore: number | null;
 }
 
+/** A miner's note about a live verification call, usually a meeting link. */
+export interface CallMessage {
+  id: string;
+  panelId: string;
+  fromId: string;
+  toId: string;
+  text: string;
+  createdAt: number;
+}
+
 // ─── Vouching ────────────────────────────────────────────────────────────
 
 /** A vouch (WP v2: percentage-based). API stringifies the bigint stake. */

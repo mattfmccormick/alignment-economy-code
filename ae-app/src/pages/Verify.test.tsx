@@ -59,6 +59,7 @@ vi.mock('../lib/api', () => ({
     createVouchRequest: vi.fn(),
     createVouch: vi.fn(),
     updateVouchRequest: vi.fn(),
+    getMyCallMessages: vi.fn(),
   },
 }));
 
@@ -233,5 +234,48 @@ describe('Verify incoming vouch requests', () => {
     await waitFor(() => expect(mockApi.updateVouchRequest).toHaveBeenCalledTimes(1));
     expect(mockApi.updateVouchRequest.mock.calls[0][1].payload).toEqual({ status: 'declined' });
     expect(mockApi.createVouch).not.toHaveBeenCalled();
+  });
+});
+
+// A miner sets up a live call on their own tool and sends the link. The wallet
+// only shows it: the link must be tappable, and a non-http "link" must not be.
+describe('Verify live-call messages', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.getAccountPanels.mockResolvedValue({ success: true, data: { panels: [] } });
+    mockApi.getVouches.mockResolvedValue({ success: true, data: { received: [], given: [] } });
+    mockApi.getVouchRequests.mockResolvedValue({ success: true, data: { incoming: [], outgoing: [] } });
+    mockApi.getEvidenceScore.mockResolvedValue({ success: true, data: { score: emptyScore, vouchCount: 0 } });
+  });
+
+  afterEach(() => cleanup());
+
+  it('shows a miner message sent to me with its link tappable', async () => {
+    mockApi.getMyCallMessages.mockResolvedValue({
+      success: true,
+      data: {
+        messages: [
+          { id: 'm1', panelId: 'p1', fromId: 'miner', toId: 'me', text: 'Free at 3pm? https://meet.example.com/abc', createdAt: 1 },
+          { id: 'm2', panelId: 'p2', fromId: 'me', toId: 'someone-else', text: 'a note I sent as a miner', createdAt: 1 },
+        ],
+      },
+    });
+    render(<Verify />);
+
+    const link = await screen.findByRole('link', { name: 'https://meet.example.com/abc' });
+    expect(link.getAttribute('href')).toBe('https://meet.example.com/abc');
+    expect(screen.getByText('Message from a miner')).toBeTruthy();
+    expect(screen.queryByText('a note I sent as a miner')).toBeNull();
+  });
+
+  it('does not turn a javascript: link into a link', async () => {
+    mockApi.getMyCallMessages.mockResolvedValue({
+      success: true,
+      data: { messages: [{ id: 'm1', panelId: 'p1', fromId: 'miner', toId: 'me', text: 'javascript:alert(1)', createdAt: 1 }] },
+    });
+    render(<Verify />);
+
+    await screen.findByText('javascript:alert(1)');
+    expect(screen.queryByRole('link')).toBeNull();
   });
 });

@@ -21,6 +21,7 @@ import type {
   AccountSearchResult,
   RecurringTransferData,
   PanelSummary,
+  CallMessage,
   SuccessResponse,
   ScoreBreakdownData,
   SharePoint,
@@ -242,6 +243,11 @@ export const api = {
   // once the block commits.
   requestPanel: (signedBody: unknown) =>
     request<{ status: string; panelId: string }>('POST', '/verification/panels', signedBody),
+
+  // Signed read: notes miners sent this account about a live call (usually a
+  // meeting link). A POST so only the two people on the call see the link.
+  getMyCallMessages: (signedBody: unknown) =>
+    request<{ messages: CallMessage[] }>('POST', '/verification/call-messages/mine', signedBody),
 
   // Submit verification evidence on the participant's own account (signed).
   submitVerificationEvidence: (signedBody: unknown) =>

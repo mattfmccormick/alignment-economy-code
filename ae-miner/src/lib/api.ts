@@ -165,6 +165,16 @@ export interface PanelDetail {
   liveScore: { totalScore: number; breakdown: { tierA: number; tierB: number; tierC: number } };
 }
 
+// A miner's note to an applicant about a live call (usually a meeting link).
+export interface CallMessage {
+  id: string;
+  panelId: string;
+  fromId: string;
+  toId: string;
+  text: string;
+  createdAt: number;
+}
+
 // Court — a dispute case header (serializeCase; camelCase).
 export interface CaseHeader {
   id: string;
@@ -284,6 +294,17 @@ export const api = {
     request<ApiResponse<{ status: string; reviewId: string }>>(
       'POST', `/verification/panels/${panelId}/score`, signedBody,
     ),
+
+  // Live call. The platform only introduces the two people: the miner sets up
+  // the call on their own tool and sends the applicant the link here.
+  sendCallMessage: (panelId: string, signedBody: unknown) =>
+    request<ApiResponse<{ message: CallMessage }>>(
+      'POST', `/verification/panels/${panelId}/call-messages`, signedBody,
+    ),
+
+  // Signed read (a POST so only the two people on the call see the link).
+  getMyCallMessages: (signedBody: unknown) =>
+    request<ApiResponse<{ messages: CallMessage[] }>>('POST', '/verification/call-messages/mine', signedBody),
 
   // Court — challenge + jury duty
   getActiveCases: () =>

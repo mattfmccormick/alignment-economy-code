@@ -33,6 +33,7 @@ const ENDPOINTS: Endpoint[] = [
   { method: 'post', path: '/tags/ambient', summary: 'Submit ambient tags', auth: true, payload: schemas.submitTags },
   { method: 'post', path: '/verification/evidence', summary: 'Submit verification evidence', auth: true, payload: schemas.submitEvidence },
   { method: 'post', path: '/verification/panels/{id}/score', summary: 'Score a verification panel (miner only)', auth: true, payload: schemas.scorePanel },
+  { method: 'post', path: '/verification/panels/{id}/call-messages', summary: 'Send an applicant a live-call note (miner only)', auth: true, payload: schemas.sendCallMessage },
   { method: 'post', path: '/miners/evidence', summary: 'Submit miner identity evidence', auth: true, payload: schemas.submitEvidence },
   { method: 'post', path: '/miners/vouches', summary: 'Vouch for another account', auth: true, payload: schemas.createVouch },
   { method: 'post', path: '/miners/vouch-requests', summary: 'Request a vouch', auth: true, payload: schemas.createVouchRequest },

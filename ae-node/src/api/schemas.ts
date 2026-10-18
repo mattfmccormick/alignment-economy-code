@@ -98,6 +98,10 @@ export const createVouchRequest = z.object({
   message: z.string().optional(),
 });
 
+export const sendCallMessage = z.object({
+  text: z.string().trim().min(1).max(1000),
+});
+
 export const respondVouchRequest = z.object({
   status: z.enum(['accepted', 'declined']),
 });

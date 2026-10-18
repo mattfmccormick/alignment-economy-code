@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { DatabaseSync } from 'node:sqlite';
+import { v4 as uuid } from 'uuid';
+import { eventBus } from '../websocket.js';
 import { authMiddleware, minerAuthMiddleware } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import * as schemas from '../schemas.js';
@@ -265,6 +267,67 @@ export function verificationRoutes(
         data: { status: 'pending', reviewId: deriveReviewId(op) },
         meta: { timestamp: Math.floor(Date.now() / 1000) },
       });
+    } catch (e) { next(e); }
+  });
+
+  // ── LIVE CALL INTRODUCTION ────────────────────────────────────
+  //
+  // A live call is one way a miner can judge a person. The platform does not
+  // host or schedule it: a miner sets up the call on their own tool and sends
+  // the applicant a note with the link. Node-local, like vouch requests; it
+  // moves no points or score (the miner still scores through the panel).
+
+  // POST /verification/panels/:id/call-messages - a miner sends the applicant
+  // of an open panel a note, usually a meeting link.
+  router.post(
+    '/panels/:id/call-messages',
+    authMiddleware(db),
+    minerAuthMiddleware(db),
+    validateBody(schemas.sendCallMessage),
+    (req, res, next) => {
+      try {
+        const fromId = req.accountId!;
+        const panel = verificationStore(db).findPanelById(req.params.id as string);
+        if (!panel) {
+          res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Panel not found' } });
+          return;
+        }
+        if (panel.status === 'complete') {
+          res.status(400).json({
+            success: false,
+            error: { code: 'PANEL_COMPLETE', message: 'This review is finished, so there is no call to set up' },
+          });
+          return;
+        }
+        if (panel.accountId === fromId) {
+          res.status(403).json({
+            success: false,
+            error: { code: 'OWN_PANEL', message: 'You cannot message your own review' },
+          });
+          return;
+        }
+        const message = {
+          id: uuid(),
+          panelId: panel.id,
+          fromId,
+          toId: panel.accountId,
+          text: (req.body.payload.text as string).trim(),
+          createdAt: Math.floor(Date.now() / 1000),
+        };
+        verificationStore(db).insertCallMessage(message);
+        eventBus.emit('verification:call-message', { accountId: panel.accountId, panelId: panel.id });
+        res.json({ success: true, data: { message }, meta: { timestamp: message.createdAt } });
+      } catch (e) { next(e); }
+    },
+  );
+
+  // POST /verification/call-messages/mine - call messages the signed-in account
+  // sent or received. A POST because reading needs the signed envelope: a
+  // meeting link should reach only the two people on the call.
+  router.post('/call-messages/mine', authMiddleware(db), (req, res, next) => {
+    try {
+      const messages = verificationStore(db).findCallMessagesForAccount(req.accountId!);
+      res.json({ success: true, data: { messages }, meta: { timestamp: Math.floor(Date.now() / 1000) } });
     } catch (e) { next(e); }
   });
 

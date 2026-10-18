@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { api, type PanelAssignment, type PanelDetail } from '../lib/api';
+import { api, type CallMessage, type PanelAssignment, type PanelDetail } from '../lib/api';
 import { loadMinerWallet } from '../lib/keys';
 import { signPayload, signPanelScore } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
@@ -39,6 +39,26 @@ export default function Verify() {
   // with the answer already typed in. Null forces a choice.
   const [proposedScore, setProposedScore] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Live call: the miner sets up the call on their own tool and sends the
+  // applicant the link. We only carry the note.
+  const [callMessages, setCallMessages] = useState<CallMessage[]>([]);
+  const [callDraft, setCallDraft] = useState('');
+  const [callSending, setCallSending] = useState(false);
+  const [callError, setCallError] = useState('');
+
+  const loadCallMessages = useCallback(async () => {
+    const wallet = loadMinerWallet();
+    if (!wallet?.privateKey) return;
+    try {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const payload = {};
+      const signature = signPayload(payload, timestamp, wallet.privateKey);
+      const res = await api.getMyCallMessages({ accountId: wallet.accountId, timestamp, signature, payload });
+      if (res.success) setCallMessages(res.data.messages);
+    } catch {
+      // Non-critical; the queue still works without the sent-notes list.
+    }
+  }, []);
 
   const loadAssignments = useCallback(async () => {
     const wallet = loadMinerWallet();
@@ -65,15 +85,18 @@ export default function Verify() {
 
   useEffect(() => {
     loadAssignments();
+    loadCallMessages();
 
     // Live refresh when a new verification is assigned to this miner
     const offAssigned = wsClient.on('verification:assigned', () => loadAssignments());
     return () => { offAssigned(); };
-  }, [loadAssignments]);
+  }, [loadAssignments, loadCallMessages]);
 
   async function openPanel(panelId: string) {
     setSelectedPanelId(panelId);
     setPanelDetail(null);
+    setCallDraft('');
+    setCallError('');
     try {
       const res = await api.getPanel(panelId);
       if (res.success) setPanelDetail(res.data);
@@ -127,6 +150,33 @@ export default function Verify() {
       setError(e instanceof Error ? e.message : 'Network error');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function sendCallMessage() {
+    if (!selectedPanelId || !callDraft.trim()) return;
+    const wallet = loadMinerWallet();
+    if (!wallet?.privateKey) {
+      setCallError('Private key missing. Sign in again.');
+      return;
+    }
+    setCallSending(true);
+    setCallError('');
+    try {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const payload = { text: callDraft.trim() };
+      const signature = signPayload(payload, timestamp, wallet.privateKey);
+      const res = await api.sendCallMessage(selectedPanelId, { accountId: wallet.accountId, timestamp, signature, payload });
+      if (res.success) {
+        setCallDraft('');
+        await loadCallMessages();
+      } else {
+        setCallError(res.error?.message || 'Could not send the message');
+      }
+    } catch {
+      setCallError('Could not send the message. Try again.');
+    } finally {
+      setCallSending(false);
     }
   }
 
@@ -242,6 +292,42 @@ export default function Verify() {
                 <h2 className="text-lg font-semibold text-white">Review applicant</h2>
                 <p className="text-xs font-mono text-muted mt-1">{panelDetail.panel.accountId}</p>
               </div>
+
+              {panelDetail.panel.status !== 'complete' && (
+                <div className="bg-bg rounded-lg p-4 space-y-3">
+                  <h3 className="text-xs uppercase tracking-wider text-muted">Live call</h3>
+                  <p className="text-sm text-white">
+                    Want to meet this person on a call? Set it up on your own video tool,
+                    then send them the link and a time. It shows up in their wallet.
+                  </p>
+                  {callMessages
+                    .filter((m) => m.panelId === panelDetail.panel.id)
+                    .map((m) => (
+                      <div key={m.id} className="border border-border rounded-md p-3">
+                        <p className="text-xs text-muted mb-1">
+                          Sent {new Date(m.createdAt * 1000).toLocaleString()}
+                        </p>
+                        <p className="text-sm text-white whitespace-pre-wrap break-words">{m.text}</p>
+                      </div>
+                    ))}
+                  <textarea
+                    value={callDraft}
+                    onChange={(e) => setCallDraft(e.target.value)}
+                    maxLength={1000}
+                    rows={3}
+                    placeholder="Paste a meeting link and a time"
+                    className="w-full bg-panel border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-muted focus:border-teal focus:outline-none"
+                  />
+                  {callError && <p className="text-xs text-red">{callError}</p>}
+                  <button
+                    onClick={sendCallMessage}
+                    disabled={callSending || !callDraft.trim()}
+                    className="w-full py-2 border border-teal text-teal rounded-lg text-sm font-medium hover:bg-teal/10 transition-colors disabled:opacity-50"
+                  >
+                    {callSending ? 'Sending…' : 'Send to their wallet'}
+                  </button>
+                </div>
+              )}
 
               <div className="bg-bg rounded-lg p-4">
                 <h3 className="text-xs uppercase tracking-wider text-muted mb-2">Submitted Evidence</h3>

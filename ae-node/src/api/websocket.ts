@@ -92,7 +92,7 @@ export function setupWebSocket(server: Server, db: DatabaseSync): WebSocketServe
   for (const evt of [
     'balance:updated', 'transaction:received', 'transaction:sent',
     'allocation:minted', 'allocation:expired', 'score:changed',
-    'vouch:received', 'vouch:withdrawn',
+    'vouch:received', 'vouch:withdrawn', 'verification:call-message',
     'court:filed-against', 'court:verdict', 'court:argument',
     'court:appeal', 'court:withdrawn', 'court:trial-demanded',
   ]) {

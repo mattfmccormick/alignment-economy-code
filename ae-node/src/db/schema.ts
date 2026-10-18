@@ -1,6 +1,25 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
+
+// Notes a miner sends an applicant about a live verification call, usually a
+// meeting link made on the miner's own call tool. Node-local like
+// vouch_requests: it introduces two people and moves no points or score.
+// Shared by TABLES and the v21 migration.
+const PANEL_CALL_MESSAGES = `
+  CREATE TABLE IF NOT EXISTS panel_call_messages (
+    id TEXT PRIMARY KEY,
+    panel_id TEXT NOT NULL,
+    from_id TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (from_id) REFERENCES accounts(id),
+    FOREIGN KEY (to_id) REFERENCES accounts(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_panel_call_messages_to ON panel_call_messages(to_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_panel_call_messages_from ON panel_call_messages(from_id, created_at);
+`;
 
 const TABLES = `
   CREATE TABLE IF NOT EXISTS schema_version (
@@ -478,7 +497,7 @@ const TABLES = `
     FOREIGN KEY (from_id) REFERENCES accounts(id),
     FOREIGN KEY (to_id) REFERENCES accounts(id)
   );
-
+${PANEL_CALL_MESSAGES}
   -- WP v2: human-tag credits. When a sender marks recipientIsHuman=true
   -- on a transaction, we snapshot the tagger's percentHuman and compute
   -- the credit (2.5 * tagger_ph / 100). The decay engine sums credits
@@ -897,6 +916,9 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
       CREATE INDEX IF NOT EXISTS idx_pending_account_regs_created
         ON pending_account_registrations(created_at);
     `);
+  }
+  if (from < 21) {
+    db.exec(PANEL_CALL_MESSAGES);
   }
   if (from < 20) {
     // Tagging operations lane (audit #16): a pending queue + a per-block column.

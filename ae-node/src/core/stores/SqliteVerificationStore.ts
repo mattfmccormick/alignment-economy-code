@@ -3,6 +3,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import type {
   Evidence,
+  PanelCallMessage,
   PanelReview,
   VerificationPanel,
   Vouch,
@@ -72,6 +73,17 @@ function rowToVouchRequest(row: Record<string, unknown>): VouchRequest {
     message: (row.message as string) ?? '',
     createdAt: row.created_at as number,
     respondedAt: row.responded_at as number | null,
+  };
+}
+
+function rowToCallMessage(row: Record<string, unknown>): PanelCallMessage {
+  return {
+    id: row.id as string,
+    panelId: row.panel_id as string,
+    fromId: row.from_id as string,
+    toId: row.to_id as string,
+    text: row.text as string,
+    createdAt: row.created_at as number,
   };
 }
 
@@ -272,5 +284,26 @@ export class SqliteVerificationStore implements IVerificationStore {
     this.db
       .prepare('UPDATE vouch_requests SET status = ?, responded_at = ? WHERE id = ?')
       .run(status, respondedAt, id);
+  }
+
+  // ── panel_call_messages ────────────────────────────────────────
+
+  insertCallMessage(m: PanelCallMessage): void {
+    this.db
+      .prepare(
+        `INSERT INTO panel_call_messages (id, panel_id, from_id, to_id, text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(m.id, m.panelId, m.fromId, m.toId, m.text, m.createdAt);
+  }
+
+  findCallMessagesForAccount(accountId: string): PanelCallMessage[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM panel_call_messages WHERE to_id = ? OR from_id = ?
+          ORDER BY created_at DESC, rowid DESC`,
+      )
+      .all(accountId, accountId) as Array<Record<string, unknown>>;
+    return rows.map(rowToCallMessage);
   }
 }

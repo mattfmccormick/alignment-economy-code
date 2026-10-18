@@ -6,11 +6,12 @@
 //   - verification_evidence (submitted evidence, e.g. gov_id hashes)
 //   - vouches               (peer stakes attesting to humanity)
 //   - vouch_requests        (incoming/outgoing vouch invitations)
+//   - panel_call_messages   (a miner's note to an applicant about a live call)
 //
 // Cross-table operations (locking voucher stake on the accounts table) live
 // in business logic and use IAccountStore for those side effects.
 
-import type { Evidence, PanelReview, VerificationPanel, Vouch, VouchRequest } from '../../verification/types.js';
+import type { Evidence, PanelCallMessage, PanelReview, VerificationPanel, Vouch, VouchRequest } from '../../verification/types.js';
 
 export interface PanelInsert {
   id: string;
@@ -131,4 +132,11 @@ export interface IVerificationStore {
 
   /** Update a request's status (accepted or declined). */
   setVouchRequestStatus(id: string, status: 'accepted' | 'declined', respondedAt: number): void;
+
+  // ── panel_call_messages ────────────────────────────────────────
+
+  insertCallMessage(message: PanelCallMessage): void;
+
+  /** Call messages this account sent or received, newest first. */
+  findCallMessagesForAccount(accountId: string): PanelCallMessage[];
 }

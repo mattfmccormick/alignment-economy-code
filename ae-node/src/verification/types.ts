@@ -72,6 +72,20 @@ export interface VouchRequest {
   respondedAt: number | null;
 }
 
+/**
+ * A note a miner sends an applicant about a live verification call, usually a
+ * meeting link the miner set up on their own call tool. The platform only
+ * introduces the two people; the call itself happens off platform.
+ */
+export interface PanelCallMessage {
+  id: string;
+  panelId: string;
+  fromId: string;
+  toId: string;
+  text: string;
+  createdAt: number;
+}
+
 export interface ScoreBreakdown {
   totalScore: number;
   breakdown: { tierA: number; tierB: number; tierC: number };

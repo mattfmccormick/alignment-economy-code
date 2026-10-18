@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, type ChangeEvent } from 'react';
 import { loadWallet } from '../lib/keys';
 import { useAccount } from '../hooks/useAccount';
 import { api } from '../lib/api';
-import type { PanelSummary, VouchData } from '../lib/types';
+import type { CallMessage, PanelSummary, VouchData } from '../lib/types';
 import { signPayload, signVouchCreate, signPanelCreate } from '../lib/crypto';
 import { wsClient } from '../lib/websocket';
 import { truncateId, displayPoints } from '../lib/formatting';
@@ -74,6 +74,7 @@ export function Verify() {
   const [panels, setPanels] = useState<PanelSummary[]>([]);
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
+  const [panelRequested, setPanelRequested] = useState(false);
 
   const loadPanels = useCallback(async () => {
     if (!wallet?.accountId) return;
@@ -83,15 +84,32 @@ export function Verify() {
     } catch { /* ignore */ }
   }, [wallet?.accountId]);
 
+  // Notes from miners about a live call. The miner sets the call up on their
+  // own tool and sends the link; the wallet only shows it.
+  const [callMessages, setCallMessages] = useState<CallMessage[]>([]);
+  const loadCallMessages = useCallback(async () => {
+    if (!wallet?.accountId || !wallet.privateKey) return;
+    try {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const payload = {};
+      const signature = signPayload(payload, timestamp, wallet.privateKey);
+      const res = await api.getMyCallMessages({ accountId: wallet.accountId, timestamp, signature, payload });
+      if (res.success) setCallMessages(res.data.messages.filter((m) => m.toId === wallet.accountId));
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet?.accountId]);
+
   useEffect(() => {
     if (!wallet?.accountId) return;
     loadVouchData();
     loadPanels();
+    loadCallMessages();
 
     // Refresh on panel completion (server emits verification:complete + score:changed)
     const offComplete = wsClient.on('verification:complete', () => loadPanels());
     const offScore = wsClient.on('score:changed', () => loadPanels());
-    return () => { offComplete(); offScore(); };
+    const offCall = wsClient.on('verification:call-message', () => loadCallMessages());
+    return () => { offComplete(); offScore(); offCall(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet?.accountId]);
 
@@ -352,9 +370,12 @@ export function Verify() {
         payload,
       });
       if (res.success) {
-        // Chain-ordered: the panel appears once the block commits. Poll a moment
-        // later so the new pending panel shows up.
+        // Chain-ordered: the panel appears once the block commits, up to one
+        // block interval later. Show "Requested" now so the tap visibly did
+        // something, then poll until the panel shows up.
+        setPanelRequested(true);
         setTimeout(() => { void loadPanels(); }, 1500);
+        setTimeout(() => { void loadPanels(); }, 12000);
         await loadPanels();
       } else {
         setPanelError(res.error?.message || 'Failed to request panel');
@@ -367,6 +388,7 @@ export function Verify() {
   }
 
   const openPanel = panels.find((p) => p.status !== 'complete') || null;
+  const reviewRequested = !!openPanel || panelRequested;
 
   const score = account?.percentHuman ?? 0;
   const scoreColor = score >= 80 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400';
@@ -456,13 +478,28 @@ export function Verify() {
             n={3}
             title="Have a call with a miner"
             detail="A live call raises your % human score. The miner also reviews your vouches and evidence."
-            action={panelLoading ? 'Requesting…' : openPanel ? 'Requested' : 'Request a call'}
+            action={panelLoading ? 'Requesting…' : reviewRequested ? 'Requested' : 'Request a call'}
             onClick={handleRequestPanel}
-            disabled={panelLoading || !!openPanel}
+            disabled={panelLoading || reviewRequested}
           />
         </ol>
         {panelError && !panelLoading && <p className="text-xs text-gold">{panelError}</p>}
-        {openPanel && !panelError && !panelLoading && <p className="text-xs text-teal">A miner is reviewing your proof.</p>}
+        {reviewRequested && !panelError && !panelLoading && callMessages.length === 0 && (
+          <p className="text-xs text-teal">Request sent. When a miner sends you a call link, it shows up here.</p>
+        )}
+        {callMessages.length > 0 && (
+          <div className="border-t border-navy-light pt-3 space-y-2">
+            <p className="text-xs font-medium text-white">Message from a miner</p>
+            {callMessages.map((m) => (
+              <div key={m.id} className="bg-navy-dark rounded-lg p-3">
+                <p className="text-sm text-gray-200 whitespace-pre-wrap break-words">
+                  <Linkified text={m.text} />
+                </p>
+                <p className="text-[11px] text-gray-500 mt-1">{new Date(m.createdAt * 1000).toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
 
@@ -761,6 +798,25 @@ export function Verify() {
   );
 }
 
+/**
+ * A miner's note with its http(s) links made tappable. Only http and https
+ * become links; any other scheme (javascript:, data:) stays plain text.
+ */
+function Linkified({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(https?:\/\/[^\s]+)/g).map((part, i) =>
+        /^https?:\/\//.test(part) ? (
+          <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-teal underline break-all">
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
 
 function ProveStep({
   n,
