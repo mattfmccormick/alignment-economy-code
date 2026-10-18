@@ -294,6 +294,11 @@ export const api = {
   demandTrial: (caseId: string, signedBody: unknown) =>
     request<{ case: CourtCaseData }>('POST', `/court/cases/${caseId}/demand-trial`, signedBody),
 
+  // Only the side that lost may appeal, within 7 days of the verdict. A fresh
+  // jury of the same size is drawn at the next daily reset. Signed.
+  appealCase: (caseId: string, signedBody: unknown) =>
+    request<{ case: CourtCaseData; appealOf: string }>('POST', `/court/cases/${caseId}/appeal`, signedBody),
+
   // Network
   getNetworkStatus: () =>
     request<NetworkStatus>('GET', '/network/status'),

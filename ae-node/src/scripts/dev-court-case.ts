@@ -20,13 +20,24 @@
  */
 
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { getDb, closeDb } from '../db/connection.js';
-import { fileChallenge, courtStore } from '../court/court.js';
+import { fileChallenge, courtStore, submitArgument, getArgumentsForCase } from '../court/court.js';
 
 const OPENING_ARGUMENT =
   "I don't think a real person is behind this account. It was opened within minutes of two other " +
   'accounts, it has no vouches from verified people, and it sends points at the same minute every day. ' +
   "I'm asking the court to look at it.";
+
+// The challenger's evidence post, so the defendant's "Evidence against you"
+// has files in it. Fingerprints are hashes of the names: there is no file.
+const EVIDENCE_TEXT =
+  'Here is what I found. The selfie on this account comes up in a reverse image search as a stock photo. ' +
+  'The sign-up log shows three accounts opened from the same device within four minutes. And every day at ' +
+  '9:02 am it sends its points to the same account.';
+const EVIDENCE_FILES = ['selfie-reverse-image-search.png', 'signup-log-same-device.csv', 'daily-transfers-9-02am.csv'].map(
+  (name) => ({ name, hash: createHash('sha256').update(`dev-court-case:${name}`).digest('hex') }),
+);
 
 const STAKE_PERCENT = 5;
 
@@ -78,16 +89,27 @@ if (defendants.length === 0) {
 console.log(`Challenger (miner): ${challenger.id}`);
 const store = courtStore(db);
 for (const defendantId of defendants) {
-  const existing = store.findActiveCaseAgainst(defendantId);
-  if (existing) {
-    console.log(`  ${defendantId}  already in court (case ${existing.id})`);
-    continue;
+  let c = store.findActiveCaseAgainst(defendantId);
+  if (c) {
+    console.log(`  ${defendantId}  already in court (case ${c.id})`);
+  } else {
+    try {
+      c = fileChallenge(db, challenger.id, defendantId, 'not_human', STAKE_PERCENT, OPENING_ARGUMENT);
+      console.log(`  ${defendantId}  case ${c.id} filed`);
+    } catch (e) {
+      console.log(`  ${defendantId}  skipped: ${(e as Error).message}`);
+      continue;
+    }
   }
-  try {
-    const c = fileChallenge(db, challenger.id, defendantId, 'not_human', STAKE_PERCENT, OPENING_ARGUMENT);
-    console.log(`  ${defendantId}  case ${c.id} filed`);
-  } catch (e) {
-    console.log(`  ${defendantId}  skipped: ${(e as Error).message}`);
+  // Add the challenger's evidence once (also upgrades cases filed before it existed).
+  const hasEvidence = getArgumentsForCase(db, c.id).some((a) => a.role === 'challenger' && a.attachments.length > 0);
+  if (!hasEvidence) {
+    try {
+      submitArgument(db, c.id, c.challengerId, EVIDENCE_TEXT, { attachments: EVIDENCE_FILES });
+      console.log('    evidence added');
+    } catch (e) {
+      console.log(`    evidence skipped: ${(e as Error).message}`);
+    }
   }
 }
 

@@ -201,6 +201,9 @@ export interface CaseArgument {
   role: 'challenger' | 'defendant';
   text: string;
   attachmentHash: string | null;
+  // Files (name + SHA-256; the file stays with its owner) and offers to meet.
+  attachments: Array<{ name: string; hash: string }>;
+  offers: Array<'call' | 'in_person'>;
   createdAt: number;
 }
 

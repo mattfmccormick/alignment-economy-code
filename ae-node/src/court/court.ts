@@ -14,7 +14,9 @@ import { getCompositeAccuracy } from '../mining/accuracy.js';
 import { SqliteCourtStore } from '../core/stores/SqliteCourtStore.js';
 import type { ICourtStore } from '../core/stores/ICourtStore.js';
 import type { ChangeType } from '../core/types.js';
-import type { CourtCase, CaseType, Vote, Verdict, CaseArgument, ArgumentRole, JurorRecord } from './types.js';
+import type {
+  CourtCase, CaseType, Vote, Verdict, CaseArgument, ArgumentRole, JurorRecord, ArgumentAttachment, ArgumentOffer,
+} from './types.js';
 import { logger } from '../node/logger.js';
 
 // How a case moves (October 16, 2026 rules, from Matt's answers to the court
@@ -338,6 +340,8 @@ export function fileChallenge(
         role: 'challenger',
         text,
         attachmentHash: null,
+        attachments: [],
+        offers: [],
         createdAt: now,
       });
     }
@@ -422,19 +426,40 @@ export function demandTrial(
 // Arguments are the case's discussion log. Both sides can post text rebuttals
 // at any time before the verdict is final; jurors read them before voting.
 // We store them as an append-only list, so even after a verdict the trail
-// stays auditable. attachment_hash is reserved for future off-chain file
-// references (we don't host files in the protocol layer).
+// stays auditable. We don't host files in the protocol layer: a post carries
+// each file's name and SHA-256, and the file stays with whoever added it.
 
 const MAX_ARGUMENT_LENGTH = 5000;
+const MAX_ATTACHMENTS = 10;
+const ARGUMENT_OFFERS: ReadonlySet<ArgumentOffer> = new Set(['call', 'in_person']);
 
 function insertArgument(db: DatabaseSync, arg: CaseArgument): void {
   db.prepare(
-    `INSERT INTO court_arguments (id, case_id, submitter_id, role, text, attachment_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO court_arguments (id, case_id, submitter_id, role, text, attachment_hash, attachments, offers, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     arg.id, arg.caseId, arg.submitterId, arg.role, arg.text,
-    arg.attachmentHash, arg.createdAt,
+    arg.attachmentHash,
+    arg.attachments.length > 0 ? JSON.stringify(arg.attachments) : null,
+    arg.offers.length > 0 ? JSON.stringify(arg.offers) : null,
+    arg.createdAt,
   );
+}
+
+function parseJsonList<T>(raw: unknown): T[] {
+  if (typeof raw !== 'string' || !raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export interface ArgumentExtras {
+  attachmentHash?: string;
+  attachments?: ArgumentAttachment[];
+  offers?: ArgumentOffer[];
 }
 
 export function submitArgument(
@@ -442,7 +467,7 @@ export function submitArgument(
   caseId: string,
   submitterAccountId: string,
   text: string,
-  attachmentHash?: string,
+  extras: ArgumentExtras = {},
 ): CaseArgument {
   const courtCase = getCase(db, caseId);
   if (!courtCase) throw new NotFoundError('Case not found');
@@ -464,8 +489,25 @@ export function submitArgument(
     throw new ValidationError(`Case is no longer open for arguments (status: ${courtCase.status})`, 'CASE_NOT_OPEN');
   }
 
+  const attachments = (extras.attachments ?? []).map((a) => ({ name: a.name.trim(), hash: a.hash.toLowerCase() }));
+  if (attachments.length > MAX_ATTACHMENTS) {
+    throw new ValidationError(`At most ${MAX_ATTACHMENTS} files per post`, 'TOO_MANY_ATTACHMENTS');
+  }
+  for (const a of attachments) {
+    if (!a.name || a.name.length > 200) throw new ValidationError('Each file needs a name of 1 to 200 characters', 'INVALID_ATTACHMENT');
+    if (!/^[0-9a-f]{64}$/.test(a.hash)) throw new ValidationError('Each file needs its SHA-256 fingerprint', 'INVALID_ATTACHMENT');
+  }
+  const offers = [...new Set(extras.offers ?? [])];
+  if (offers.some((o) => !ARGUMENT_OFFERS.has(o))) {
+    throw new ValidationError("Offers must be 'call' or 'in_person'", 'INVALID_OFFER');
+  }
+
+  // A post can be just a file or just an offer ("I'm open to a call"), but it
+  // has to carry something.
   const trimmed = text.trim();
-  if (!trimmed) throw new ValidationError('Argument text is required', 'ARGUMENT_REQUIRED');
+  if (!trimmed && attachments.length === 0 && offers.length === 0) {
+    throw new ValidationError('Write something, attach a file, or make an offer', 'ARGUMENT_REQUIRED');
+  }
   if (trimmed.length > MAX_ARGUMENT_LENGTH) throw new ValidationError('Argument text exceeds 5,000 character limit', 'ARGUMENT_TOO_LONG');
 
   const arg: CaseArgument = {
@@ -474,7 +516,9 @@ export function submitArgument(
     submitterId: submitterAccountId,
     role,
     text: trimmed,
-    attachmentHash: attachmentHash ?? null,
+    attachmentHash: extras.attachmentHash ?? null,
+    attachments,
+    offers,
     createdAt: nowSeconds(),
   };
   insertArgument(db, arg);
@@ -483,8 +527,8 @@ export function submitArgument(
 
 export function getArgumentsForCase(db: DatabaseSync, caseId: string): CaseArgument[] {
   const rows = db.prepare(
-    `SELECT id, case_id, submitter_id, role, text, attachment_hash, created_at
-     FROM court_arguments WHERE case_id = ? ORDER BY created_at ASC`,
+    `SELECT id, case_id, submitter_id, role, text, attachment_hash, attachments, offers, created_at
+     FROM court_arguments WHERE case_id = ? ORDER BY created_at ASC, rowid ASC`,
   ).all(caseId) as Array<Record<string, unknown>>;
   return rows.map((r) => ({
     id: r.id as string,
@@ -493,6 +537,8 @@ export function getArgumentsForCase(db: DatabaseSync, caseId: string): CaseArgum
     role: r.role as ArgumentRole,
     text: r.text as string,
     attachmentHash: (r.attachment_hash as string | null) ?? null,
+    attachments: parseJsonList<ArgumentAttachment>(r.attachments),
+    offers: parseJsonList<ArgumentOffer>(r.offers),
     createdAt: r.created_at as number,
   }));
 }

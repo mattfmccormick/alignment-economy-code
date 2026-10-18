@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
 
 // Notes a miner sends an applicant about a live verification call, usually a
 // meeting link made on the miner's own call tool. Node-local like
@@ -386,8 +386,10 @@ const TABLES = `
 
   -- Append-only log of arguments (text submissions) made by the challenger or
   -- defendant on a case. Both sides can post until the verdict resolves; jurors
-  -- read these alongside the case header before voting. attachment_hash is for
-  -- future use (off-chain file refs); the 2-person test uses text only.
+  -- read these alongside the case header before voting. attachment_hash is the
+  -- legacy single-file slot; attachments is a JSON list of {name, hash} (the
+  -- file stays with its owner, only its name and SHA-256 are shared) and offers
+  -- a JSON list of 'call' | 'in_person' (schema v22).
   CREATE TABLE IF NOT EXISTS court_arguments (
     id TEXT PRIMARY KEY,
     case_id TEXT NOT NULL,
@@ -395,6 +397,8 @@ const TABLES = `
     role TEXT NOT NULL,                -- 'challenger' | 'defendant'
     text TEXT NOT NULL,
     attachment_hash TEXT,
+    attachments TEXT,
+    offers TEXT,
     created_at INTEGER NOT NULL,
     FOREIGN KEY (case_id) REFERENCES court_cases(id)
   );
@@ -1040,5 +1044,18 @@ function runMigrations(db: DatabaseSync, from: number, _to: number): void {
     db.exec(
       'CREATE INDEX IF NOT EXISTS idx_transactions_pending ON transactions(applied, "from")',
     );
+  }
+  // Last on purpose: court_arguments is created by the v7 block above, so on a
+  // very old database the columns can only be added after it exists.
+  if (from < 22) {
+    // court_arguments.attachments + offers: files (name + SHA-256) and "open to
+    // a live call / can meet in person" on a case post. Existing rows get NULL.
+    const cols = db.prepare('PRAGMA table_info(court_arguments)').all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'attachments')) {
+      db.exec('ALTER TABLE court_arguments ADD COLUMN attachments TEXT');
+    }
+    if (!cols.some((c) => c.name === 'offers')) {
+      db.exec('ALTER TABLE court_arguments ADD COLUMN offers TEXT');
+    }
   }
 }

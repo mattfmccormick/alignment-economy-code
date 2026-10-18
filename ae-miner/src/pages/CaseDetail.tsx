@@ -202,13 +202,13 @@ function CaseHeaderCard({
       {role && <p className="text-xs text-teal">{role}</p>}
 
       <div className="grid grid-cols-2 gap-3 text-xs">
-        <div>
+        <div className="col-span-2">
           <div className="text-muted mb-0.5">Challenger</div>
-          <div className="font-mono text-white truncate">{truncateId(caseHeader.challengerId)}</div>
+          <div className="font-mono text-white break-all">{caseHeader.challengerId}</div>
         </div>
-        <div>
+        <div className="col-span-2">
           <div className="text-muted mb-0.5">Defendant</div>
-          <div className="font-mono text-white truncate">{truncateId(caseHeader.defendantId)}</div>
+          <div className="font-mono text-white break-all">{caseHeader.defendantId}</div>
         </div>
         <div>
           <div className="text-muted mb-0.5">Stake</div>
@@ -266,10 +266,34 @@ function ArgumentTimeline({ argumentLog, myAccountId }: { argumentLog: CaseArgum
               </span>
               <span className="text-[11px] text-muted">{timeAgo(arg.createdAt)}</span>
             </div>
-            <p className="text-sm text-white whitespace-pre-wrap">{arg.text}</p>
+            {arg.text && <p className="text-sm text-white whitespace-pre-wrap">{arg.text}</p>}
+            {(arg.attachments ?? []).length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {(arg.attachments ?? []).map((f) => (
+                  <li key={f.hash + f.name} className="flex items-center justify-between gap-2 bg-bg rounded px-2.5 py-1.5">
+                    <span className="text-xs text-white truncate">📎 {f.name}</span>
+                    <span className="font-mono text-[10px] text-muted shrink-0" title={f.hash}>{f.hash.slice(0, 10)}…</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {(arg.offers ?? []).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(arg.offers ?? []).map((o) => (
+                  <span key={o} className="text-[11px] px-2 py-0.5 rounded-full bg-teal/15 text-teal">
+                    {o === 'call' ? 'Open to a live call' : 'Can meet in person'}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
+      {argumentLog.some((a) => (a.attachments ?? []).length > 0) && (
+        <p className="text-[11px] text-muted">
+          Files stay with the person who added them. Each file&apos;s fingerprint is on record, so it can&apos;t be swapped later.
+        </p>
+      )}
     </div>
   );
 }
@@ -388,8 +412,8 @@ function JuryPanel({
           const isMe = j.jurorAccountId === myAccountId;
           return (
             <li key={j.minerId} className="flex items-center justify-between text-xs">
-              <span className="font-mono text-muted">
-                {truncateId(j.jurorAccountId)}{isMe ? ' (you)' : ''}
+              <span className="font-mono text-muted break-all">
+                {j.jurorAccountId}{isMe ? ' (you)' : ''}
               </span>
               <span className={`tabular-nums ${
                 j.vote === 'human' ? 'text-teal' : j.vote === 'not_human' ? 'text-red' : 'text-muted'

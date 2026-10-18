@@ -123,8 +123,19 @@ export interface CaseArgumentData {
   role: 'challenger' | 'defendant';
   text: string;
   attachmentHash: string | null;
+  /** Files backing the post: name + SHA-256. The file stays with its owner. */
+  attachments: CaseAttachment[];
+  /** Other ways the poster offers to prove themselves. */
+  offers: CaseOffer[];
   createdAt: number;
 }
+
+export interface CaseAttachment {
+  name: string;
+  hash: string;
+}
+
+export type CaseOffer = 'call' | 'in_person';
 
 /**
  * An account-search hit from `GET /contacts/search/accounts`. Snake_case —

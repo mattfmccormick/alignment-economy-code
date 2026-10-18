@@ -77,5 +77,19 @@ export interface CaseArgument {
   role: ArgumentRole;
   text: string;
   attachmentHash: string | null;
+  /**
+   * Files backing the post. The file itself stays with whoever added it; the
+   * case carries its name and SHA-256 so it cannot be swapped later.
+   */
+  attachments: ArgumentAttachment[];
+  /** Ways the poster offers to prove themselves beyond the text. */
+  offers: ArgumentOffer[];
   createdAt: number;
 }
+
+export interface ArgumentAttachment {
+  name: string;
+  hash: string;
+}
+
+export type ArgumentOffer = 'call' | 'in_person';

@@ -48,9 +48,16 @@ export const fileChallenge = z.object({
   counterpartAccountId: z.string().optional(),
 });
 
+// Text may be empty when the post is only a file or an offer; court.ts
+// requires at least one of the three.
 export const submitArgument = z.object({
-  text: z.string().min(1),
+  text: z.string().max(5000).optional(),
   attachmentHash: z.string().optional(),
+  attachments: z
+    .array(z.object({ name: z.string().min(1).max(200), hash: z.string().regex(/^[0-9a-fA-F]{64}$/) }))
+    .max(10)
+    .optional(),
+  offers: z.array(z.enum(['call', 'in_person'])).max(2).optional(),
 });
 
 export const castVote = z.object({

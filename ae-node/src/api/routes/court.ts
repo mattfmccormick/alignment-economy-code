@@ -120,18 +120,12 @@ export function courtRoutes(db: DatabaseSync): Router {
   router.post('/cases/:id/arguments', authMiddleware(db), validateBody(schemas.submitArgument), (req, res, next) => {
     try {
       const caseId = req.params.id as string;
-      const { text, attachmentHash } = req.body.payload || req.body;
-      if (typeof text !== 'string' || !text.trim()) {
-        res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_REQUEST', message: 'text is required' },
-        });
-        return;
-      }
-      const arg = submitArgument(
-        db, caseId, req.accountId!, text,
-        typeof attachmentHash === 'string' ? attachmentHash : undefined,
-      );
+      const { text, attachmentHash, attachments, offers } = req.body.payload || req.body;
+      const arg = submitArgument(db, caseId, req.accountId!, typeof text === 'string' ? text : '', {
+        attachmentHash: typeof attachmentHash === 'string' ? attachmentHash : undefined,
+        attachments: Array.isArray(attachments) ? attachments : undefined,
+        offers: Array.isArray(offers) ? offers : undefined,
+      });
       // Notify both parties so the other side sees the new post in real time.
       const courtCase = getCase(db, caseId);
       if (courtCase) {

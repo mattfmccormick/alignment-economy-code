@@ -590,15 +590,46 @@
                     "properties": {
                       "text": {
                         "type": "string",
-                        "minLength": 1
+                        "maxLength": 5000
                       },
                       "attachmentHash": {
                         "type": "string"
+                      },
+                      "attachments": {
+                        "maxItems": 10,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "hash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{64}$"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "hash"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "offers": {
+                        "maxItems": 2,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "call",
+                            "in_person"
+                          ]
+                        }
                       }
                     },
-                    "required": [
-                      "text"
-                    ],
                     "additionalProperties": false
                   }
                 }
