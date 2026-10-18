@@ -428,13 +428,15 @@ export function Verify() {
         </div>
       )}
 
-      {/* Three steps: request a vouch, upload evidence, connect with miners to
-          verify. Each row carries its own button, so the card is the whole
+      {/* Three steps: request a vouch, upload evidence, have a call with a
+          miner. Each row carries its own button, so the card is the whole
           flow. Uploading evidence still starts a miner review on its own (see
           handleSubmitEvidence); step 3 is for people who only have vouches,
-          which was the one path with no button at all. */}
+          which was the one path with no button at all. There is no live-call
+          channel yet, so step 3's button opens a miner review panel; the call
+          itself is still to be built. */}
       <div className="bg-navy rounded-xl p-4 border border-navy-light space-y-3">
-        <h3 className="text-sm font-medium text-white">Prove you&apos;re human</h3>
+        <h3 className="text-sm font-medium text-white">Prove you are a unique human with one account</h3>
         <ol className="space-y-2">
           <ProveStep
             n={1}
@@ -446,15 +448,15 @@ export function Verify() {
           <ProveStep
             n={2}
             title="Upload evidence"
-            detail="A photo ID, a selfie or a voice clip. The file itself never leaves this device."
+            detail="A photo ID, a selfie, a voice clip, etc. The file itself never leaves this device."
             action="Upload evidence"
             onClick={() => { setModal('submit-evidence'); setEvidenceSuccess(false); setEvidenceError(null); }}
           />
           <ProveStep
             n={3}
-            title="Connect with miners to verify"
-            detail="Miners review your vouches and evidence, then set your score."
-            action={panelLoading ? 'Connecting…' : openPanel ? 'Under review' : 'Connect with miners'}
+            title="Have a call with a miner"
+            detail="A live call raises your % human score. The miner also reviews your vouches and evidence."
+            action={panelLoading ? 'Requesting…' : openPanel ? 'Requested' : 'Request a call'}
             onClick={handleRequestPanel}
             disabled={panelLoading || !!openPanel}
           />

@@ -9,6 +9,7 @@
     "lint": "eslint src",
     "dev": "tsx watch src/node/cli.ts",
     "dev:solo": "node scripts/dev-solo.mjs",
+    "dev:court-case": "tsx src/scripts/dev-court-case.ts",
     "start": "node dist/node/cli.js",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "tsx --test tests/*.e2e.ts",
